@@ -1,12 +1,13 @@
 // Lets the whole server folder be copied to another drive or PC. Two settings files hold the
 // folder's full path, so when the folder has moved they are pointed at where it is now.
 import { existsSync } from 'node:fs';
-import { copyFile, readFile, rename, writeFile } from 'node:fs/promises';
+import { copyFile, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import {
   DB_INI, DB_PORT, ROOT, ROOT_FOUND, TX_PROFILE, TXADMIN_PORT, TXDATA,
 } from './paths.js';
 import { isPortOpen } from './processes.js';
+import { replaceFile } from './retry.js';
 
 const slashes = (p) => p.replaceAll('\\', '/');
 const same = (a, b) => path.resolve(a).toLowerCase() === path.resolve(b).toLowerCase();
@@ -37,12 +38,10 @@ export function relocatedDataPath(saved, txData, exists = existsSync) {
   return exists(path.join(candidate, 'server.cfg')) ? `${slashes(candidate)}/` : null;
 }
 
-async function replaceFile(file, text) {
+async function updateFile(file, text) {
   const keep = `${file}.before-move`;
   if (!existsSync(keep)) await copyFile(file, keep);
-  const tmp = `${file}.tmp`;
-  await writeFile(tmp, text);
-  await rename(tmp, file);
+  await replaceFile(file, text);
 }
 
 /** Runs at startup. Each file is only touched while the program that reads it is not running. */
@@ -52,7 +51,7 @@ export async function repairMovedFolder() {
   try {
     if (existsSync(DB_INI) && existsSync(path.join(ROOT, 'db', 'data')) && !(await isPortOpen(DB_PORT))) {
       const updated = relocateIni(await readFile(DB_INI, 'utf8'), ROOT);
-      if (updated) { await replaceFile(DB_INI, updated); fixed.push('database settings'); }
+      if (updated) { await updateFile(DB_INI, updated); fixed.push('database settings'); }
     }
   } catch (err) { console.error('[cityhq] could not update my.ini after a move:', err.message); }
   try {
@@ -62,7 +61,7 @@ export async function repairMovedFolder() {
       const moved = relocatedDataPath(config?.server?.dataPath, TXDATA);
       if (moved) {
         config.server.dataPath = moved;
-        await replaceFile(file, JSON.stringify(config, null, 2));
+        await updateFile(file, JSON.stringify(config, null, 2));
         fixed.push('txAdmin settings');
       }
     }

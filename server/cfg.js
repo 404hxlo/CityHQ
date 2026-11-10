@@ -1,6 +1,7 @@
 // Reads and edits server.cfg: which resources start at boot, the app's own managed
 // block, and masking of secrets so they never reach the browser.
-import { readFile, rename, writeFile } from 'node:fs/promises';
+import { readFile } from 'node:fs/promises';
+import { replaceFile } from './retry.js';
 
 export const BLOCK_START = '# >>> CityHQ (managed by the app, edits here may be replaced)';
 export const BLOCK_END = '# <<< CityHQ';
@@ -20,11 +21,7 @@ const EOL = (text) => (text.includes('\r\n') ? '\r\n' : '\n');
 
 export const readCfg = (cfgPath) => readFile(cfgPath, 'utf8');
 
-export async function writeCfg(cfgPath, text) {
-  const tmp = `${cfgPath}.tmp`;
-  await writeFile(tmp, text);
-  await rename(tmp, cfgPath);
-}
+export const writeCfg = (cfgPath, text) => replaceFile(cfgPath, text);
 
 function splitComment(line) {
   let quote = null;

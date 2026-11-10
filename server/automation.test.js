@@ -1,4 +1,8 @@
 import assert from 'node:assert/strict';
+import {
+  existsSync, readFileSync, renameSync, rmSync, writeFileSync,
+} from 'node:fs';
+import path from 'node:path';
 import { test } from 'node:test';
 import { findInstallSource } from './catalog.js';
 import { explainLogLines, explainMissingDependency, luaPlain } from './explain.js';
@@ -10,6 +14,76 @@ import { BLOCK_END, BLOCK_START, ensureManagedBlock } from './cfg.js';
 import { findRoot, portOr } from './paths.js';
 
 import { relocatedDataPath, relocateIni } from './relocate.js';
+import { isRetryableDumpError } from './backups.js';
+import {
+  isBusy, moveFolderSafely, replaceFile, retry,
+} from './retry.js';
+
+const busyError = (code = 'EPERM') => Object.assign(new Error(`${code}: operation not permitted, rename`), { code });
+const noWait = async () => {};
+
+test('your real error: a file busy for a moment is saved on a later try', async () => {
+  const tmpDir = (await import('node:fs')).mkdtempSync(path.join((await import('node:os')).tmpdir(), 'cityhq-'));
+  const target = path.join(tmpDir, 'server.cfg');
+  writeFileSync(target, 'old');
+  let calls = 0;
+  const flakyRename = async (from, to) => {
+    calls++;
+    if (calls <= 2) throw busyError(calls === 1 ? 'EPERM' : 'EBUSY');
+    renameSync(from, to);
+  };
+  await replaceFile(target, 'new', { renameFn: flakyRename, wait: noWait });
+  assert.equal(calls, 3);
+  assert.equal(readFileSync(target, 'utf8'), 'new');
+  assert.equal(existsSync(`${target}.qbctmp`), false);
+  rmSync(tmpDir, { recursive: true, force: true });
+});
+
+test('a file that stays busy: a plain message, the original untouched, no leftover copy', async () => {
+  const tmpDir = (await import('node:fs')).mkdtempSync(path.join((await import('node:os')).tmpdir(), 'cityhq-'));
+  const target = path.join(tmpDir, 'server.cfg');
+  writeFileSync(target, 'old');
+  let calls = 0;
+  const stuck = async () => { calls++; throw busyError(); };
+  await assert.rejects(replaceFile(target, 'new', { renameFn: stuck, wait: noWait }), (err) => {
+    assert.equal(err.status, 423);
+    assert.match(err.message, /server\.cfg is open in another program/);
+    return true;
+  });
+  assert.equal(calls, 8);
+  assert.equal(readFileSync(target, 'utf8'), 'old');
+  assert.equal(existsSync(`${target}.qbctmp`), false);
+  rmSync(tmpDir, { recursive: true, force: true });
+});
+
+test('other save errors are not retried and keep their own message', async () => {
+  let calls = 0;
+  const missing = Object.assign(new Error('ENOENT: no such file'), { code: 'ENOENT' });
+  await assert.rejects(retry(async () => { calls++; throw missing; }, { wait: noWait }), /ENOENT/);
+  assert.equal(calls, 1);
+  assert.equal(isBusy(busyError('EACCES')), true);
+  assert.equal(isBusy(missing), false);
+});
+
+test('a resource folder that stays busy says which one and what to do', async () => {
+  const stuck = async () => { throw busyError(); };
+  await assert.rejects(moveFolderSafely('a', 'b', 'cfx-gomstyling-subpack-1', { renameFn: stuck, wait: noWait }), (err) => {
+    assert.equal(err.status, 423);
+    assert.match(err.message, /move cfx-gomstyling-subpack-1, because a file in it is open in another program/);
+    return true;
+  });
+  // A move across drives is not "busy": it falls through so the caller can copy instead.
+  const crossDrive = async () => { throw Object.assign(new Error('EXDEV'), { code: 'EXDEV' }); };
+  await assert.rejects(moveFolderSafely('a', 'b', 'x', { renameFn: crossDrive, wait: noWait }), (err) => err.code === 'EXDEV');
+});
+
+test('your real error: the backup before a database file retries when a table just changed', () => {
+  const real = { stderr: 'mariadb-dump.exe: Error 1412: Table definition has changed, please retry transaction when dumping table `garage_interiors` at row: 0' };
+  assert.equal(isRetryableDumpError(real), true);
+  assert.equal(isRetryableDumpError({ stderr: 'mariadb-dump: Got error: 1205: Lock wait timeout exceeded' }), true);
+  assert.equal(isRetryableDumpError({ stderr: 'mariadb-dump: Got error: 2003: Can\'t connect to MySQL server' }), false);
+  assert.equal(isRetryableDumpError({ stderr: 'mariadb-dump: Got error: 1049: Unknown database' }), false);
+});
 
 // Both names the app had before it was called CityHQ: a server.cfg written by either keeps working.
 for (const oldName of ['QBCore Control', 'FiveM Server Manager']) {

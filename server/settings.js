@@ -1,7 +1,8 @@
 import { randomBytes, randomInt } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { STATE_DIR } from './paths.js';
+import { replaceFileSync } from './retry.js';
 
 const FILE = path.join(STATE_DIR, 'settings.json');
 
@@ -18,9 +19,7 @@ let cache = null;
 
 function save() {
   mkdirSync(STATE_DIR, { recursive: true });
-  const tmp = `${FILE}.tmp`;
-  writeFileSync(tmp, JSON.stringify(cache, null, 2));
-  renameSync(tmp, FILE);
+  replaceFileSync(FILE, JSON.stringify(cache, null, 2));
 }
 
 export function getSettings() {

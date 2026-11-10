@@ -2,7 +2,7 @@
 import { execFile } from 'node:child_process';
 import { createWriteStream, existsSync } from 'node:fs';
 import {
-  cp, lstat, mkdir, readdir, readFile, rename, rm, stat, statfs, writeFile,
+  cp, lstat, mkdir, readdir, readFile, rm, stat, statfs, writeFile,
 } from 'node:fs/promises';
 import path from 'node:path';
 import { Readable } from 'node:stream';
@@ -18,6 +18,7 @@ import {
 import {
   DB_CLI, findServerData, HttpError, resolveInside, STATE_DIR, TMP_DIR, TRASH_DIR,
 } from './paths.js';
+import { moveFolderSafely } from './retry.js';
 
 const exec = promisify(execFile);
 const TAR = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'tar.exe');
@@ -222,7 +223,7 @@ export async function setBoot(name, enabled) {
     if (disabled[name]) {
       const origin = path.join(dataPath, 'resources', disabled[name]);
       await mkdir(path.dirname(origin), { recursive: true });
-      await rename(resource.dir, origin);
+      await moveFolderSafely(resource.dir, origin, name);
       delete disabled[name];
       await writeDisabled(disabled);
       await refreshResources();
@@ -246,7 +247,7 @@ export async function setBoot(name, enabled) {
     const resourcesRoot = path.join(dataPath, 'resources');
     const dest = path.join(resourcesRoot, DISABLED_CATEGORY, name);
     await mkdir(path.dirname(dest), { recursive: true });
-    await rename(resource.dir, dest);
+    await moveFolderSafely(resource.dir, dest, name);
     disabled[name] = path.relative(resourcesRoot, resource.dir);
     await writeDisabled(disabled);
     await refreshResources();
@@ -296,7 +297,7 @@ const tidyName = (folder) => folder
 /** Moves within the same drive, which is instant even for gigabytes; copies otherwise. */
 async function moveFolder(from, to) {
   try {
-    await rename(from, to);
+    await moveFolderSafely(from, to, path.basename(to));
   } catch (err) {
     if (err.code !== 'EXDEV') throw err;
     await cp(from, to, { recursive: true });
@@ -487,7 +488,7 @@ export async function removeResource(name) {
   const dest = path.join(TRASH_DIR, id);
   await mkdir(TRASH_DIR, { recursive: true });
   const rel = path.relative(path.join(dataPath, 'resources'), resource.dir);
-  await rename(resource.dir, dest);
+  await moveFolderSafely(resource.dir, dest, name);
   await writeFile(`${dest}.json`, JSON.stringify({ name, origin: rel, removedAt: Date.now() }));
   await writeCfg(cfgPath, forgetBootLines(await readCfg(cfgPath), name));
 
@@ -522,7 +523,7 @@ export async function restoreFromTrash(id) {
   const { dataPath } = serverData();
   const dest = resolveInside(path.join(dataPath, 'resources'), meta.origin);
   await mkdir(path.dirname(dest), { recursive: true });
-  await rename(src, dest);
+  await moveFolderSafely(src, dest, meta.name);
   await rm(metaFile, { force: true });
   await refreshResources();
   return { restored: meta.name };

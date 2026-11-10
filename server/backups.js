@@ -17,6 +17,7 @@ import {
   DB_CLI, findServerData, HttpError, ROOT, STATE_DIR,
 } from './paths.js';
 import { ensureDatabase } from './processes.js';
+import { retry } from './retry.js';
 import { getSettings } from './settings.js';
 
 const exec = promisify(execFile);
@@ -60,12 +61,22 @@ function gently(run) {
   return run;
 }
 
-async function dumpDatabase(conn, file) {
+/**
+ * Errors the database itself says to retry. 1412 happens when a table is created or changed
+ * while the backup reads it, for example by a script setting up its tables, or by a database
+ * file that was run a moment before.
+ */
+export const isRetryableDumpError = (err) => /\b(1412|1205|1213)\b|Table definition has changed|Lock wait timeout|Deadlock found/i
+  .test(`${err?.stderr || ''} ${err?.message || ''}`);
+
+async function dumpDatabase(conn, file, { run = exec, wait } = {}) {
   try {
-    await gently(exec(DUMP, [
+    await retry(() => gently(run(DUMP, [
       ...clientArgs(conn), '--single-transaction', '--quick', '--routines', '--events', '--triggers',
       `--result-file=${file}`, conn.database,
-    ], { env: clientEnv(conn), windowsHide: true, timeout: 600_000, maxBuffer: 16 * 1024 * 1024 }));
+    ], { env: clientEnv(conn), windowsHide: true, timeout: 600_000, maxBuffer: 16 * 1024 * 1024 })), {
+      attempts: 4, firstDelayMs: 1500, retryable: isRetryableDumpError, wait,
+    });
   } catch (err) {
     throw new HttpError(500, `The database could not be backed up: ${lastLine(err)}`);
   }

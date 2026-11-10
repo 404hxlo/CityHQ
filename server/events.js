@@ -1,7 +1,8 @@
 // A short history of what the app did and noticed on its own, shown on the Overview page.
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { STATE_DIR } from './paths.js';
+import { replaceFileSync } from './retry.js';
 
 const FILE = path.join(STATE_DIR, 'events.json');
 const MAX_EVENTS = 100;
@@ -19,9 +20,7 @@ function load() {
 
 function save() {
   mkdirSync(STATE_DIR, { recursive: true });
-  const tmp = `${FILE}.tmp`;
-  writeFileSync(tmp, JSON.stringify(events, null, 1));
-  renameSync(tmp, FILE);
+  replaceFileSync(FILE, JSON.stringify(events, null, 1));
 }
 
 /** level: "alert" needs attention and notifies the desktop; "info" is only history. */

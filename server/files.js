@@ -13,6 +13,7 @@ import {
   BACKUP_DIR, findServerData, HttpError, resolveInside,
 } from './paths.js';
 import { findResourceDir, serverData } from './resources.js';
+import { replaceFile } from './retry.js';
 
 export const SERVER_SCOPE = '__server__';
 export const DATA_SCOPE = '__data__';
@@ -243,12 +244,6 @@ function refuseMistake(check, force) {
   throw new HttpError(422, check.line ? `Line ${check.line}: ${check.plain}` : check.plain, {
     syntax: { line: check.line, message: check.message, plain: check.plain },
   });
-}
-
-async function replaceFile(full, text) {
-  const tmp = `${full}.qbctmp`;
-  await writeFile(tmp, text);
-  await rename(tmp, full);
 }
 
 async function loadForWrite(scope, rel, etag) {
