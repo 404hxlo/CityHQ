@@ -1,0 +1,31 @@
+# Built and downloaded files: recreated by `npm ci` and `npm run package`
+node_modules/
+release/
+dist/
+web/dist/
+
+# Never commit anything from a real server. These don't live in this folder, but if one is
+# ever copied in by mistake it stays out of the repository.
+server.cfg
+server.cfg.*
+*.cfg.bkp
+settings.json
+token.txt
+events.json
+qbcontrol.json
+.qbcontrol/
+txData/
+db/
+*.sql
+*.dmp
+
+# Logs, scratch files and editor leftovers
+*.log
+*.tmp
+*.part
+.env
+.env.*
+.vscode/
+.idea/
+Thumbs.db
+desktop.ini

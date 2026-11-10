@@ -1,0 +1,47 @@
+{
+  "name": "cityhq",
+  "productName": "CityHQ",
+  "version": "1.0.0",
+  "description": "Desktop and phone dashboard for a local QBCore / txAdmin server",
+  "private": true,
+  "type": "module",
+  "main": "electron/main.js",
+  "scripts": {
+    "dev:web": "vite",
+    "typecheck": "tsc --noEmit -p web",
+    "build": "npm run typecheck && vite build",
+    "serve": "node server/standalone.js",
+    "desktop": "electron .",
+    "test": "node --test server/fields.test.js server/browser.test.js server/automation.test.js",
+    "package": "npm run build && node scripts/package.js"
+  },
+  "dependencies": {
+    "express": "^5.3.0",
+    "qrcode": "^1.5.4"
+  },
+  "devDependencies": {
+    "@codemirror/commands": "^6.8.1",
+    "@codemirror/lang-css": "^6.3.1",
+    "@codemirror/lang-html": "^6.4.9",
+    "@codemirror/lang-javascript": "^6.2.3",
+    "@codemirror/lang-json": "^6.0.1",
+    "@codemirror/language": "^6.11.0",
+    "@codemirror/legacy-modes": "^6.5.1",
+    "@codemirror/search": "^6.5.10",
+    "@codemirror/state": "^6.5.2",
+    "@codemirror/view": "^6.36.5",
+    "@electron/packager": "^20.3.0",
+    "@fontsource-variable/archivo": "^5.2.5",
+    "@fontsource-variable/jetbrains-mono": "^5.2.5",
+    "@lezer/highlight": "^1.2.5",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@vitejs/plugin-react": "^6.3.0",
+    "electron": "^45.2.3",
+    "lucide-react": "^1.70.0",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.6"
+  }
+}

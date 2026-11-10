@@ -1,0 +1,10 @@
+# Text is stored with LF line endings. Windows scripts always get CRLF when checked out or
+# downloaded as a ZIP, because cmd.exe can misread a batch file whose lines end in LF only.
+* text=auto
+*.cmd text eol=crlf
+*.bat text eol=crlf
+*.ps1 text eol=crlf
+
+*.png binary
+*.ico binary
+*.woff2 binary
