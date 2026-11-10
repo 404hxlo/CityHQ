@@ -1,8 +1,12 @@
-import { Archive, Boxes, FolderOpen, Gauge, KeyRound, Settings as SettingsIcon, Terminal, Users } from 'lucide-react';
+import {
+  Archive, Bell, Boxes, Building2, ExternalLink, FolderOpen, Gauge, KeyRound, Settings as SettingsIcon, Terminal, Users,
+} from 'lucide-react';
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { api, onSignedOut } from './api';
 import { Backups } from './pages/Backups';
+import { City } from './pages/City';
 import { Console } from './pages/Console';
+import { GlobalSearch } from './Search';
 import { Files } from './pages/Files';
 import { Overview } from './pages/Overview';
 import { Players } from './pages/Players';
@@ -12,11 +16,12 @@ import {
   Button, ConfirmProvider, Notice, ServerBadge, Spinner, ToastProvider, usePoll,
 } from './ui';
 
-type Page = 'overview' | 'resources' | 'players' | 'files' | 'backups' | 'console' | 'settings';
+type Page = 'overview' | 'city' | 'resources' | 'players' | 'files' | 'backups' | 'console' | 'settings';
 const NAV: { id: Page; label: string; icon: ReactNode }[] = [
   { id: 'overview', label: 'Overview', icon: <Gauge size={20} /> },
-  { id: 'resources', label: 'Resources', icon: <Boxes size={20} /> },
+  { id: 'city', label: 'City', icon: <Building2 size={20} /> },
   { id: 'players', label: 'Players', icon: <Users size={20} /> },
+  { id: 'resources', label: 'Resources', icon: <Boxes size={20} /> },
   { id: 'files', label: 'Files', icon: <FolderOpen size={20} /> },
   { id: 'backups', label: 'Backups', icon: <Archive size={20} /> },
   { id: 'console', label: 'Console', icon: <Terminal size={20} /> },
@@ -100,8 +105,19 @@ function Shell({ local, onSignOut }: { local: boolean; onSignOut: () => void }) 
           ))}
         </ul>
         <div className="rail-foot">
-          {state && <ServerBadge state={state} />}
-          {overview.data?.serverName && <div className="rail-server">{overview.data.serverName}</div>}
+          <div className="server-card">
+            <div className="server-card-head">
+              <img src="/logo-small.svg" alt="" width={22} height={22} />
+              <strong>{overview.data?.serverName || 'Your server'}</strong>
+            </div>
+            {state && <ServerBadge state={state} />}
+            <span className="muted-note">
+              {online && overview.data?.status ? `${overview.data.status.players} of ${overview.data.status.maxClients} players` : 'Not running'}
+            </span>
+            {local && overview.data && (
+              <a className="btn btn-default server-card-btn" href={`http://localhost:${overview.data.txAdminPort}`} target="_blank" rel="noreferrer"><ExternalLink size={15} /><span>Open txAdmin</span></a>
+            )}
+          </div>
         </div>
       </nav>
 
@@ -112,7 +128,26 @@ function Shell({ local, onSignOut }: { local: boolean; onSignOut: () => void }) 
       </div>
 
       <main className={`content ${page === 'console' ? 'content-console' : ''} ${page === 'files' ? 'content-files' : ''}`}>
+        {page !== 'console' && page !== 'files' && (
+          <header className="app-header">
+            <GlobalSearch pages={NAV} />
+            <div className="app-header-right">
+              <button className="header-bell" aria-label={`${overview.data?.alerts.length || 0} alerts`} title="Alerts" onClick={() => goTo('overview')}>
+                <Bell size={18} />
+                {(overview.data?.alerts.length || 0) > 0 && <span className="bell-dot">{overview.data?.alerts.length}</span>}
+              </button>
+              <div className="header-chip">
+                <img src="/logo.svg" alt="" width={30} height={30} />
+                <span>
+                  <strong>{overview.data?.serverName || 'CityHQ'}</strong>
+                  <span className="muted-note">{online ? 'Live' : state === 'stopped' ? 'Offline' : state ? 'Working' : ''}</span>
+                </span>
+              </div>
+            </div>
+          </header>
+        )}
         {page === 'overview' && <Overview data={overview.data} error={overview.error} refresh={overview.refresh} local={local} goTo={goTo} />}
+        {page === 'city' && <City online={online} helperOutdated={Boolean(overview.data?.helperOutdated)} />}
         {page === 'resources' && <Resources />}
         {page === 'players' && <Players gamePort={overview.data?.gamePort ?? 30121} />}
         {page === 'files' && <Files online={online} />}

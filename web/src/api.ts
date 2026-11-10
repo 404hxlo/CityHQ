@@ -100,10 +100,39 @@ export interface Player {
   money?: Record<string, number>;
   job?: { name: string; label: string; grade: number; gradeName?: string; onduty?: boolean };
   gang?: { name: string; label: string; grade: number; gradeName?: string };
+  frozen?: boolean; jailMonths?: number;
 }
 export interface InventoryItem { name: string; label: string; amount: number; slot?: number }
 export interface Group { name: string; label: string; grades: { level: number; name: string }[] }
-export interface Shared { jobs: Group[]; gangs: Group[]; items: { name: string; label: string }[]; moneyTypes: string[] }
+export interface VehicleModel { model: string; name: string; brand?: string; category?: string }
+export interface Shared {
+  jobs: Group[]; gangs: Group[]; items: { name: string; label: string }[]; moneyTypes: string[];
+  vehicles?: VehicleModel[]; places?: { key: string; label: string }[];
+}
+
+export interface SeriesPoint { t: number; v: number | null }
+export interface DayCount { unique: number; peak: number }
+export interface ActivityItem { t: number; kind: 'join' | 'leave'; name: string; character: string | null }
+export interface UpcomingItem { kind: 'countdown' | 'restart' | 'backup'; at: number; title: string; detail: string }
+export interface Dashboard {
+  day: SeriesPoint[]; week: SeriesPoint[];
+  today: DayCount; yesterday: DayCount; days: ({ day: string } & DayCount)[];
+  activity: ActivityItem[]; upcoming: UpcomingItem[];
+  history: Record<string, { backup?: number; crash?: number; restart?: number }>;
+  schedule: { restarts: string[]; backup: string | null };
+  greetingName: string;
+}
+export interface World { weather: string; blackout: boolean; timeFrozen: boolean; dynamicWeather: boolean; hour: number; minute: number }
+export interface KnownPlayer { license: string; name: string; characters: { citizenid: string; name: string }[]; lastSeen: number; ids: string[] }
+export interface Whitelist { enabled: boolean; entries: { id: string; name: string }[]; live: { enabled: boolean } | null; applied?: boolean }
+export type AdminRole = 'god' | 'admin' | 'mod';
+export interface AdminEntry { identifier: string; principal: string; role: AdminRole | 'full'; label: string; line: number; name: string | null }
+export interface AdminsResponse {
+  admins: AdminEntry[];
+  roles: Record<AdminRole, { principal: string; label: string; help: string }>;
+  players: KnownPlayer[];
+  playersError: string | null;
+}
 export interface Ban { id: number; name: string; reason: string; expire: number; bannedby: string }
 
 export interface ConsoleLine { text: string; level: 'info' | 'warn' | 'error' }
@@ -229,6 +258,20 @@ export const api = {
   playerAction: (id: number, action: string, extra: Record<string, unknown> = {}) => request<{ message: string }>('POST', `/api/players/${id}/action`, { action, ...extra }),
   bans: () => request<Ban[]>('GET', '/api/bans'),
   unban: (id: number) => request('DELETE', `/api/bans/${id}`),
+
+  dashboard: () => request<Dashboard>('GET', '/api/dashboard'),
+  setGreeting: (name: string) => request<{ greetingName: string }>('PUT', '/api/settings/greeting', { name }),
+  world: () => request<World>('GET', '/api/city/world'),
+  setWorld: (patch: Partial<World>) => request<World>('POST', '/api/city/world', patch),
+  banner: (title: string, message: string, seconds: number, countdown: boolean) => request<{ players: number }>('POST', '/api/city/banner', { title, message, seconds, countdown }),
+  reviveAll: () => request<{ revived: number }>('POST', '/api/city/revive-all'),
+  clearVehicles: (seconds: number) => request<{ removed?: number; scheduled?: number }>('POST', '/api/city/clear-vehicles', { seconds }),
+  whitelist: () => request<Whitelist>('GET', '/api/city/whitelist'),
+  setWhitelist: (change: { enabled?: boolean; add?: { id: string; name: string }; remove?: string }) => request<Whitelist>('PUT', '/api/city/whitelist', change),
+  knownPlayers: () => request<KnownPlayer[]>('GET', '/api/known-players'),
+  admins: () => request<AdminsResponse>('GET', '/api/admins'),
+  addAdmin: (identifier: string, role: AdminRole, name: string) => request<{ saved: boolean; live: boolean }>('POST', '/api/admins', { identifier, role, name }),
+  removeAdmin: (identifier: string) => request<{ removed: number; live: boolean }>('DELETE', `/api/admins/${q(identifier)}`),
 
   settings: () => request<Settings>('GET', '/api/settings'),
   setLan: (enabled: boolean) => request<{ lanEnabled: boolean; lanListening: boolean; errors: string[] }>('POST', '/api/settings/lan', { enabled }),

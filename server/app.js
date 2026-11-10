@@ -25,9 +25,17 @@ import { desktop } from './desktop.js';
 import {
   listEvents, markSeen, recordEvent, unseenAlerts,
 } from './events.js';
+import {
+  parseAdmins, removeAdmin, ROLES, setAdmin, VALID_IDENTIFIER,
+} from './admins.js';
+import { readCfg, writeCfg } from './cfg.js';
+import { knownPlayers, nameFor } from './people.js';
 import { currentProblems, restartChecked } from './problems.js';
 import {
-  cancelPendingRestart, getPendingRestart, isValidTime, nextBackupTime, nextScheduledRestart, scheduleRestart, startScheduler, stopScheduler,
+  dayKey, pushWhitelist, startStats, statsView, stopStats,
+} from './stats.js';
+import {
+  cancelPendingRestart, getPendingRestart, isValidTime, nextBackupTime, nextOccurrence, nextScheduledRestart, scheduleRestart, startScheduler, stopScheduler,
 } from './scheduler.js';
 import {
   listFiles, listVersions, readEditable, restoreVersion, saveContent, saveFields,
@@ -307,6 +315,138 @@ function buildApp() {
   api.get('/bans', handler(() => agentRequest('/bans')));
   api.delete('/bans/:id', handler((req) => agentRequest('/bans/remove', { method: 'POST', body: { id: Number(req.params.id) } })));
 
+  // Dashboard: how busy the server has been, what is coming up, and what happened when.
+  api.get('/dashboard', handler(async () => {
+    const s = getSettings();
+    const now = Date.now();
+    const upcoming = [];
+    const pending = getPendingRestart();
+    if (pending) upcoming.push({ kind: 'countdown', at: pending.at, title: pending.reason === 'scheduled' ? 'Scheduled restart' : 'Restart', detail: 'Players are being warned' });
+    if (s.restarts.enabled && s.restarts.times.length) {
+      let cursor = now;
+      for (let i = 0; i < 3; i++) {
+        const at = nextOccurrence(s.restarts.times, new Date(cursor));
+        if (!at) break;
+        if (!pending || Math.abs(at - pending.at) > 60000) upcoming.push({ kind: 'restart', at, title: 'Scheduled restart', detail: 'Warnings at 15, 5 and 1 minutes' });
+        cursor = at;
+      }
+    }
+    const backupAt = s.backups.enabled ? nextBackupTime() : null;
+    if (backupAt) upcoming.push({ kind: 'backup', at: backupAt, title: 'Nightly backup', detail: 'Players stay connected' });
+    upcoming.sort((a, b) => a.at - b.at);
+
+    const history = {};
+    const mark = (ms, kind) => {
+      const day = dayKey(ms);
+      history[day] = history[day] || {};
+      history[day][kind] = (history[day][kind] || 0) + 1;
+    };
+    for (const b of await listBackups().catch(() => [])) mark(b.createdAt, 'backup');
+    for (const e of listEvents(500)) {
+      if (/crash|stopped unexpectedly|went down/i.test(e.title)) mark(e.at, 'crash');
+      else if (/restart/i.test(e.title)) mark(e.at, 'restart');
+    }
+    return {
+      ...statsView(),
+      upcoming: upcoming.slice(0, 6),
+      history,
+      schedule: { restarts: s.restarts.enabled ? s.restarts.times : [], backup: s.backups.enabled ? s.backups.time : null },
+      greetingName: s.greetingName,
+    };
+  }));
+  api.put('/settings/greeting', json, handler((req) => {
+    const name = String(req.body?.name ?? '').replace(/[\r\n]/g, ' ').trim().slice(0, 40);
+    updateSettings({ greetingName: name });
+    return { greetingName: name };
+  }));
+
+  // The city: weather and time, events for everyone, and who may join.
+  const WORLD_KEYS = ['weather', 'hour', 'minute', 'blackout', 'timeFrozen', 'dynamicWeather'];
+  api.get('/city/world', handler(() => agentRequest('/world')));
+  api.post('/city/world', json, handler((req) => agentRequest('/world', {
+    method: 'POST', body: Object.fromEntries(WORLD_KEYS.filter((k) => req.body?.[k] !== undefined).map((k) => [k, req.body[k]])),
+  })));
+  api.post('/city/banner', json, handler((req) => agentRequest('/events/banner', {
+    method: 'POST',
+    body: { title: req.body?.title, message: req.body?.message, seconds: Number(req.body?.seconds) || 10, countdown: req.body?.countdown === true },
+  })));
+  api.post('/city/revive-all', handler(() => agentRequest('/events/revive-all', { method: 'POST' })));
+  api.post('/city/clear-vehicles', json, handler((req) => agentRequest('/events/clear-vehicles', {
+    method: 'POST', body: { seconds: Math.max(0, Math.min(600, Number(req.body?.seconds) || 0)) },
+  })));
+  api.get('/city/whitelist', handler(async () => {
+    const { whitelist } = getSettings();
+    let live = null;
+    try { live = await agentRequest('/whitelist', { timeoutMs: 2500 }); } catch { /* server off or older helper */ }
+    return { enabled: whitelist.enabled, entries: whitelist.entries, live: live ? { enabled: live.enabled === true } : null };
+  }));
+  api.put('/city/whitelist', json, handler(async (req) => {
+    const { whitelist } = getSettings();
+    let entries = [...whitelist.entries];
+    const add = req.body?.add;
+    if (add) {
+      if (!VALID_IDENTIFIER.test(add.id || '')) throw new HttpError(400, 'That is not a valid player ID');
+      if (!entries.some((e) => e.id === add.id)) entries.push({ id: add.id, name: String(add.name || '').slice(0, 60) });
+    }
+    if (typeof req.body?.remove === 'string') entries = entries.filter((e) => e.id !== req.body.remove);
+    const enabled = typeof req.body?.enabled === 'boolean' ? req.body.enabled : whitelist.enabled;
+    updateSettings({ whitelist: { enabled, entries } });
+    let applied = false;
+    try { await pushWhitelist(); applied = true; } catch { /* sent the next time the server starts */ }
+    return { enabled, entries, applied };
+  }));
+
+  // Admins: kept in server.cfg, and applied to the running server straight away.
+  const serverCfg = () => {
+    const server = findServerData();
+    if (!server) throw new HttpError(409, 'Finish the txAdmin setup first.');
+    return server.cfgPath;
+  };
+  const applyLive = async (steps) => {
+    try {
+      for (const body of steps) await agentRequest('/admins/apply', { method: 'POST', body });
+      return true;
+    } catch { return false; }
+  };
+  api.get('/known-players', handler(async () => (await knownPlayers()).slice(0, 500)));
+  api.get('/admins', handler(async () => {
+    const admins = parseAdmins(await readCfg(serverCfg()));
+    let players = [];
+    let playersError = null;
+    try { players = await knownPlayers(); } catch { playersError = 'The player list could not be read from the database. Is the database running?'; }
+    return {
+      admins: admins.map((a) => ({ ...a, name: nameFor(a.identifier, players) })),
+      roles: ROLES,
+      players: players.slice(0, 500),
+      playersError,
+    };
+  }));
+  api.post('/admins', json, handler(async (req) => {
+    const { identifier, role, name } = req.body || {};
+    if (!VALID_IDENTIFIER.test(identifier || '')) throw new HttpError(400, 'Choose a player first');
+    if (!ROLES[role]) throw new HttpError(400, 'Choose Owner, Admin or Moderator');
+    const cfgPath = serverCfg();
+    const { text, removed } = setAdmin(await readCfg(cfgPath), identifier, role, name);
+    await writeCfg(cfgPath, text);
+    const live = await applyLive([
+      ...removed.map((principal) => ({ identifier, role: principal, remove: true })),
+      { identifier, role: ROLES[role].principal },
+    ]);
+    if (getSettings().whitelist.enabled) await pushWhitelist().catch(() => {});
+    return { saved: true, live };
+  }));
+  api.delete('/admins/:identifier', handler(async (req) => {
+    const { identifier } = req.params;
+    if (!VALID_IDENTIFIER.test(identifier || '')) throw new HttpError(400, 'That is not a valid player ID');
+    const cfgPath = serverCfg();
+    const { text, removed } = removeAdmin(await readCfg(cfgPath), identifier);
+    if (!removed.length) throw new HttpError(404, 'That player is not an admin');
+    await writeCfg(cfgPath, text);
+    const live = await applyLive(removed.map((principal) => ({ identifier, role: principal, remove: true })));
+    if (getSettings().whitelist.enabled) await pushWhitelist().catch(() => {});
+    return { removed: removed.length, live };
+  }));
+
   // Settings
   api.get('/settings', handler((req) => {
     const local = isLocalRequest(req);
@@ -413,11 +553,13 @@ export async function startApp() {
   mainServer = await listen(appInstance, '127.0.0.1');
   await applyLanSetting();
   startScheduler();
+  startStats();
   return { port: APP_PORT, url: `http://127.0.0.1:${APP_PORT}` };
 }
 
 export async function stopApp() {
   stopScheduler();
+  stopStats();
   stopStatusPolling();
   stopProbe();
   await Promise.all([mainServer, ...lanServers].filter(Boolean).map((s) => new Promise((r) => {

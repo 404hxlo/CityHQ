@@ -12,6 +12,120 @@ import {
 } from './scheduler.js';
 import { BLOCK_END, BLOCK_START, ensureManagedBlock } from './cfg.js';
 import { findRoot, portOr } from './paths.js';
+import {
+  parseAdmins, removeAdmin, setAdmin, VALID_IDENTIFIER,
+} from './admins.js';
+import { groupPlayers, parseBatch } from './people.js';
+import {
+  addReading, BUCKET_MS, countDay, diffPlayers, series,
+} from './stats.js';
+
+const CFG = [
+  '## Permissions',
+  'add_ace group.admin command allow # allow all commands',
+  'add_principal identifier.fivem:1234567 group.admin #serverowner',
+  'add_ace qbcore.god command allow # Allow all commands',
+  'add_principal qbcore.god group.admin # Allow gods access to the main admin group',
+  '# add_principal identifier.license:aaaa qbcore.admin  (a comment, not a real line)',
+  '',
+  '# >>> CityHQ (managed by the app, edits here may be replaced)',
+  'add_ace resource.qb-control command allow',
+  'ensure qb-control',
+  '# <<< CityHQ',
+  '',
+].join('\n');
+const LICENSE = 'license:0123456789abcdef0123456789abcdef01234567';
+
+test('your real server.cfg: the hand-written admin line is found and named', () => {
+  const admins = parseAdmins(CFG);
+  assert.equal(admins.length, 1);
+  assert.deepEqual(admins[0], { identifier: 'fivem:1234567', principal: 'group.admin', role: 'full', label: 'serverowner', line: 3 });
+});
+
+test('making someone an admin writes one line in the CityHQ block, and nothing else changes', () => {
+  const { text, removed } = setAdmin(CFG, LICENSE, 'admin', 'PlayerOne');
+  assert.deepEqual(removed, []);
+  const lines = text.split('\n');
+  const end = lines.indexOf('# <<< CityHQ');
+  assert.equal(lines[end - 1], `add_principal identifier.${LICENSE} qbcore.admin # PlayerOne`);
+  assert.ok(text.includes('add_principal identifier.fivem:1234567 group.admin #serverowner'));
+  assert.equal(parseAdmins(text).length, 2);
+});
+
+test('changing a role replaces the old line instead of adding a second one', () => {
+  const once = setAdmin(CFG, LICENSE, 'mod', 'Fuzzy').text;
+  const { text, removed } = setAdmin(once, LICENSE, 'god', 'Fuzzy');
+  assert.deepEqual(removed, ['qbcore.mod']);
+  const mine = parseAdmins(text).filter((a) => a.identifier === LICENSE);
+  assert.equal(mine.length, 1);
+  assert.equal(mine[0].role, 'god');
+});
+
+test('a hand-written admin line can be replaced or removed', () => {
+  const promoted = setAdmin(CFG, 'fivem:1234567', 'god', 'serverowner');
+  assert.deepEqual(promoted.removed, ['group.admin']);
+  assert.ok(!promoted.text.includes('group.admin #serverowner'));
+  const { text, removed } = removeAdmin(CFG, 'FIVEM:1234567');
+  assert.deepEqual(removed, ['group.admin']);
+  assert.equal(parseAdmins(text).length, 0);
+  // The group rules themselves are not admin lines, so they stay.
+  assert.ok(text.includes('add_principal qbcore.god group.admin'));
+});
+
+test('nothing harmful can get into server.cfg or a server command through an ID or name', () => {
+  for (const bad of ['license:abc qbcore.god', 'license:zz11', 'license:abc;quit', 'discord:12 34', 'ip:127.0.0.1', '', 'fivem:']) {
+    assert.equal(VALID_IDENTIFIER.test(bad), false, bad);
+  }
+  assert.throws(() => setAdmin(CFG, 'license:abc;quit', 'admin', 'x'));
+  assert.throws(() => setAdmin(CFG, LICENSE, 'superuser', 'x'));
+  const { text } = setAdmin(CFG, LICENSE, 'admin', 'Evil\nquit # name');
+  assert.ok(!text.includes('\nquit'));
+  assert.ok(text.includes(`add_principal identifier.${LICENSE} qbcore.admin # Evil quit name`));
+});
+
+test('players from the database are grouped by person, with all their characters', () => {
+  const rows = parseBatch([
+    `${LICENSE}\tPlayerOne\tABC123\tAlex\tRivera\t1794300000`,
+    `${LICENSE}\tPlayerOne\tDEF456\tTony\tMontana\t1794200000`,
+    'license:fedcba9876543210fedcba9876543210fedcba98\tPlayerTwo\tGHI789\tNULL\tNULL\t1794100000',
+    'not-a-license\tSomeone\tX\ta\tb\t1',
+  ].join('\n'));
+  const people = groupPlayers(rows, { [LICENSE]: { name: 'PlayerOne', ids: [LICENSE, 'fivem:1234567'], lastSeen: 1794400000000 } });
+  assert.equal(people.length, 2);
+  assert.equal(people[0].name, 'PlayerOne');
+  assert.deepEqual(people[0].characters.map((c) => c.name), ['Alex Rivera', 'Tony Montana']);
+  assert.ok(people[0].ids.includes('fivem:1234567'));
+  assert.deepEqual(people[1].characters.map((c) => c.name), ['GHI789']);
+});
+
+test('history: readings fold into 5-minute buckets, keeping the busiest moment', () => {
+  const state = { samples: [], bucket: null };
+  const start = 1_800_000_000_000 - (1_800_000_000_000 % BUCKET_MS);
+  addReading(state, start + 1000, 2);
+  addReading(state, start + 60000, 5);
+  addReading(state, start + 120000, 3);
+  assert.equal(state.samples.length, 0);
+  addReading(state, start + BUCKET_MS + 1000, 1);
+  assert.deepEqual(state.samples, [[start, 5]]);
+  const out = series(state.samples, start + 3 * BUCKET_MS, 4, BUCKET_MS);
+  assert.deepEqual(out.map((p) => p.v), [5, null, null, null]);
+});
+
+test('history: joins, leaves, unique players and the daily peak', () => {
+  const before = new Map([['a', { name: 'A' }], ['b', { name: 'B' }]]);
+  const after = new Map([['b', { name: 'B' }], ['c', { name: 'C' }]]);
+  const { joined, left } = diffPlayers(before, after);
+  assert.deepEqual(joined.map((p) => p.name), ['C']);
+  assert.deepEqual(left.map((p) => p.name), ['A']);
+  const store = { days: {}, today: { day: '', ids: [] } };
+  const now = new Date(2026, 10, 10, 20, 0).getTime();
+  countDay(store, now, ['a', 'b'], 2);
+  countDay(store, now + 60000, ['b', 'c'], 2);
+  countDay(store, now + 120000, ['b'], 1);
+  const day = store.days['2026-11-10'];
+  assert.equal(day.unique, 3);
+  assert.equal(day.peak, 2);
+});
 
 import { relocatedDataPath, relocateIni } from './relocate.js';
 import { isRetryableDumpError } from './backups.js';

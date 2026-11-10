@@ -1,8 +1,10 @@
 import {
-  Ban as BanIcon, Briefcase, Gavel, HeartPulse, LogOut, MessageSquare, PackagePlus, ShieldOff, Trash2, Users, Wallet,
+  Ban as BanIcon, Briefcase, Car, Fuel, Gavel, HeartPulse, Lock, LogOut, MapPin, MessageSquare, PackagePlus, Shield,
+  ShieldOff, Snowflake, Trash2, Unlock, Users, Wallet, Wrench,
 } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { api, type Ban, type Group, type InventoryItem, type Player, type Shared } from '../api';
+import { takePlayerTarget } from '../nav';
 import {
   Button, Drawer, Empty, formatMoney, Modal, Notice, Segmented, Spinner, useAction, useConfirm, usePoll,
 } from '../ui';
@@ -37,7 +39,85 @@ function GroupEditor({ title, icon, groups, current, grade, busy, onApply }: {
   );
 }
 
-function PlayerDetail({ player, shared, onClose, reload }: { player: Player; shared: Shared | null; onClose: () => void; reload: () => void }) {
+function PlayerTools({ player, others, shared, busy, action }: {
+  player: Player; others: Player[]; shared: Shared | null; busy: string | null;
+  action: (key: string, name: string, extra?: Record<string, unknown>) => Promise<unknown>;
+}) {
+  const [target, setTarget] = useState('');
+  const [months, setMonths] = useState('10');
+  const [car, setCar] = useState('');
+  const hasCharacter = Boolean(player.citizenid);
+  const carModel = useMemo(() => {
+    const raw = car.trim().toLowerCase();
+    const match = shared?.vehicles?.find((v) => v.model.toLowerCase() === raw || `${v.brand ? `${v.brand} ` : ''}${v.name}`.toLowerCase() === raw || v.name.toLowerCase() === raw);
+    return match?.model || raw;
+  }, [car, shared]);
+  const send = () => {
+    if (!target) return;
+    const [kind, value] = target.split(':');
+    action('tp', 'teleport', kind === 'player' ? { toPlayer: Number(value) } : { place: value });
+  };
+  return (
+    <>
+      <section className="card">
+        <h3 className="card-title"><HeartPulse size={16} />Player tools</h3>
+        <div className="tool-grid">
+          <Button icon={<HeartPulse size={15} />} busy={busy === 'heal'} onClick={() => action('heal', 'heal')}>Heal</Button>
+          <Button icon={<Shield size={15} />} busy={busy === 'armor'} onClick={() => action('armor', 'armor')}>Give armor</Button>
+          {player.frozen
+            ? <Button icon={<Unlock size={15} />} busy={busy === 'unfreeze'} onClick={() => action('unfreeze', 'unfreeze')}>Unfreeze</Button>
+            : <Button icon={<Snowflake size={15} />} busy={busy === 'freeze'} onClick={() => action('freeze', 'freeze')}>Freeze</Button>}
+        </div>
+        <label className="input-label" htmlFor="tp-target"><MapPin size={14} />Send them to</label>
+        <div className="input-row">
+          <select id="tp-target" className="input" value={target} onChange={(e) => setTarget(e.target.value)}>
+            <option value="">Choose a place or player</option>
+            {(shared?.places?.length ?? 0) > 0 && (
+              <optgroup label="Places">
+                {shared?.places?.map((p) => <option key={p.key} value={`place:${p.key}`}>{p.label}</option>)}
+              </optgroup>
+            )}
+            {others.length > 0 && (
+              <optgroup label="Another player">
+                {others.map((o) => <option key={o.id} value={`player:${o.id}`}>{o.character?.trim() || o.name}</option>)}
+              </optgroup>
+            )}
+          </select>
+          <Button busy={busy === 'tp'} disabled={!target} onClick={send}>Send</Button>
+        </div>
+        {hasCharacter && (
+          <>
+            <label className="input-label" htmlFor="jail-months"><Lock size={14} />Jail (each month is one real minute)</label>
+            <div className="input-row">
+              <input id="jail-months" className="input input-number small" type="number" min={1} max={600} inputMode="numeric" value={months} onChange={(e) => setMonths(e.target.value)} />
+              <Button busy={busy === 'jail'} disabled={!(Number(months) >= 1)} onClick={() => action('jail', 'jail', { months: Number(months) })}>Send to jail</Button>
+              <Button variant="ghost" busy={busy === 'unjail'} onClick={() => action('unjail', 'unjail')}>Release</Button>
+            </div>
+          </>
+        )}
+      </section>
+
+      <section className="card">
+        <h3 className="card-title"><Car size={16} />Cars</h3>
+        <div className="input-row">
+          <input className="input" list="qb-vehicles" placeholder="Search for a car, like Adder" aria-label="Car" value={car} onChange={(e) => setCar(e.target.value)} />
+          <datalist id="qb-vehicles">
+            {(shared?.vehicles || []).map((v) => <option key={v.model} value={`${v.brand ? `${v.brand} ` : ''}${v.name}`}>{v.model}</option>)}
+          </datalist>
+          <Button busy={busy === 'car'} disabled={!car.trim()} onClick={async () => { if (await action('car', 'spawnCar', { model: carModel })) setCar(''); }}>Spawn with keys</Button>
+        </div>
+        <div className="tool-grid">
+          <Button icon={<Wrench size={15} />} busy={busy === 'fix'} onClick={() => action('fix', 'fixCar')}>Fix their car</Button>
+          <Button icon={<Fuel size={15} />} busy={busy === 'fuel'} onClick={() => action('fuel', 'refuel')}>Fill the tank</Button>
+          <Button variant="ghost" icon={<Trash2 size={15} />} busy={busy === 'dv'} onClick={() => action('dv', 'deleteCar')}>Remove their car</Button>
+        </div>
+        <p className="muted-note">Fixing, refueling and removing work on the car they are in or just got out of.</p>
+      </section>
+    </>
+  );
+}
+
+function PlayerDetail({ player, others, shared, onClose, reload }: { player: Player; others: Player[]; shared: Shared | null; onClose: () => void; reload: () => void }) {
   const { busy, run } = useAction();
   const confirm = useConfirm();
   const [inventory, setInventory] = useState<InventoryItem[] | null>(null);
@@ -103,6 +183,8 @@ function PlayerDetail({ player, shared, onClose, reload }: { player: Player; sha
       </header>
 
       {!hasCharacter && <Notice kind="info">{player.name} has not chosen a character yet, so money, job and items are not available.</Notice>}
+
+      <PlayerTools player={player} others={others} shared={shared} busy={busy} action={action} />
 
       {hasCharacter && (
         <>
@@ -272,6 +354,14 @@ export function Players({ gamePort }: { gamePort: number }) {
     if (selected !== null && data && !player) setSelected(null);
   }, [data, player, selected]);
 
+  // Opened from the dashboard or search with a player in mind.
+  useEffect(() => {
+    const take = () => { const id = takePlayerTarget(); if (id !== null) { setTab('online'); setSelected(id); } };
+    take();
+    window.addEventListener('qbc-players-target', take);
+    return () => window.removeEventListener('qbc-players-target', take);
+  }, []);
+
   useEffect(() => {
     if (data?.length && !shared.data) shared.refresh();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -320,7 +410,7 @@ export function Players({ gamePort }: { gamePort: number }) {
         </>
       )}
 
-      {player && <PlayerDetail key={player.id} player={player} shared={shared.data} onClose={() => setSelected(null)} reload={refresh} />}
+      {player && <PlayerDetail key={player.id} player={player} others={(data || []).filter((p) => p.id !== player.id)} shared={shared.data} onClose={() => setSelected(null)} reload={refresh} />}
     </div>
   );
 }

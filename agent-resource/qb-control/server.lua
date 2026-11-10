@@ -5,6 +5,30 @@ local RES = GetCurrentResourceName()
 local PROTECTED = { [RES] = true, monitor = true }
 local PERMANENT_BAN = 2147483647
 local REASON = 'CityHQ'
+-- A player ID from FiveM, Discord, Steam or Rockstar. Letters and digits only, so it can never
+-- smuggle anything extra into a server command.
+local VALID_ID = '^(license2?):(%x+)$'
+local OTHER_ID = '^(fivem|discord|steam|xbl|live):(%w+)$'
+local ROLES = { ['qbcore.god'] = true, ['qbcore.admin'] = true, ['qbcore.mod'] = true, ['group.admin'] = true }
+
+-- Where players can be sent. Taken from QBCore's own spawn and job settings.
+local PLACES = {
+    legion = { label = 'Legion Square', x = 195.17, y = -933.77, z = 30.2, h = 144.5 },
+    police = { label = 'Mission Row Police', x = 428.23, y = -984.28, z = 30.26, h = 3.5 },
+    pillbox = { label = 'Pillbox Hospital', x = 308.19, y = -595.35, z = 43.29, h = 70.0 },
+    motel = { label = 'Pink Cage Motel', x = 327.56, y = -205.08, z = 54.08, h = 163.5 },
+    sandy = { label = 'Sandy Shores', x = 1853.97, y = 3686.93, z = 34.27, h = 210.0 },
+    paleto = { label = 'Paleto Bay', x = 80.35, y = 6424.12, z = 31.67, h = 45.5 },
+    airport = { label = 'Los Santos Airport', x = -1037.74, y = -2738.04, z = 20.17, h = 330.0 },
+}
+local PLACE_ORDER = { 'legion', 'police', 'pillbox', 'motel', 'sandy', 'paleto', 'airport' }
+
+local frozen = {}
+AddEventHandler('playerDropped', function() frozen[source] = nil end)
+
+local function validId(id)
+    return type(id) == 'string' and #id <= 80 and (id:match(VALID_ID) ~= nil or id:match(OTHER_ID) ~= nil)
+end
 
 local function loadToken()
     local raw = LoadResourceFile(RES, 'token.txt')
@@ -59,6 +83,7 @@ local function describePlayer(sid, QB)
         name = GetPlayerName(sid),
         ping = GetPlayerPing(sid),
         license = GetPlayerIdentifierByType(sid, 'license'),
+        frozen = frozen[src] == true,
     }
     if QB then
         local ok, player = pcall(QB.Functions.GetPlayer, src)
@@ -69,6 +94,7 @@ local function describePlayer(sid, QB)
                 entry.character = ('%s %s'):format(d.charinfo.firstname or '', d.charinfo.lastname or '')
             end
             entry.money = d.money
+            entry.jailMonths = d.metadata and d.metadata.injail or 0
             if d.job then
                 entry.job = {
                     name = d.job.name, label = d.job.label, onduty = d.job.onduty,
@@ -321,6 +347,82 @@ function playerActions.notify(src, body)
     return 'Message sent'
 end
 
+function playerActions.heal(src)
+    TriggerClientEvent(RES .. ':client:heal', src)
+    if GetResourceState('qb-ambulancejob') == 'started' then
+        TriggerClientEvent('hospital:client:HealInjuries', src, 'full')
+    end
+    return 'Player healed'
+end
+
+function playerActions.armor(src)
+    TriggerClientEvent(RES .. ':client:armor', src)
+    return 'Armor given'
+end
+
+function playerActions.freeze(src)
+    frozen[src] = true
+    TriggerClientEvent(RES .. ':client:freeze', src, true)
+    return 'Player frozen in place'
+end
+
+function playerActions.unfreeze(src)
+    frozen[src] = nil
+    TriggerClientEvent(RES .. ':client:freeze', src, false)
+    return 'Player can move again'
+end
+
+function playerActions.teleport(src, body)
+    if body.toPlayer ~= nil then
+        local target = onlinePlayer(body.toPlayer)
+        if target == src then error('Choose a different player to send them to') end
+        local coords = GetEntityCoords(GetPlayerPed(tostring(target)))
+        TriggerClientEvent('QBCore:Command:TeleportToPlayer', src, coords)
+        return ('Sent to %s'):format(GetPlayerName(tostring(target)) or 'that player')
+    end
+    local place = PLACES[body.place]
+    if not place then error('Choose where to send them') end
+    TriggerClientEvent('QBCore:Command:TeleportToCoords', src, place.x, place.y, place.z, place.h)
+    return 'Sent to ' .. place.label
+end
+
+function playerActions.jail(src, body)
+    qbPlayer(src)
+    if GetResourceState('qb-prison') ~= 'started' then error('qb-prison is not running') end
+    local months = wholeNumber(body.months, 1, 600)
+    if not months then error('Choose from 1 to 600 months') end
+    TriggerClientEvent('prison:client:Enter', src, months)
+    return ('Sent to jail for %d months'):format(months)
+end
+
+function playerActions.unjail(src)
+    qbPlayer(src)
+    TriggerClientEvent('prison:client:UnjailPerson', src)
+    return 'Released from jail'
+end
+
+function playerActions.spawnCar(src, body)
+    local model = text(body.model, 40)
+    if not model or not model:match('^[%w_]+$') then error('Choose a car') end
+    TriggerClientEvent('QBCore:Command:SpawnVehicle', src, model:lower())
+    return 'Car spawned with keys and a full tank'
+end
+
+function playerActions.fixCar(src)
+    TriggerClientEvent(RES .. ':client:fixVehicle', src)
+    return 'Car repaired'
+end
+
+function playerActions.refuel(src)
+    TriggerClientEvent(RES .. ':client:refuel', src)
+    return 'Tank filled'
+end
+
+function playerActions.deleteCar(src)
+    TriggerClientEvent('QBCore:Command:DeleteVehicle', src)
+    return 'Car removed'
+end
+
 routes['POST /players/action'] = function(body)
     local handler = playerActions[body.action]
     if not handler then error('Unknown player action') end
@@ -351,7 +453,169 @@ routes['GET /shared'] = function()
     local moneyTypes = {}
     for name in pairs(QB.Config.Money.MoneyTypes or {}) do moneyTypes[#moneyTypes + 1] = name end
     table.sort(moneyTypes)
-    return { jobs = grouped(QB.Shared.Jobs), gangs = grouped(QB.Shared.Gangs), items = items, moneyTypes = moneyTypes }
+    local vehicles = {}
+    for model, data in pairs(QB.Shared.Vehicles or {}) do
+        if type(data) == 'table' then
+            vehicles[#vehicles + 1] = {
+                model = data.model or model, name = data.name or model,
+                brand = data.brand, category = data.category,
+            }
+        end
+    end
+    table.sort(vehicles, function(a, b) return ((a.brand or '') .. a.name) < ((b.brand or '') .. b.name) end)
+    local places = {}
+    for _, key in ipairs(PLACE_ORDER) do places[#places + 1] = { key = key, label = PLACES[key].label } end
+    return {
+        jobs = grouped(QB.Shared.Jobs), gangs = grouped(QB.Shared.Gangs), items = items, moneyTypes = moneyTypes,
+        vehicles = vehicles, places = places,
+    }
+end
+
+-- ---------------------------------------------------------------- the world
+local function weatherSync()
+    if GetResourceState('qb-weathersync') ~= 'started' then error('qb-weathersync is not running') end
+    return exports['qb-weathersync']
+end
+
+routes['GET /world'] = function()
+    local ws = weatherSync()
+    local hour, minute = ws:getTime()
+    return {
+        weather = ws:getWeatherState(),
+        blackout = ws:getBlackoutState() == true,
+        timeFrozen = ws:getTimeFreezeState() == true,
+        dynamicWeather = ws:getDynamicWeather() == true,
+        hour = tonumber(hour), minute = tonumber(minute),
+    }
+end
+
+routes['POST /world'] = function(body)
+    local ws = weatherSync()
+    if body.weather ~= nil then
+        local weather = text(body.weather, 20)
+        if not weather or not ws:setWeather(weather) then error('Unknown weather') end
+    end
+    if body.hour ~= nil then
+        local hour, minute = wholeNumber(body.hour, 0, 23), wholeNumber(body.minute or 0, 0, 59)
+        if not hour or not minute then error('Choose a time of day') end
+        ws:setTime(hour, minute)
+    end
+    if body.blackout ~= nil then ws:setBlackout(body.blackout == true) end
+    if body.timeFrozen ~= nil then ws:setTimeFreeze(body.timeFrozen == true) end
+    if body.dynamicWeather ~= nil then ws:setDynamicWeather(body.dynamicWeather == true) end
+    return routes['GET /world']()
+end
+
+-- ---------------------------------------------------------------- whole-server events
+routes['POST /events/banner'] = function(body)
+    local title = text(body.title, 80)
+    local message = text(body.message, 240)
+    if not message or message == '' then error('Type a message first') end
+    local seconds = wholeNumber(body.seconds, 3, 900) or 10
+    TriggerClientEvent(RES .. ':client:banner', -1, (title and title ~= '') and title or 'Announcement', message, seconds, body.countdown == true)
+    return { sent = true, players = #GetPlayers() }
+end
+
+routes['POST /events/revive-all'] = function()
+    local QB = core()
+    if not QB then error('qb-core is not running') end
+    local revived = 0
+    for src in pairs(QB.Functions.GetQBPlayers()) do
+        TriggerClientEvent('hospital:client:Revive', src)
+        revived = revived + 1
+    end
+    return { revived = revived }
+end
+
+local function clearEmptyVehicles()
+    local removed = 0
+    for _, vehicle in ipairs(GetAllVehicles()) do
+        local occupied = false
+        for seat = -1, 6 do
+            local ped = GetPedInVehicleSeat(vehicle, seat)
+            if ped and ped ~= 0 then occupied = true break end
+        end
+        if not occupied and DoesEntityExist(vehicle) then
+            DeleteEntity(vehicle)
+            removed = removed + 1
+        end
+    end
+    return removed
+end
+
+routes['POST /events/clear-vehicles'] = function(body)
+    local seconds = wholeNumber(body.seconds, 0, 600) or 0
+    if seconds == 0 then return { removed = clearEmptyVehicles() } end
+    TriggerClientEvent(RES .. ':client:banner', -1, 'Clearing the streets', 'Empty cars will be removed in', seconds, true)
+    SetTimeout(seconds * 1000, function()
+        local removed = clearEmptyVehicles()
+        TriggerClientEvent('QBCore:Notify', -1, ('%d empty cars were cleared from the streets'):format(removed), 'primary', 7000)
+    end)
+    return { scheduled = seconds }
+end
+
+-- ---------------------------------------------------------------- whitelist
+-- Kept inside the server, so it still works after a restart even if CityHQ is closed.
+local whitelist = { enabled = false, ids = {} }
+do
+    local raw = GetResourceKvpString('cityhq:whitelist')
+    local ok, saved = pcall(json.decode, raw or '')
+    if ok and type(saved) == 'table' then
+        whitelist.enabled = saved.enabled == true
+        whitelist.ids = type(saved.ids) == 'table' and saved.ids or {}
+    end
+end
+
+routes['GET /whitelist'] = function() return whitelist end
+
+routes['POST /whitelist'] = function(body)
+    local ids = {}
+    for _, id in ipairs(type(body.ids) == 'table' and body.ids or {}) do
+        if validId(id) then ids[#ids + 1] = id end
+    end
+    whitelist = { enabled = body.enabled == true, ids = ids }
+    SetResourceKvp('cityhq:whitelist', json.encode(whitelist))
+    return whitelist
+end
+
+AddEventHandler('playerConnecting', function(_, _, deferrals)
+    if not whitelist.enabled then return end
+    local src = source
+    deferrals.defer()
+    Wait(0)
+    local allowed = {}
+    for _, id in ipairs(whitelist.ids) do allowed[id] = true end
+    for _, id in ipairs(GetPlayerIdentifiers(src)) do
+        if allowed[id] then return deferrals.done() end
+    end
+    if IsPlayerAceAllowed(src, 'command') then return deferrals.done() end
+    deferrals.done('This server is invite-only right now. Ask an admin to add you to the whitelist.')
+end)
+
+-- ---------------------------------------------------------------- admins
+-- server.cfg holds the lasting list; this applies a change right away without a restart.
+routes['POST /admins/apply'] = function(body)
+    local id, role = body.identifier, body.role
+    if not validId(id) then error('That is not a valid player ID') end
+    if not ROLES[role] then error('Unknown role') end
+    ExecuteCommand(('%s identifier.%s %s'):format(body.remove and 'remove_principal' or 'add_principal', id, role))
+    local QB = core()
+    for _, sid in ipairs(GetPlayers()) do
+        for _, pid in ipairs(GetPlayerIdentifiers(sid)) do
+            if pid == id and QB and QB.Commands and QB.Commands.Refresh then
+                pcall(QB.Commands.Refresh, tonumber(sid))
+            end
+        end
+    end
+    return { applied = true }
+end
+
+routes['GET /identifiers'] = function()
+    local list = {}
+    for _, sid in ipairs(GetPlayers()) do
+        list[#list + 1] = { id = tonumber(sid), name = GetPlayerName(sid), identifiers = GetPlayerIdentifiers(sid) }
+    end
+    return list
 end
 
 routes['GET /bans'] = function()

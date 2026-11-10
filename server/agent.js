@@ -27,6 +27,9 @@ export async function agentRequest(route, { method = 'GET', body, timeoutMs = 40
     if (res.status === 404 && !payload) {
       throw new HttpError(503, 'The server is running but the qb-control resource is not started yet.');
     }
+    if (res.status === 404 && payload?.error === 'Not found') {
+      throw new HttpError(409, 'This needs the newer CityHQ helper, which loads when the server restarts. Restart the server once to turn it on.');
+    }
     throw new HttpError(res.status === 401 ? 503 : 400, payload?.error || `The server replied with an error (${res.status})`);
   }
   return payload.data;
@@ -51,8 +54,9 @@ export async function installAgent() {
 
   const sameVersion = versionOf(target) === versionOf(AGENT_SOURCE);
   const sameToken = existsSync(tokenFile) && readFileSync(tokenFile, 'utf8').trim() === token;
-  const sameCode = sameVersion && existsSync(path.join(target, 'server.lua'))
-    && readFileSync(path.join(target, 'server.lua'), 'utf8') === readFileSync(path.join(AGENT_SOURCE, 'server.lua'), 'utf8');
+  const sameFile = (name) => existsSync(path.join(target, name))
+    && readFileSync(path.join(target, name), 'utf8') === readFileSync(path.join(AGENT_SOURCE, name), 'utf8');
+  const sameCode = sameVersion && sameFile('server.lua') && sameFile('client.lua');
   if (sameCode && sameToken) return { installed: true, changed: false };
 
   mkdirSync(path.dirname(target), { recursive: true });

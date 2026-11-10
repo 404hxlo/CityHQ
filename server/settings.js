@@ -37,6 +37,12 @@ export function getSettings() {
     restarts: { ...AUTOMATION_DEFAULTS.restarts, ...loaded.restarts },
     autoStartServer: loaded.autoStartServer ?? AUTOMATION_DEFAULTS.autoStartServer,
     autoRecover: loaded.autoRecover ?? AUTOMATION_DEFAULTS.autoRecover,
+    // Who may join while the whitelist is on: [{ id: 'license:...', name }]. Admins always may.
+    whitelist: {
+      enabled: Boolean(loaded.whitelist?.enabled),
+      entries: Array.isArray(loaded.whitelist?.entries) ? loaded.whitelist.entries : [],
+    },
+    greetingName: typeof loaded.greetingName === 'string' ? loaded.greetingName.slice(0, 40) : '',
   };
   save();
   return cache;

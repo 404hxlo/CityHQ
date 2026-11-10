@@ -32,6 +32,20 @@ export function openAddResource(url: string) {
   else window.location.hash = 'resources';
 }
 
+let playerTarget: number | null = null;
+
+export function openPlayer(id: number) {
+  playerTarget = id;
+  if (window.location.hash === '#players') window.dispatchEvent(new Event('qbc-players-target'));
+  else window.location.hash = 'players';
+}
+
+export function takePlayerTarget() {
+  const value = playerTarget;
+  playerTarget = null;
+  return value;
+}
+
 export function takeResourceTargets() {
   const value = { name: resourceTarget, addUrl: addResourceUrl };
   resourceTarget = null;

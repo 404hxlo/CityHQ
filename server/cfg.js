@@ -80,6 +80,9 @@ function withBlock(text, mutate) {
 /** Adds the app's block (agent permission and start line) when it is not there yet. */
 export const ensureManagedBlock = (text) => withBlock(text);
 
+/** Changes the lines inside the app's block; mutate gets the lines and may change them in place. */
+export const editManagedBlock = (text, mutate) => withBlock(text, mutate);
+
 export function addBootLine(text, name) {
   const off = `${OFF_MARKER}ensure ${name}`;
   const eol = EOL(text);

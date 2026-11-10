@@ -3,6 +3,7 @@ import {
 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { api, SERVER_SCOPE, type Settings } from '../api';
+import { AdminsCard } from '../Admins';
 import { SettingsEditor } from '../SettingsEditor';
 import {
   Button, Notice, Spinner, Toggle, useAction, useConfirm, usePoll,
@@ -199,6 +200,7 @@ export function SettingsPage({ online, onSignOut }: { online: boolean; onSignOut
 
       <section className="card">
         <h3 className="card-title"><Server size={16} />Server settings (server.cfg)</h3>
+        <AdminsCard />
         <p className="muted-note">Your license key and database password stay hidden here and are kept when you save.</p>
         <SettingsEditor
           scope={SERVER_SCOPE}

@@ -1,5 +1,7 @@
 // The desktop window. The server runs on its own, so closing this never stops the game.
-import { app, BrowserWindow, dialog, Menu, nativeImage, session, shell, Tray } from 'electron';
+import {
+  app, BrowserWindow, dialog, Menu, nativeImage, screen, session, shell, Tray,
+} from 'electron';
 import { appendFileSync, mkdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -54,20 +56,38 @@ function showWindow() {
   return undefined;
 }
 
+/**
+ * The window must fit the screen it opens on. Laptops with display scaling (200% on a
+ * 2560 x 1600 screen works like 1280 x 800) are smaller than the size the app prefers.
+ */
+function windowSize() {
+  const area = screen.getPrimaryDisplay().workAreaSize;
+  const width = Math.min(1320, area.width);
+  const height = Math.min(860, area.height);
+  // On a small screen, use all of it rather than leaving a sliver of desktop around the edges.
+  const fill = area.width <= 1440 || area.height <= 900;
+  return {
+    width, height, fill, minWidth: Math.min(420, area.width), minHeight: Math.min(560, area.height),
+  };
+}
+
 function createWindow() {
+  const size = windowSize();
   win = new BrowserWindow({
-    width: 1320,
-    height: 860,
-    minWidth: 420,
-    minHeight: 600,
+    width: size.width,
+    height: size.height,
+    minWidth: size.minWidth,
+    minHeight: size.minHeight,
+    center: true,
     title: 'CityHQ',
-    backgroundColor: '#0f1113',
+    backgroundColor: '#0a0b11',
     autoHideMenuBar: true,
     icon: iconPath,
     show: false,
     webPreferences: { contextIsolation: true, sandbox: true, nodeIntegration: false },
   });
   win.once('ready-to-show', () => {
+    if (size.fill && !isSecondary()) win.maximize();
     if (startedHidden()) return;
     // A test copy must never pull focus away from someone playing the game.
     if (isSecondary()) win.showInactive();
