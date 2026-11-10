@@ -35,18 +35,18 @@ const theme = EditorView.theme({
   '.cm-activeLineGutter': { backgroundColor: 'transparent', color: 'var(--ink-soft)' },
   '.cm-cursor': { borderLeftColor: 'var(--accent)', borderLeftWidth: '2px' },
   '&.cm-focused': { outline: 'none' },
-  '.cm-selectionBackground, &.cm-focused .cm-selectionBackground, ::selection': { backgroundColor: 'rgba(255,138,61,0.26) !important' },
-  '.cm-matchingBracket': { backgroundColor: 'rgba(255,138,61,0.22)', outline: 'none' },
+  '.cm-selectionBackground, &.cm-focused .cm-selectionBackground, ::selection': { backgroundColor: 'rgba(128,102,168,0.42) !important' },
+  '.cm-matchingBracket': { backgroundColor: 'rgba(128,102,168,0.38)', outline: 'none' },
   '.cm-selectionMatch': { backgroundColor: 'rgba(255,255,255,0.09)' },
   '.cm-panels': { backgroundColor: 'var(--raised)', color: 'var(--ink)', borderColor: 'var(--line)' },
   '.cm-panels input, .cm-panels button': { fontFamily: 'inherit', fontSize: '13px' },
   '.cm-textfield': { backgroundColor: 'var(--bg)', border: '1px solid var(--line-strong)', color: 'var(--ink)', borderRadius: '6px' },
   '.cm-button': { backgroundImage: 'none', backgroundColor: 'var(--raised-2)', border: '1px solid var(--line-strong)', color: 'var(--ink)', borderRadius: '6px' },
-  '.cm-searchMatch': { backgroundColor: 'rgba(255,138,61,0.28)', outline: 'none' },
+  '.cm-searchMatch': { backgroundColor: 'rgba(128,102,168,0.45)', outline: 'none' },
 }, { dark: true });
 
 const highlight = HighlightStyle.define([
-  { tag: [t.keyword, t.controlKeyword, t.moduleKeyword, t.operatorKeyword], color: '#ff9d5c' },
+  { tag: [t.keyword, t.controlKeyword, t.moduleKeyword, t.operatorKeyword], color: '#a98bf5' },
   { tag: [t.string, t.special(t.string)], color: '#a9d98a' },
   { tag: [t.number, t.bool, t.null, t.atom], color: '#7cc7ff' },
   { tag: [t.comment, t.lineComment, t.blockComment], color: '#6e7780', fontStyle: 'italic' },

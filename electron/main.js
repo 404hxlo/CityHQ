@@ -1,6 +1,6 @@
 // The desktop window. The server runs on its own, so closing this never stops the game.
 import { app, BrowserWindow, dialog, Menu, nativeImage, session, shell, Tray } from 'electron';
-import { appendFileSync, mkdirSync } from 'node:fs';
+import { appendFileSync, mkdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { startApp, stopApp } from '../server/app.js';
@@ -101,7 +101,9 @@ function createWindow() {
 }
 
 function createTray() {
-  const image = nativeImage.createFromPath(iconPath).resize({ width: 16, height: 16 });
+  // A simpler drawing made for 16 pixels, plus a sharper one for high-resolution screens.
+  const image = nativeImage.createFromPath(path.join(here, '..', 'build', 'tray-16.png'));
+  image.addRepresentation({ scaleFactor: 2, buffer: readFileSync(path.join(here, '..', 'build', 'tray-32.png')) });
   tray = new Tray(image);
   tray.setToolTip('CityHQ');
   tray.setContextMenu(Menu.buildFromTemplate([

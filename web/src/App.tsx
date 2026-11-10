@@ -49,7 +49,7 @@ function Login({ onDone, startError }: { onDone: () => void; startError: string 
   return (
     <main className="login">
       <form className="login-card" onSubmit={submit}>
-        <img src="/icon-192.png" alt="" width={56} height={56} />
+        <img src="/logo.svg" alt="" width={56} height={56} />
         <h1>CityHQ</h1>
         <p className="muted-note">Enter the passcode shown under Settings in the app on your PC, or scan its QR code.</p>
         {error && <Notice kind="error">{error}</Notice>}
@@ -87,7 +87,7 @@ function Shell({ local, onSignOut }: { local: boolean; onSignOut: () => void }) 
     <div className="shell">
       <nav className="rail" aria-label="Main">
         <div className="brand">
-          <img src="/icon-192.png" alt="" width={30} height={30} />
+          <img src="/logo.svg" alt="" width={30} height={30} />
           <span>CityHQ</span>
         </div>
         <ul>
@@ -106,7 +106,7 @@ function Shell({ local, onSignOut }: { local: boolean; onSignOut: () => void }) 
       </nav>
 
       <div className="topbar">
-        <img src="/icon-192.png" alt="" width={26} height={26} />
+        <img src="/logo.svg" alt="" width={26} height={26} />
         <span className="topbar-name">{overview.data?.serverName || 'CityHQ'}</span>
         {state && <ServerBadge state={state} />}
       </div>
