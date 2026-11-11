@@ -10,6 +10,7 @@ import { ProfileCard } from '../Profile';
 import { Term } from '../Term';
 import { startTour } from '../Tour';
 import { SettingsEditor } from '../SettingsEditor';
+import { UpdatesCard } from '../Updates';
 import {
   Button, Notice, Spinner, Toggle, useAction, useConfirm, usePoll,
 } from '../ui';
@@ -258,6 +259,8 @@ export function SettingsPage({ online, onSignOut }: { online: boolean; onSignOut
       </section>
 
       <Automation />
+
+      {data.local && <UpdatesCard />}
 
       {data.local ? <PhoneAccess settings={data} reload={refresh} /> : (
         <Notice kind="info">Phone access and the passcode can only be changed on the PC running the server.</Notice>

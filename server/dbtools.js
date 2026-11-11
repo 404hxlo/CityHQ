@@ -60,7 +60,7 @@ export function checksumFor(list, name) {
   return line ? line.trim().split(/\s+/)[0].toLowerCase() : null;
 }
 
-function sha256(file) {
+export function sha256(file) {
   return new Promise((resolve, reject) => {
     const hash = createHash('sha256');
     createReadStream(file).on('error', reject).on('data', (d) => hash.update(d)).on('end', () => resolve(hash.digest('hex')));
@@ -68,7 +68,7 @@ function sha256(file) {
 }
 
 /** Downloads with Windows' own curl, which retries through the timeouts some networks give. */
-function download(url, dest, onProgress) {
+export function download(url, dest, onProgress, what = 'the database tools') {
   return new Promise((resolve, reject) => {
     const part = `${dest}.part`;
     const child = spawn(CURL, [
@@ -83,7 +83,7 @@ function download(url, dest, onProgress) {
       clearInterval(timer);
       if (code !== 0) {
         await rm(part, { force: true }).catch(() => {});
-        reject(new HttpError(502, `Could not download the database tools: ${stderr.trim().split('\n').pop() || `curl stopped (${code})`}. Check the internet connection and try again.`));
+        reject(new HttpError(502, `Could not download ${what}: ${stderr.trim().split('\n').pop() || `curl stopped (${code})`}. Check the internet connection and try again.`));
         return;
       }
       try { await rename(part, dest); resolve(); } catch (err) { reject(err); }

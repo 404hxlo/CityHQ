@@ -99,6 +99,8 @@ export interface Overview {
   root?: string | null;
   /** CityHQ's database tools, for someone's own database: null when the server's own are used. */
   dbTools?: { ready: boolean; progress: { step: string; mb: number | null } | null } | null;
+  /** A newer CityHQ that can be installed (only sent to the PC itself). */
+  update?: { version: string } | null;
   status: null | {
     uptimeSec: number; players: number; maxClients: number; gameBuild: string; version: string;
     onesync: string; qbcore: boolean; resourcesStarted: number; resourcesTotal: number;
@@ -388,6 +390,25 @@ export const api = {
   setLan: (enabled: boolean) => request<{ lanEnabled: boolean; lanListening: boolean; errors: string[] }>('POST', '/api/settings/lan', { enabled }),
   newPasscode: () => request<{ passcode: string }>('POST', '/api/settings/passcode'),
   pairing: (url?: string) => request<{ url: string; svg: string }>('POST', '/api/settings/pairing', { url }),
+
+  updates: () => request<UpdateStatus>('GET', '/api/updates'),
+  checkUpdates: () => request<UpdateStatus>('POST', '/api/updates/check'),
+  installUpdate: () => request<UpdateStatus>('POST', '/api/updates/install'),
+  setAutoUpdate: (enabled: boolean) => request<UpdateStatus>('PUT', '/api/updates/auto', { enabled }),
 };
+
+export interface UpdateStatus {
+  current: string;
+  available: boolean;
+  latest: { version: string; notes: string; page: string; publishedAt: string | null; sizeMb: number | null } | null;
+  checking: boolean;
+  checkedAt: number | null;
+  error: string | null;
+  autoCheck: boolean;
+  /** Why this copy can't install it by itself (then it's downloaded from GitHub instead). */
+  cantInstall: string | null;
+  job: { step: string; mb: number; totalMb: number | null; error: string | null; done: boolean } | null;
+  lastLog: string | null;
+}
 
 export const SERVER_SCOPE = '__server__';

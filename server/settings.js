@@ -50,6 +50,9 @@ export function getSettings() {
       entries: Array.isArray(loaded.whitelist?.entries) ? loaded.whitelist.entries : [],
     },
     greetingName: typeof loaded.greetingName === 'string' ? loaded.greetingName.slice(0, 40) : '',
+    // Look for a new CityHQ version now and then (installing always waits for a click).
+    autoUpdateCheck: loaded.autoUpdateCheck ?? true,
+    updateAnnounced: typeof loaded.updateAnnounced === 'string' ? loaded.updateAnnounced : null,
   };
   save();
   return cache;

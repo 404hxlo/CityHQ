@@ -1445,3 +1445,53 @@ test('boot wait: there is still a hard limit, and time the PC spent asleep does 
   assert.equal(bootVerdict({ now, startedAt: 0, lastProgress: now - 1000 }), 'timeout');
   assert.equal(bootVerdict({ now, startedAt: 0, lastProgress: now - 1000, asleepMs: 30 * 60000 }), 'wait', 'a 30-minute sleep during the boot is not held against it');
 });
+// Updates: version order, the notes CityHQ shows, and what it takes from GitHub's answer.
+test('isNewer compares plain version numbers only', async () => {
+  const { isNewer } = await import('./updates.js');
+  assert.equal(isNewer('1.2.0', '1.1.3'), true);
+  assert.equal(isNewer('v1.10.0', '1.9.9'), true);
+  assert.equal(isNewer('1.1.3', '1.1.3'), false);
+  assert.equal(isNewer('1.1.2', '1.1.3'), false);
+  assert.equal(isNewer('2.0.0-beta.1', '1.0.0'), false);
+  assert.equal(isNewer('garbage', '1.0.0'), false);
+});
+
+test('whatsNew keeps only the What\'s new section of the release notes', async () => {
+  const { whatsNew } = await import('./updates.js');
+  const body = "## What's new\r\n\r\n- Updates itself.\r\n- Checks downloads.\r\n\r\n## Download\r\n\r\nDownload the zip.";
+  assert.equal(whatsNew(body), '- Updates itself.\n- Checks downloads.');
+  assert.equal(whatsNew("## What's new\n\n- Only this."), '- Only this.');
+  assert.equal(whatsNew('## Download\n\nNo notes.'), '');
+  assert.equal(whatsNew(null), '');
+});
+
+test('parseRelease takes the version, the zip and its checksum, and skips anything unusable', async () => {
+  const { parseRelease } = await import('./updates.js');
+  const hex = 'a'.repeat(64);
+  const release = parseRelease({
+    tag_name: 'v1.2.0', html_url: 'https://github.com/404hxlo/CityHQ/releases/tag/v1.2.0', body: "## What's new\n\n- New.\n\n## Download\nx", published_at: '2026-11-11T00:00:00Z',
+    assets: [
+      { name: 'CityHQ-windows.zip', browser_download_url: 'https://github.com/x/CityHQ-windows.zip', size: 104857600, digest: `sha256:${hex.toUpperCase()}` },
+      { name: 'CityHQ-windows.zip.sha256', browser_download_url: 'https://github.com/x/CityHQ-windows.zip.sha256' },
+    ],
+  });
+  assert.equal(release.version, '1.2.0');
+  assert.equal(release.notes, '- New.');
+  assert.equal(release.zip.digest, hex);
+  assert.equal(release.zip.size, 104857600);
+  assert.equal(release.sumsUrl, 'https://github.com/x/CityHQ-windows.zip.sha256');
+  // A page link that isn't GitHub's falls back to the releases page.
+  assert.equal(parseRelease({ tag_name: 'v1.2.0', html_url: 'https://evil.example/x', assets: [] }).page, 'https://github.com/404hxlo/CityHQ/releases/latest');
+  assert.equal(parseRelease({ tag_name: 'v1.2.0', assets: [] }).zip, null);
+  assert.equal(parseRelease({ tag_name: 'v1.3.0', prerelease: true }), null);
+  assert.equal(parseRelease({ tag_name: 'nightly' }), null);
+  assert.equal(parseRelease(null), null);
+});
+
+test('the updater command line keeps folders with spaces in one piece, and odd folder names are refused', async () => {
+  const { helperCommandLine, unsafeForCmd } = await import('./updates.js');
+  const line = helperCommandLine(['-File', 'C:\\Users\\Sam\\AppData\\Local\\CityHQ\\updates\\update-helper.ps1', '-Install', 'D:\\my apps\\CityHQ', '-ArgsB64', 'W10=']);
+  assert.equal(line, '/d /s /c "start "" /b powershell.exe -File C:\\Users\\Sam\\AppData\\Local\\CityHQ\\updates\\update-helper.ps1 -Install "D:\\my apps\\CityHQ" -ArgsB64 "W10=""');
+  assert.equal(unsafeForCmd('D:\\100% games\\CityHQ'), true);
+  assert.equal(unsafeForCmd('D:\\Games (x86)\\CityHQ & co'), false);
+});

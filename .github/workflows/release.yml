@@ -44,9 +44,23 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Zipping the app failed.' }
           "ZIP=$zip" >> $env:GITHUB_ENV
           "{0:N0} MB" -f ((Get-Item $zip).Length / 1MB)
+          # CityHQ's updater checks the download against this before installing it.
+          $hash = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLower()
+          [IO.File]::WriteAllText("$PWD\$zip.sha256", "$hash  $zip`n")
+
+      - name: Write the release notes
+        shell: pwsh
+        run: |
+          # "What's new" is this version's part of CHANGELOG.md; CityHQ shows it before updating.
+          $log = Get-Content CHANGELOG.md -Raw
+          $pattern = '(?ms)^## ' + [regex]::Escape($env:VERSION) + '\b[^\n]*\n(.*?)(?=^## |\z)'
+          $m = [regex]::Match($log, $pattern)
+          if (-not $m.Success -or -not $m.Groups[1].Value.Trim()) { throw "CHANGELOG.md has no section for $env:VERSION." }
+          $notes = "## What's new`n`n" + $m.Groups[1].Value.Trim() + "`n`n" + (Get-Content .github/release-notes.md -Raw)
+          [IO.File]::WriteAllText("$PWD\notes.md", $notes)
 
       - name: Publish the release
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create $env:GITHUB_REF_NAME $env:ZIP --title "CityHQ $env:VERSION" --notes-file .github/release-notes.md
+        run: gh release create $env:GITHUB_REF_NAME $env:ZIP "$env:ZIP.sha256" --title "CityHQ $env:VERSION" --notes-file notes.md

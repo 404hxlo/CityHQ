@@ -16,6 +16,7 @@ import { Players } from './pages/Players';
 import { Resources } from './pages/Resources';
 import { SettingsPage } from './pages/SettingsPage';
 import { Welcome } from './pages/Welcome';
+import { UpdateNotice } from './Updates';
 import {
   Button, ConfirmProvider, Notice, ServerBadge, Spinner, ToastProvider, usePoll,
 } from './ui';
@@ -159,6 +160,7 @@ function Shell({ local, onSignOut }: { local: boolean; onSignOut: () => void }) 
             </div>
           </header>
         )}
+        {local && overview.data?.update && page !== 'console' && page !== 'files' && <UpdateNotice version={overview.data.update.version} />}
         {page === 'overview' && <Overview data={overview.data} error={overview.error} refresh={overview.refresh} local={local} goTo={goTo} />}
         {page === 'health' && <Health />}
         {page === 'city' && <City online={online} helperOutdated={Boolean(overview.data?.helperOutdated)} />}

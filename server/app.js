@@ -72,6 +72,9 @@ import {
   refreshResources, removeResource, resourceAction, restoreFromTrash, runSql, setBoot,
 } from './resources.js';
 import { getSettings, regeneratePasscode, updateSettings } from './settings.js';
+import {
+  checkForUpdate, installUpdate, setAutoUpdateCheck, startUpdateChecks, stopUpdateChecks, updateNotice, updateStatus,
+} from './updates.js';
 
 const handler = (fn) => async (req, res) => {
   try {
@@ -157,6 +160,8 @@ function buildApp() {
       // Shown on "Finish setting up", so someone can tell it's the server they meant.
       root: isLocalRequest(req) ? ROOT : null,
       dbTools: MANAGED_DB ? null : { ready: dbToolsReady(), progress: dbToolsProgress() },
+      // A newer CityHQ, shown at the top of every page. Only on the PC, where it can be installed.
+      update: isLocalRequest(req) ? updateNotice() : null,
       problems: await currentProblems().catch(() => []),
       alerts: unseenAlerts().slice(0, 5),
       schedule: {
@@ -600,6 +605,12 @@ function buildApp() {
   api.get('/history', handler(() => listChanges()));
   api.post('/history/:id/undo', handler((req) => undoChange(req.params.id)));
 
+  // Updates to CityHQ itself. Installing closes and reopens the app; the game server keeps running.
+  api.get('/updates', localOnly, handler(() => updateStatus()));
+  api.post('/updates/check', localOnly, handler(() => checkForUpdate()));
+  api.post('/updates/install', localOnly, handler(() => installUpdate()));
+  api.put('/updates/auto', localOnly, json, handler((req) => setAutoUpdateCheck(Boolean(req.body?.enabled))));
+
   // Settings
   api.get('/settings', handler((req) => {
     const local = isLocalRequest(req);
@@ -700,6 +711,7 @@ export async function startApp() {
   // No server chosen yet: only the Welcome screen runs. Nothing to watch, back up or restart.
   if (!ROOT_FOUND) {
     mainServer = await listen(appInstance, '127.0.0.1');
+    startUpdateChecks();
     return { port: APP_PORT, url: `http://127.0.0.1:${APP_PORT}` };
   }
   // If the whole folder was copied to another drive or PC, point its settings at the new place.
@@ -716,6 +728,7 @@ export async function startApp() {
   startScheduler();
   startStats();
   startAwakeWatch();
+  startUpdateChecks();
   // Someone's own database needs CityHQ's database tools; fetch them if a first try didn't finish.
   if (!MANAGED_DB && !dbToolsReady()) {
     installDbTools().catch((err) => recordEvent({ level: 'alert', title: 'CityHQ could not get its database tools', detail: `${err.message} Backups and SQL files need them. CityHQ tries again the next time it starts.` }));
@@ -729,6 +742,7 @@ export async function stopApp() {
   stopAwakeWatch();
   stopStatusPolling();
   stopProbe();
+  stopUpdateChecks();
   await Promise.all([mainServer, ...lanServers].filter(Boolean).map((s) => new Promise((r) => {
     s.close(() => r());
     s.closeAllConnections?.();

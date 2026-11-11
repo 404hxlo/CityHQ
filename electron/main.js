@@ -10,6 +10,7 @@ import { COOKIE, createSession } from '../server/auth.js';
 import { isSecondary, setDesktopHooks } from '../server/desktop.js';
 import { onEvent } from '../server/events.js';
 import { APP_PORT, LOG_DIR } from '../server/paths.js';
+import { markStarted } from '../server/updates.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const iconPath = path.join(here, '..', 'build', 'icon.png');
@@ -148,6 +149,17 @@ function setKeepAwake(mode) {
   awakeKind = mode;
 }
 
+/** Closes CityHQ for good, and with restart, opens it again. */
+function leave(restart) {
+  quitting = true;
+  if (restart) app.relaunch();
+  // Stop the process watcher, timers and web server first; a running PowerShell watcher can
+  // keep the old copy from exiting, and then the new one never takes its place.
+  const exit = () => { app.exit(0); setTimeout(() => process.exit(0), 1500); };
+  setTimeout(exit, 5000);
+  stopApp().catch(() => {}).finally(exit);
+}
+
 function installDesktopHooks() {
   const loginOptions = { path: process.execPath, args: [AUTOSTART_FLAG] };
   setDesktopHooks({
@@ -162,15 +174,13 @@ function installDesktopHooks() {
     },
     openFolder: (folder) => shell.openPath(folder),
     // Picking a server on the Welcome screen: every path is read once at start, so start again.
-    relaunch() {
-      quitting = true;
-      app.relaunch();
-      // Stop the process watcher, timers and web server first; a running PowerShell watcher can
-      // keep the old copy from exiting, and then the new one never takes its place.
-      const exit = () => { app.exit(0); setTimeout(() => process.exit(0), 1500); };
-      setTimeout(exit, 5000);
-      stopApp().catch(() => {}).finally(exit);
-    },
+    relaunch: () => leave(true),
+    // Installing an update: the updater opens the new version once this one has closed.
+    exit: () => leave(false),
+    // Only the ready-made app can replace its own folder; a copy run from the source code can't.
+    installFolder: () => (app.isPackaged ? path.dirname(process.execPath) : null),
+    // Options to open the new version with. Not --autostart: someone just pressed Update.
+    launchArgs: () => process.argv.slice(1).filter((a) => a !== AUTOSTART_FLAG),
     async pickInstallSource(type) {
       const options = type === 'server'
         ? { title: 'Choose your server folder (the one with FXServer.exe, or the folder above it)', properties: ['openDirectory'] }
@@ -221,5 +231,7 @@ if (!app.requestSingleInstanceLock()) {
     await signIn();
     createTray();
     createWindow();
+    // Opened by the updater: tell it this version works, so it keeps it.
+    win?.webContents.once('did-finish-load', markStarted);
   });
 }
