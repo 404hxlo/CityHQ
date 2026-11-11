@@ -483,6 +483,16 @@ test('welcome: servers are found in the usual places, and start scripts and PINs
   assert.equal(suggestNewFolder(() => false), 'C:\\QBCore-Server');
 });
 
+test('your real bug: an undone fix in "What changed" carries the time it was undone', async () => {
+  const { listChanges, registerFixLog } = await import('./history.js');
+  registerFixLog({
+    list: async () => [{ id: '9', at: 1000, label: 'Switch that line off', message: 'done', title: 'a problem', undone: true, undoneAt: 2000, undoable: false }],
+    undo: async () => ({}),
+  });
+  const fix = (await listChanges()).find((c) => c.id === 'fix:9');
+  assert.equal(fix.undoneAt, 2000, 'without it the page showed "undone Invalid Date"');
+});
+
 test('database tools: the download is checked against MariaDB\'s published list', () => {
   const list = 'aaa111  mariadb-12.3.3-winx64.msi\nBBB222 *mariadb-12.3.3-winx64.zip\n';
   assert.equal(checksumFor(list, 'mariadb-12.3.3-winx64.zip'), 'bbb222');

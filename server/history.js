@@ -48,7 +48,7 @@ export async function listChanges(limit = 100) {
   await writing;
   const own = (await readAll()).map(({ undo, ...rest }) => ({ ...rest, undoable: Boolean(undo && undoers.has(undo.type)) && !rest.undone }));
   const fixes = (await fixLog.list().catch(() => [])).map((f) => ({
-    id: `fix:${f.id}`, at: f.at, kind: 'fix', title: f.label, detail: `${f.message} (${f.title})`, undoHint: 'This puts it back the way it was before the fix.', undone: f.undone, undoable: f.undoable,
+    id: `fix:${f.id}`, at: f.at, kind: 'fix', title: f.label, detail: `${f.message} (${f.title})`, undoHint: 'This puts it back the way it was before the fix.', undone: f.undone, undoneAt: f.undoneAt, undoable: f.undoable,
   }));
   return [...own, ...fixes].sort((a, b) => b.at - a.at).slice(0, limit);
 }

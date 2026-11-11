@@ -133,7 +133,7 @@ export function RecentFixes({ onChanged }: { onChanged?: () => void }) {
             {f.undone ? <Undo2 size={15} /> : <CheckCircle2 size={15} />}
             <div className="recent-fix-text">
               <strong>{f.label}</strong>
-              <span>{f.undone ? `Undone ${formatWhen(f.undoneAt as number)}` : f.message}</span>
+              <span>{f.undone ? `Undone${f.undoneAt ? ` ${formatWhen(f.undoneAt)}` : ''}` : f.message}</span>
               <span className="muted-note">{f.title} · {formatWhen(f.at)}</span>
             </div>
             {f.undoable && (

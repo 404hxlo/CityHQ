@@ -50,7 +50,7 @@ function ChangeHistory() {
               <div className="change-text">
                 <strong>{c.title}</strong>
                 {c.detail && <span className="muted-note">{c.detail}</span>}
-                <span className="muted-note">{formatWhen(c.at)}{c.undone ? ` · undone ${formatWhen(c.undoneAt as number)}` : ''}</span>
+                <span className="muted-note">{formatWhen(c.at)}{c.undone ? ` · undone${c.undoneAt ? ` ${formatWhen(c.undoneAt)}` : ''}` : ''}</span>
               </div>
               {c.undoable && <Button variant="ghost" icon={<Undo2 size={15} />} busy={busy === c.id} onClick={() => undo(c)}>Undo</Button>}
             </li>
