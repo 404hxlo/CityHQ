@@ -28,7 +28,7 @@ export function readSavedRoot(file = POINTER_FILE) {
 
 /**
  * Finds the server folder. When the app lives inside one (<folder>\control-app\...), that folder,
- * found by looking upwards for the settings file setup writes or FiveM's server. Otherwise the one
+ * found by looking upwards for the settings file setup writes. Otherwise the one
  * chosen on the Welcome screen. Set QBC_ROOT to point somewhere else.
  */
 export function findRoot(from = APP_DIR, env = process.env.QBC_ROOT, saved = readSavedRoot()) {
@@ -36,11 +36,15 @@ export function findRoot(from = APP_DIR, env = process.env.QBC_ROOT, saved = rea
   return folderAbove(from) || saved || null;
 }
 
-/** The server folder the app is installed inside, looking upwards, or null. */
-function folderAbove(from) {
+/**
+ * The server folder the app is installed inside, looking upwards, or null. Only CityHQ's own
+ * settings file counts: a downloaded copy unzipped in Downloads once took a folder above it that
+ * merely had server\FXServer.exe for its server, and skipped the Welcome screen.
+ */
+export function folderAbove(from) {
   let dir = from;
   for (let i = 0; i < 8; i++) {
-    if (existsSync(path.join(dir, CONFIG_NAME)) || existsSync(path.join(dir, 'server', 'FXServer.exe'))) return dir;
+    if (existsSync(path.join(dir, CONFIG_NAME))) return dir;
     const up = path.dirname(dir);
     if (up === dir) break;
     dir = up;

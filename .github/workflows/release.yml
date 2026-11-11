@@ -36,7 +36,8 @@ jobs:
       - name: Zip the app
         shell: pwsh
         run: |
-          $zip = "CityHQ-$env:VERSION-windows.zip"
+          # Always the same name, so releases/latest/download/CityHQ-windows.zip gets the newest one.
+          $zip = "CityHQ-windows.zip"
           # Windows' own tar writes a normal zip, with one CityHQ folder inside.
           Rename-Item release\CityHQ-win32-x64 CityHQ
           & "$env:SystemRoot\System32\tar.exe" -a -c -f $zip -C release CityHQ

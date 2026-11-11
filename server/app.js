@@ -142,7 +142,7 @@ function buildApp() {
   api.use(requireSession);
 
   // Overview and server power
-  api.get('/overview', handler(async () => {
+  api.get('/overview', handler(async (req) => {
     const overview = getOverview();
     // Count the same resources the Resources page lists, not FXServer's internal ones.
     if (overview.status) {
@@ -154,6 +154,8 @@ function buildApp() {
       ...overview,
       folderFound: ROOT_FOUND,
       rootSource: ROOT_SOURCE,
+      // Shown on "Finish setting up", so someone can tell it's the server they meant.
+      root: isLocalRequest(req) ? ROOT : null,
       dbTools: MANAGED_DB ? null : { ready: dbToolsReady(), progress: dbToolsProgress() },
       problems: await currentProblems().catch(() => []),
       alerts: unseenAlerts().slice(0, 5),

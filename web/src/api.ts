@@ -95,6 +95,8 @@ export interface Overview {
   databasePort?: number | null;
   /** How the server folder was found; 'saved' means it was chosen on the Welcome screen. */
   rootSource?: 'folder' | 'saved' | 'env' | null;
+  /** The server folder CityHQ manages (only sent to the PC itself). */
+  root?: string | null;
   /** CityHQ's database tools, for someone's own database: null when the server's own are used. */
   dbTools?: { ready: boolean; progress: { step: string; mb: number | null } | null } | null;
   status: null | {

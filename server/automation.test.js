@@ -274,6 +274,24 @@ test('the server folder is found from wherever the app is installed', () => {
   assert.equal(findRoot('C:\\Windows\\System32', '', 'E:\\FXServer'), 'E:\\FXServer');
 });
 
+test('your real problem: a copy unzipped under a folder that has server\\FXServer.exe still shows the Welcome screen', () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'cityhq-walk-'));
+  try {
+    // Someone's FiveM server sits at <drive>\server, and CityHQ was unzipped in Downloads below it.
+    mkdirSync(path.join(root, 'server'), { recursive: true });
+    writeFileSync(path.join(root, 'server', 'FXServer.exe'), '');
+    const app = path.join(root, 'Users', 'me', 'Downloads', 'CityHQ-windows', 'CityHQ', 'resources', 'app');
+    mkdirSync(app, { recursive: true });
+    assert.equal(findRoot(app, '', null), null, 'FXServer.exe alone isn\'t CityHQ\'s server folder');
+    assert.equal(findRoot(app, '', 'E:\\Chosen'), 'E:\\Chosen', 'so the Welcome screen\'s choice is used');
+    // A folder setup made (or the Welcome screen connected) has qbcontrol.json, and that still counts.
+    writeFileSync(path.join(root, 'qbcontrol.json'), '{}');
+    assert.equal(findRoot(app, '', null), root);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 // ---- other people's servers: layouts, the Welcome screen, processes ----
 /** A made-up disk for the Welcome screen's folder reading: { 'C:\\a\\b.txt': 'text' }. */
 function fakeDisk(files) {

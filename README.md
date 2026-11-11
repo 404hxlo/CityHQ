@@ -8,11 +8,17 @@ of txAdmin and works from the desktop, or from a phone on the same Wi-Fi.
 
 ## Download
 
-1. Open the **[Releases](../../releases/latest)** page and download **CityHQ-…-windows.zip** (under **Assets**).
-   Don't use the green **Code** button: that's the source code, not the app.
-2. Right-click the zip, choose **Properties**, tick **Unblock** and press OK. Then choose **Extract All**.
-3. Open the **CityHQ** folder and double-click **CityHQ.exe**. If Windows says it protected your PC,
-   choose **More info**, then **Run anyway**. The app isn't code-signed, so Windows doesn't know it yet.
+### [⬇ Download CityHQ for Windows](https://github.com/404hxlo/CityHQ/releases/latest/download/CityHQ-windows.zip)
+
+That link always gets the newest version (**CityHQ-windows.zip**). Don't use GitHub's green **Code**
+button: it downloads **CityHQ-main.zip**, which is the source code and has no app in it.
+
+1. In your Downloads, right-click **CityHQ-windows.zip**, choose **Properties**, tick **Unblock** and
+   press OK. Then right-click it again and choose **Extract All**. (It won't run from inside the zip.)
+2. Open the extracted **CityHQ-windows** folder, then the **CityHQ** folder inside it.
+3. Double-click **CityHQ**: the one with the purple HQ icon (its type is Application; Windows hides
+   the `.exe`). If Windows says it protected your PC, choose **More info**, then **Run anyway**. The
+   app isn't code-signed, so Windows doesn't know it yet.
 
 The first time, CityHQ asks: **Do you already have a FiveM server?**
 

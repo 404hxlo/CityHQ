@@ -62,12 +62,27 @@ function FinishTxAdmin({ data, local }: { data: OverviewData; local: boolean }) 
       setTimeout(() => window.open(url, '_blank'), 8000);
     }
   };
+  const confirm = useConfirm();
+  const changeServer = async () => {
+    const ok = await confirm({
+      title: 'Choose a different server?',
+      body: <p>CityHQ starts again on its Welcome screen, where you pick your server or make a new one. Nothing in this folder is changed or removed.</p>,
+      confirm: 'Choose another server',
+    });
+    if (ok) await run('forget', () => api.welcomeForget(), (r) => (r.relaunching ? 'CityHQ is starting again...' : 'Close CityHQ from its tray icon and open it again.'));
+  };
   if (!local) {
     return <Empty icon={<Boxes size={32} />} title="Your server is not set up yet">Finish txAdmin's setup on the PC that runs the server, then come back here.</Empty>;
   }
   return (
     <section className="card finish-tx">
       <h2>Finish setting up your server in txAdmin</h2>
+      {data.root && (
+        <div className="finish-root">
+          <span className="muted-note">CityHQ is using the server in <code>{data.root}</code>.</span>
+          {data.rootSource === 'saved' && <Button variant="ghost" busy={busy === 'forget'} onClick={changeServer}>Not your server? Choose another</Button>}
+        </div>
+      )}
       <p className="muted-note">txAdmin is FiveM's own server panel. It downloads QBCore and sets up the database the first time. This takes about 10 minutes, once.</p>
       <ol className="finish-steps">
         <li>
