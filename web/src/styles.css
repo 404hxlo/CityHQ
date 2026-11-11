@@ -1011,3 +1011,10 @@ button.stat-card:hover { border-color: var(--line-strong); }
 .update-notes li { margin: 2px 0; }
 .update-progress { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; font-size: 14px; }
 .update-progress progress { flex-basis: 100%; height: 8px; accent-color: var(--accent); }
+
+/* Report a problem */
+.report-input { resize: vertical; min-height: 64px; line-height: 1.45; }
+.report-preview { min-height: 300px; resize: vertical; font-family: var(--mono); font-size: 12.5px; line-height: 1.5; white-space: pre-wrap; }
+.check-row { display: flex; align-items: flex-start; gap: 9px; font-size: 13.5px; line-height: 1.45; cursor: pointer; }
+.check-row input { margin-top: 3px; accent-color: var(--accent); flex: none; }
+.welcome-foot { width: min(760px, 100%); display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 10px; }

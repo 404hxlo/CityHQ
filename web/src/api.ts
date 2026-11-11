@@ -391,6 +391,8 @@ export const api = {
   newPasscode: () => request<{ passcode: string }>('POST', '/api/settings/passcode'),
   pairing: (url?: string) => request<{ url: string; svg: string }>('POST', '/api/settings/pairing', { url }),
 
+  report: (what: string, doing: string, includeDetails: boolean) => request<{ title: string; body: string; url: string; complete: boolean }>('POST', '/api/report', { what, doing, includeDetails }),
+
   updates: () => request<UpdateStatus>('GET', '/api/updates'),
   checkUpdates: () => request<UpdateStatus>('POST', '/api/updates/check'),
   installUpdate: () => request<UpdateStatus>('POST', '/api/updates/install'),

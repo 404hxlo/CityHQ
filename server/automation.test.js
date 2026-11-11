@@ -1495,3 +1495,47 @@ test('the updater command line keeps folders with spaces in one piece, and odd f
   assert.equal(unsafeForCmd('D:\\100% games\\CityHQ'), true);
   assert.equal(unsafeForCmd('D:\\Games (x86)\\CityHQ & co'), false);
 });
+
+// Report a problem: what the privacy filter takes out, and the GitHub link.
+test('redact takes keys, passwords, player IDs, addresses and the user folder out of a report', async () => {
+  const { redact } = await import('./report.js');
+  const opts = { home: 'C:\\Users\\Sam Doe', user: 'SamDoe', root: 'D:\\Games\\MyCity' };
+  const out = redact([
+    'sv_licenseKey cfxk_abcDEF123_xyz',
+    'set mysql_connection_string "mysql://root:hunter2@127.0.0.1/qb"',
+    'server=localhost;uid=root;password=s3cret;database=qb',
+    'player license:0123456789abcdef0123456789abcdef01234567 steam:110000112345678 discord:123456789012345678',
+    'joined from 203.0.113.45 and listening on 0.0.0.0:30120 and 127.0.0.1:40125',
+    'mail sam.doe@example.com',
+    'at file:///C:/Users/Sam%20Doe/Downloads/CityHQ/resources/app/server/app.js:10:5',
+    'Error: EPERM, rename C:\\Users\\Sam Doe\\AppData\\x and D:\\Games\\MyCity\\txData\\default',
+    'logged in as SamDoe; token=abcdef; https://discord.com/api/webhooks/123/abcDEF',
+    'CityHQ 1.2.0, FXServer 38435, resource qb-core',
+  ].join('\n'), opts);
+  for (const secret of ['cfxk_abc', 'hunter2', 's3cret', '0123456789abcdef', '110000112345678', '123456789012345678', '203.0.113.45', 'sam.doe@', 'Sam Doe', 'Sam%20Doe', 'SamDoe', 'D:\\Games\\MyCity', 'webhooks/123', 'token=abcdef']) {
+    assert.ok(!out.includes(secret), `${secret} should be gone:\n${out}`);
+  }
+  for (const kept of ['127.0.0.1:40125', '0.0.0.0:30120', '%USERPROFILE%/Downloads/CityHQ', '<server folder>\\txData\\default', 'CityHQ 1.2.0, FXServer 38435, resource qb-core', 'cfxk_(hidden)', 'license:(hidden)']) {
+    assert.ok(out.includes(kept), `${kept} should stay:\n${out}`);
+  }
+});
+
+test('buildReport needs a description, keeps a short title and falls back when the link is too long', async () => {
+  const { buildReport, ISSUES_URL, MAX_URL } = await import('./report.js');
+  const keep = (s) => s;
+  assert.throws(() => buildReport({ what: '   ' }, keep), /Say what went wrong/);
+  const short = buildReport({ what: 'Backups fail\nwith an error', doing: 'Pressed Back up now', details: { lines: ['CityHQ: 1.2.0'], log: 'line one' } }, keep);
+  assert.equal(short.title, 'Backups fail');
+  assert.equal(short.complete, true);
+  assert.ok(short.url.startsWith(`${ISSUES_URL}?`));
+  const params = new URL(short.url).searchParams;
+  assert.equal(params.get('title'), 'Backups fail');
+  assert.ok(params.get('body').includes('### What I was doing\nPressed Back up now'));
+  assert.ok(params.get('body').includes('- CityHQ: 1.2.0'));
+  assert.ok(params.get('body').includes('```\nline one\n```'));
+  const long = buildReport({ what: 'x'.repeat(100), details: { lines: ['CityHQ: 1.2.0'], log: 'y'.repeat(9000) } }, keep);
+  assert.equal(long.complete, false);
+  assert.ok(long.url.length <= MAX_URL);
+  assert.ok(long.body.includes('y'.repeat(9000)));
+  assert.ok(buildReport({ what: 'z'.repeat(200) }, keep).title.endsWith('...'));
+});

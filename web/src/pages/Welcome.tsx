@@ -7,6 +7,7 @@ import {
 import {
   api, type NewServerJob, type ServerCandidate, type WelcomeInfo,
 } from '../api';
+import { ReportButton } from '../Report';
 import { Term } from '../Term';
 import {
   Button, Notice, Spinner, useAction,
@@ -347,6 +348,10 @@ export function Welcome({ local }: { local: boolean }) {
         </div>
       </header>
       {body}
+      <footer className="welcome-foot">
+        <span className="muted-note">Stuck, or something looks wrong?</span>
+        <ReportButton />
+      </footer>
     </main>
   );
 }

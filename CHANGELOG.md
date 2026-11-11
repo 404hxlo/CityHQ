@@ -2,6 +2,10 @@
 
 Each version's section is shown in the app before it updates, and on its GitHub release page.
 
+## 1.2.1
+
+- Report a problem, under Settings and on the Welcome screen: describe what went wrong, check the report, then open it on GitHub or copy it. CityHQ's version, the kind of setup and the last lines of its log can go with it, with license keys, passwords, player IDs, IP addresses and your Windows user name taken out. Nothing is sent until you choose to.
+
 ## 1.2.0
 
 - CityHQ now updates itself. It checks for a new version every few hours, shows what changed, and installs it when you press Update now. Your game server keeps running while it does.

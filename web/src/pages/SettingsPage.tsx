@@ -10,6 +10,7 @@ import { ProfileCard } from '../Profile';
 import { Term } from '../Term';
 import { startTour } from '../Tour';
 import { SettingsEditor } from '../SettingsEditor';
+import { ReportButton } from '../Report';
 import { UpdatesCard } from '../Updates';
 import {
   Button, Notice, Spinner, Toggle, useAction, useConfirm, usePoll,
@@ -250,11 +251,12 @@ export function SettingsPage({ online, onSignOut }: { online: boolean; onSignOut
       <section className="card help-card">
         <div>
           <h3 className="card-title"><BookOpen size={16} />New to running a server?</h3>
-          <p className="muted-note">The Learn page explains how it all fits together and every term in plain words. The tour shows where everything is in CityHQ.</p>
+          <p className="muted-note">The Learn page explains how it all fits together and every term in plain words. The tour shows where everything is in CityHQ. Found something wrong with CityHQ itself? Report it.</p>
         </div>
         <div className="button-row">
           <a className="btn btn-default" href="#learn"><BookOpen size={15} /><span>Learn the basics</span></a>
           <Button icon={<Compass size={15} />} onClick={startTour}>Take the tour</Button>
+          <ReportButton />
         </div>
       </section>
 

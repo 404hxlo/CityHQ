@@ -71,6 +71,7 @@ import {
   activateInstalled, ensureCfgBlock, getInstallStatus, installFromGithub, installFromLocalPath, installFromUpload, isValidName, listResources, listSqlFiles, listTrash,
   refreshResources, removeResource, resourceAction, restoreFromTrash, runSql, setBoot,
 } from './resources.js';
+import { buildReport, technicalDetails } from './report.js';
 import { getSettings, regeneratePasscode, updateSettings } from './settings.js';
 import {
   checkForUpdate, installUpdate, setAutoUpdateCheck, startUpdateChecks, stopUpdateChecks, updateNotice, updateStatus,
@@ -604,6 +605,14 @@ function buildApp() {
   });
   api.get('/history', handler(() => listChanges()));
   api.post('/history/:id/undo', handler((req) => undoChange(req.params.id)));
+
+  // Report a problem: built here with private details taken out; the person opens or copies it.
+  api.post('/report', json, handler(async (req) => {
+    const problems = req.body?.includeDetails ? (await currentProblems().catch(() => [])).map((p) => p.title).filter(Boolean) : [];
+    return buildReport({
+      what: req.body?.what, doing: req.body?.doing, details: req.body?.includeDetails ? technicalDetails({ problems }) : null,
+    });
+  }));
 
   // Updates to CityHQ itself. Installing closes and reopens the app; the game server keeps running.
   api.get('/updates', localOnly, handler(() => updateStatus()));
