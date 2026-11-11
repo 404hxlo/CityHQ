@@ -434,10 +434,14 @@ test('welcome: a server CityHQ\'s setup made is recognised as its own', () => {
     'D:\\QBCore-Server\\qbcontrol.json': JSON.stringify({ gamePort: 30121, txAdminPort: 40120, databasePort: 3308 }),
     'D:\\QBCore-Server\\server\\FXServer.exe': '',
     'D:\\QBCore-Server\\db\\mariadb\\bin\\mariadbd.exe': '',
+    // Your real layout: txAdmin 8 keeps admins.json at the top of txData, not in the profile.
+    'D:\\QBCore-Server\\txData\\admins.json': '[]',
     'D:\\QBCore-Server\\txData\\default\\config.json': JSON.stringify({ server: { dataPath: 'D:/QBCore-Server/txData/Q.base/' } }),
     'D:\\QBCore-Server\\txData\\Q.base\\server.cfg': 'set mysql_connection_string "mysql://root@127.0.0.1:3308/q"\nensure qb-core\n',
   }));
   assert.equal(r.cityhqMade, true);
+  assert.equal(r.root, 'D:\\QBCore-Server');
+  assert.equal(r.txDataDir, 'D:\\QBCore-Server\\txData');
   assert.equal(r.gamePort, 30121, 'CityHQ forces its own game port, so server.cfg\'s line isn\'t needed');
   assert.equal(r.database.managed, true);
   assert.deepEqual(r.problems, []);

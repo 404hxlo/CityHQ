@@ -1,7 +1,7 @@
 {
   "name": "cityhq",
   "productName": "CityHQ",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "Desktop and phone dashboard for a local QBCore / txAdmin server",
   "private": true,
   "type": "module",

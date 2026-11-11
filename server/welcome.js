@@ -26,9 +26,12 @@ const same = (a, b) => path.resolve(a).toLowerCase() === path.resolve(b).toLower
 const inside = (child, parent) => path.resolve(child).toLowerCase().startsWith(`${path.resolve(parent).toLowerCase()}\\`);
 const problem = (level, text) => ({ level, text });
 
-/** txAdmin's data folders keep one folder per profile, each with its own config.json. */
+/**
+ * txAdmin's data folders keep one folder per profile, each with its own config.json. (txAdmin 8
+ * keeps admins.json at the top of txData itself, so admins.json alone doesn't make a profile.)
+ */
 function profilesIn(txData, io) {
-  return tryOr(() => io.dirs(txData), []).filter((d) => io.exists(path.join(txData, d, 'config.json')) || io.exists(path.join(txData, d, 'admins.json')));
+  return tryOr(() => io.dirs(txData), []).filter((d) => io.exists(path.join(txData, d, 'config.json')));
 }
 
 /** The txAdmin port a start script sets (TXHOST_TXA_PORT=40120, or the older +set txAdminPort 40120). */
