@@ -13,6 +13,9 @@ const AUTOMATION_DEFAULTS = {
   restarts: { enabled: false, times: ['06:00'] },
   autoStartServer: false,
   autoRecover: true,
+  // Ask Windows not to sleep while the server runs. On battery, Modern Standby laptops only stay
+  // awake with the screen on, which drains the battery, so that part is a separate choice.
+  keepAwake: { enabled: true, screenOnBattery: false },
 };
 
 let cache = null;
@@ -37,6 +40,10 @@ export function getSettings() {
     restarts: { ...AUTOMATION_DEFAULTS.restarts, ...loaded.restarts },
     autoStartServer: loaded.autoStartServer ?? AUTOMATION_DEFAULTS.autoStartServer,
     autoRecover: loaded.autoRecover ?? AUTOMATION_DEFAULTS.autoRecover,
+    keepAwake: {
+      enabled: loaded.keepAwake?.enabled ?? AUTOMATION_DEFAULTS.keepAwake.enabled,
+      screenOnBattery: loaded.keepAwake?.screenOnBattery ?? AUTOMATION_DEFAULTS.keepAwake.screenOnBattery,
+    },
     // Who may join while the whitelist is on: [{ id: 'license:...', name }]. Admins always may.
     whitelist: {
       enabled: Boolean(loaded.whitelist?.enabled),

@@ -115,11 +115,14 @@ function lastConsoleError() {
 }
 
 /** Why txAdmin closed during startup, as plainly as can be told. */
-export async function whyStartFailed(startedAt, { closed, boxText }) {
+export async function whyStartFailed(startedAt, { closed, boxText, stalledMs = 0 }) {
   const block = await windowsBlock(startedAt);
   if (block) return blockMessage(block);
   if (boxText) return `The server stopped on a fatal error while starting: ${boxText}`;
-  if (!closed) return 'The server did not come online in 3 minutes. Check the Console page.';
+  if (!closed && stalledMs) {
+    return `The server stopped making progress while starting: nothing new in its log for ${Math.round(stalledMs / 60000)} minutes. The Health page's restart list shows what it was loading; the Console page shows the last lines.`;
+  }
+  if (!closed) return `The server still wasn't online after ${Math.round((Date.now() - startedAt) / 60000)} minutes. Check the Console page.`;
   const said = lastConsoleError();
   return `txAdmin closed right after starting${said ? `, saying: ${said}` : ', and Windows did not record a reason'}. Press Start to try again.`;
 }

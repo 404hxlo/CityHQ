@@ -19,6 +19,7 @@ function ConsoleRow({ line }: { line: ConsoleLine }) {
       const { resources } = await api.resources();
       const resource = resources.find((r) => r.name === location.resource);
       if (!resource) throw new Error(`${location.resource} isn't in your resources folder.`);
+      if (!resource.folder) throw new Error(`${location.resource} is built into FiveM, so its files can't be opened here.`);
       const path = `${resource.folder}/${location.file}`;
       openFilesAt(path.slice(0, path.lastIndexOf('/')), { path, line: location.line });
     } catch (err) {

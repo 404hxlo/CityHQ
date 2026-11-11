@@ -21,6 +21,9 @@ import { readConsole } from './console.js';
 import {
   getOverview, restartServer, restoreServer, startServer, startStatusPolling, stopServer, stopStatusPolling,
 } from './control.js';
+import {
+  awakeStatus, refreshAwake, startAwakeWatch, stopAwakeWatch,
+} from './awake.js';
 import { desktop } from './desktop.js';
 import {
   listEvents, markSeen, recordEvent, unseenAlerts,
@@ -30,7 +33,18 @@ import {
 } from './admins.js';
 import { readCfg, writeCfg } from './cfg.js';
 import { knownPlayers, nameFor } from './people.js';
-import { currentProblems, restartChecked } from './problems.js';
+import { startupDoctor } from './doctor.js';
+import {
+  listFixes, recordFix, runFix, undoFix,
+} from './fixes.js';
+import { healthChecks } from './health.js';
+import { inspectResource } from './inspect.js';
+import { readProfile, setMaxClients } from './profile.js';
+import { askFirewallRules, firewallCommand, reachReport } from './reach.js';
+import {
+  listChanges, recordChange, registerFixLog, registerUndo, undoChange,
+} from './history.js';
+import { currentProblems, fixProblem, restartChecked } from './problems.js';
 import {
   dayKey, pushWhitelist, startStats, statsView, stopStats,
 } from './stats.js';
@@ -141,6 +155,41 @@ function buildApp() {
     };
   }));
   api.get('/problems', handler((req) => currentProblems({ fresh: req.query.fresh === '1' })));
+  // One-click fixes: the server re-plans the fix from the problem id; nothing else is taken from the request.
+  api.post('/problems/fix', json, handler((req) => fixProblem(String(req.body?.id || ''))));
+  api.get('/problems/fixes', handler(() => listFixes()));
+
+  // Health page: checks, and the startup doctor. Fixes are re-planned on the server from the id.
+  api.get('/health', handler(() => healthChecks()));
+  api.get('/health/doctor', handler(() => startupDoctor()));
+  const runPlannedFix = async (list, id, prefix) => {
+    const item = list.find((x) => x.id === id);
+    if (!item) throw new HttpError(404, 'That is no longer listed. It may already be fixed.');
+    if (!item.fix) throw new HttpError(400, 'There\'s no one-click fix for this.');
+    const result = await runFix(item.fix.fix);
+    const record = await recordFix({
+      problemId: `${prefix}:${id}`, boot: null, title: item.title, label: item.fix.label, message: result.message, undo: result.undo, versionId: result.versionId,
+    });
+    return { message: result.message, fixId: record.id, undoable: Boolean(result.undo) };
+  };
+  api.post('/health/fix', json, handler(async (req) => runPlannedFix(await healthChecks(), String(req.body?.id || ''), 'health')));
+  api.post('/health/doctor/fix', json, handler(async (req) => runPlannedFix((await startupDoctor()).incidents, String(req.body?.id || ''), 'doctor')));
+  // Server profile: player slots (server.cfg) and the game version; the listing lives on the Cfx.re Portal.
+  api.get('/profile', handler(() => readProfile()));
+  api.put('/profile/slots', json, handler((req) => setMaxClients(req.body?.maxClients)));
+  // Friends can't join? What stands between the server and players outside the home network.
+  api.get('/reach', handler(async (req) => ({ ...(await reachReport()), firewallCommand: firewallCommand(), local: isLocalRequest(req) })));
+  api.post('/reach/firewall', handler((req) => {
+    if (!isLocalRequest(req)) throw new HttpError(403, 'This can only be done on the PC running the server.');
+    return askFirewallRules();
+  }));
+  // Install check for one script, with fixes planned again from the id.
+  api.get('/resources/:name/check', handler((req) => inspectResource(named(req))));
+  api.post('/resources/:name/check/fix', json, handler(async (req) => {
+    const name = named(req);
+    return runPlannedFix((await inspectResource(name)).checks, String(req.body?.id || ''), `check:${name}`);
+  }));
+  api.post('/problems/fixes/:id/undo', handler((req) => undoFix(req.params.id)));
   api.get('/events', handler(() => listEvents()));
   api.post('/events/seen', json, handler((req) => {
     markSeen(typeof req.body?.id === 'string' ? req.body.id : undefined);
@@ -195,6 +244,7 @@ function buildApp() {
       autoStartServer: s.autoStartServer,
       autoRecover: s.autoRecover,
       openAtLogin: local && desktop() ? desktop().getOpenAtLogin() : null,
+      keepAwake: { ...s.keepAwake, ...awakeStatus() },
     };
   };
   api.get('/automation', handler((req) => automationView(req)));
@@ -215,12 +265,17 @@ function buildApp() {
     }
     if (typeof body.autoStartServer === 'boolean') patch.autoStartServer = body.autoStartServer;
     if (typeof body.autoRecover === 'boolean') patch.autoRecover = body.autoRecover;
+    if (body.keepAwake && typeof body.keepAwake === 'object') {
+      const { enabled = s.keepAwake.enabled, screenOnBattery = s.keepAwake.screenOnBattery } = body.keepAwake;
+      patch.keepAwake = { enabled: Boolean(enabled), screenOnBattery: Boolean(screenOnBattery) };
+    }
     if (typeof body.openAtLogin === 'boolean') {
       if (!isLocalRequest(req)) throw new HttpError(403, 'This can only be changed on the PC running the server.');
       if (!desktop()) throw new HttpError(409, 'This only works in the desktop app.');
       desktop().setOpenAtLogin(body.openAtLogin);
     }
     updateSettings(patch);
+    if (patch.keepAwake) refreshAwake();
     return automationView(req);
   }));
   api.post('/announce', json, handler((req) => agentRequest('/announce', { method: 'POST', body: { message: req.body?.message } })));
@@ -408,6 +463,37 @@ function buildApp() {
       return true;
     } catch { return false; }
   };
+  /** Gives a player a role (or none), live too, and notes it in the history with the way back. */
+  const changeAdmin = async (identifier, role, name, { record = true } = {}) => {
+    const cfgPath = serverCfg();
+    const before = parseAdmins(await readCfg(cfgPath)).find((a) => a.identifier === identifier) || null;
+    let result;
+    if (role) {
+      const { text, removed } = setAdmin(await readCfg(cfgPath), identifier, role, name);
+      await writeCfg(cfgPath, text);
+      const live = await applyLive([
+        ...removed.map((principal) => ({ identifier, role: principal, remove: true })),
+        { identifier, role: ROLES[role].principal },
+      ]);
+      result = { saved: true, live };
+    } else {
+      const { text, removed } = removeAdmin(await readCfg(cfgPath), identifier);
+      if (!removed.length) throw new HttpError(404, 'That player is not an admin');
+      await writeCfg(cfgPath, text);
+      result = { removed: removed.length, live: await applyLive(removed.map((principal) => ({ identifier, role: principal, remove: true }))) };
+    }
+    if (getSettings().whitelist.enabled) await pushWhitelist().catch(() => {});
+    if (record) {
+      const who = name || before?.label || 'A player';
+      recordChange({
+        kind: 'admin',
+        title: role ? `${who} is now ${ROLES[role].label}` : `${who} is no longer an admin`,
+        undo: { type: 'admin', identifier, role: before?.role || null, name: who },
+        undoHint: before?.role ? `${who} goes back to ${ROLES[before.role]?.label || before.role}.` : `${who} is no longer an admin.`,
+      });
+    }
+    return result;
+  };
   api.get('/known-players', handler(async () => (await knownPlayers()).slice(0, 500)));
   api.get('/admins', handler(async () => {
     const admins = parseAdmins(await readCfg(serverCfg()));
@@ -425,27 +511,31 @@ function buildApp() {
     const { identifier, role, name } = req.body || {};
     if (!VALID_IDENTIFIER.test(identifier || '')) throw new HttpError(400, 'Choose a player first');
     if (!ROLES[role]) throw new HttpError(400, 'Choose Owner, Admin or Moderator');
-    const cfgPath = serverCfg();
-    const { text, removed } = setAdmin(await readCfg(cfgPath), identifier, role, name);
-    await writeCfg(cfgPath, text);
-    const live = await applyLive([
-      ...removed.map((principal) => ({ identifier, role: principal, remove: true })),
-      { identifier, role: ROLES[role].principal },
-    ]);
-    if (getSettings().whitelist.enabled) await pushWhitelist().catch(() => {});
-    return { saved: true, live };
+    return changeAdmin(identifier, role, name);
   }));
   api.delete('/admins/:identifier', handler(async (req) => {
     const { identifier } = req.params;
     if (!VALID_IDENTIFIER.test(identifier || '')) throw new HttpError(400, 'That is not a valid player ID');
-    const cfgPath = serverCfg();
-    const { text, removed } = removeAdmin(await readCfg(cfgPath), identifier);
-    if (!removed.length) throw new HttpError(404, 'That player is not an admin');
-    await writeCfg(cfgPath, text);
-    const live = await applyLive(removed.map((principal) => ({ identifier, role: principal, remove: true })));
-    if (getSettings().whitelist.enabled) await pushWhitelist().catch(() => {});
-    return { removed: removed.length, live };
+    return changeAdmin(identifier, null);
   }));
+
+  // Change history: one timeline with Undo. Each kind of change says how it is undone.
+  registerFixLog({ list: listFixes, undo: undoFix });
+  registerUndo('file-version', async ({ scope, rel, versionId }) => { await restoreVersion(scope, rel, versionId); return `${rel} is back to how it was before that change.`; });
+  registerUndo('boot', async ({ name, enabled }) => { await setBoot(name, enabled); return enabled ? `${name} starts with the server again.` : `${name} no longer starts with the server.`; });
+  registerUndo('remove', async ({ name }) => { await removeResource(name); return `${name} was moved to Recently removed.`; });
+  registerUndo('restore-trash', async ({ id, name, boot }) => {
+    await restoreFromTrash(id);
+    if (boot) await setBoot(name, true, { record: false });
+    return `${name} is back${boot ? ' and starts with the server again' : ''}.`;
+  });
+  registerUndo('restore-db', async ({ backupId }) => { await restoreServer(backupId, ['database']); return `The database is back to backup ${backupId}.`; });
+  registerUndo('admin', async ({ identifier, role, name }) => {
+    await changeAdmin(identifier, role, name);
+    return role ? `${name} is ${ROLES[role]?.label || role} again.` : `${name} is no longer an admin.`;
+  });
+  api.get('/history', handler(() => listChanges()));
+  api.post('/history/:id/undo', handler((req) => undoChange(req.params.id)));
 
   // Settings
   api.get('/settings', handler((req) => {
@@ -554,12 +644,14 @@ export async function startApp() {
   await applyLanSetting();
   startScheduler();
   startStats();
+  startAwakeWatch();
   return { port: APP_PORT, url: `http://127.0.0.1:${APP_PORT}` };
 }
 
 export async function stopApp() {
   stopScheduler();
   stopStats();
+  stopAwakeWatch();
   stopStatusPolling();
   stopProbe();
   await Promise.all([mainServer, ...lanServers].filter(Boolean).map((s) => new Promise((r) => {

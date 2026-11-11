@@ -12,8 +12,15 @@ import { applyFieldChanges, parseCfgFields, parseLuaFields } from './fields.js';
 import {
   BACKUP_DIR, findServerData, HttpError, resolveInside,
 } from './paths.js';
+import { recordChange } from './history.js';
 import { findResourceDir, serverData } from './resources.js';
 import { replaceFile } from './retry.js';
+
+const shownPath = (scope, rel) => (scope === SERVER_SCOPE || scope === DATA_SCOPE ? rel : `${scope}/${rel}`);
+const FILE_UNDO_HINT = 'This puts the file back to how it was just before this change. Later changes to the same file are undone too.';
+const recordFileChange = (scope, rel, versionId, title) => recordChange({
+  kind: 'file', title: title || `Changed ${shownPath(scope, rel)}`, undo: versionId ? { type: 'file-version', scope, rel, versionId } : null, undoHint: FILE_UNDO_HINT,
+});
 
 export const SERVER_SCOPE = '__server__';
 export const DATA_SCOPE = '__data__';
@@ -274,6 +281,7 @@ export async function saveContent(scope, rel, content, etag, { force = false } =
   refuseMistake(check, force);
   const backupId = await backup(scope, rel, full);
   await replaceFile(full, next);
+  recordFileChange(scope, rel, backupId);
   return { ...(await readEditable(scope, rel)), backupId, syntaxChecked: check.checked && !check.plain };
 }
 
@@ -288,7 +296,15 @@ export async function saveFields(scope, rel, changes, etag, { force = false } = 
   refuseMistake(check, force);
   const backupId = await backup(scope, rel, full);
   await replaceFile(full, next);
+  recordFileChange(scope, rel, backupId, `Changed settings in ${shownPath(scope, rel)}`);
   return { ...(await readEditable(scope, rel)), backupId, syntaxChecked: check.checked && !check.plain };
+}
+
+/** Saves a copy of a file into its version history, the same one the editor's Backups button shows. */
+export async function keepVersion(scope, rel) {
+  assertScopePath(scope, rel);
+  const base = await scopeBase(scope);
+  return backup(scope, rel, resolveInside(base, rel));
 }
 
 export async function listVersions(scope, rel) {
@@ -310,7 +326,8 @@ export async function restoreVersion(scope, rel, id) {
   const { full } = await loadForWrite(scope, rel);
   const source = path.join(backupDirFor(scope, rel), `${id}.bak`);
   if (!existsSync(source)) throw new HttpError(404, 'That backup no longer exists');
-  await backup(scope, rel, full);
+  const before = await backup(scope, rel, full);
   await replaceFile(full, await readFile(source, 'utf8'));
+  recordFileChange(scope, rel, before, `Put back an older version of ${shownPath(scope, rel)}`);
   return readEditable(scope, rel);
 }

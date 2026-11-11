@@ -1,10 +1,16 @@
 import {
-  AlertTriangle, BookOpen, Database, Download, FileCode, MessagesSquare, Settings2, Video, XCircle,
+  AlertTriangle, BookOpen, CheckCircle2, Database, Download, FileCode, MessagesSquare, Settings2, Undo2, Video, Wrench, XCircle,
 } from 'lucide-react';
-import { useState, type ReactNode } from 'react';
-import { api, type Problem, type ProblemAction, type ProblemLink } from './api';
+import {
+  useCallback, useEffect, useState, type ReactNode,
+} from 'react';
+import {
+  api, type FixRecord, type Problem, type ProblemAction, type ProblemLink,
+} from './api';
 import { openAddResource, openFilesAt, openResourcePanel } from './nav';
-import { Button, useAction, useConfirm } from './ui';
+import {
+  Button, formatWhen, useAction, useConfirm,
+} from './ui';
 
 const LINK_ICONS: Record<ProblemLink['kind'], ReactNode> = {
   doc: <BookOpen size={14} />,
@@ -14,10 +20,25 @@ const LINK_ICONS: Record<ProblemLink['kind'], ReactNode> = {
 
 const parentOf = (path: string) => (path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '');
 
-function ActionButton({ action, onChanged }: { action: ProblemAction; onChanged?: () => void }) {
+/** Lets "Recently fixed" lists refresh when a fix is made anywhere on the page. */
+export const FIXED_EVENT = 'qbc-problem-fixed';
+
+function ActionButton({ action, problemId, onChanged }: { action: ProblemAction; problemId: string; onChanged?: () => void }) {
   const { busy, run } = useAction();
   const confirm = useConfirm();
 
+  if (action.kind === 'fix') {
+    const fix = async () => {
+      const ok = await confirm({ title: `${action.label}?`, body: <p>{action.confirm}</p>, confirm: 'Fix it' });
+      if (!ok) return;
+      const done = await run('fix', () => api.fixProblem(problemId), (result) => result.message);
+      if (done) {
+        window.dispatchEvent(new Event(FIXED_EVENT));
+        onChanged?.();
+      }
+    };
+    return <Button variant="primary" icon={<Wrench size={15} />} busy={busy === 'fix'} onClick={fix}>{action.label}</Button>;
+  }
   if (action.kind === 'open-file') {
     return <Button variant="primary" icon={<FileCode size={15} />} onClick={() => openFilesAt(parentOf(action.path), { path: action.path, line: action.line })}>{action.label}</Button>;
   }
@@ -60,7 +81,7 @@ export function ProblemCard({ problem, onChanged }: { problem: Problem; onChange
       )}
       {problem.actions.length > 0 && (
         <div className="problem-actions">
-          {problem.actions.map((action) => <ActionButton key={action.label} action={action} onChanged={onChanged} />)}
+          {problem.actions.map((action) => <ActionButton key={action.label} action={action} problemId={problem.id} onChanged={onChanged} />)}
         </div>
       )}
       <div className="problem-links">
@@ -80,6 +101,47 @@ export function ProblemList({ problems, onChanged }: { problems: Problem[]; onCh
   return (
     <div className="problem-list-cards">
       {problems.map((problem) => <ProblemCard key={problem.id} problem={problem} onChanged={onChanged} />)}
+    </div>
+  );
+}
+
+const RECENT_MS = 24 * 3600 * 1000;
+
+/** Fixes made in the last day, each with Undo when it can be undone. */
+export function RecentFixes({ onChanged }: { onChanged?: () => void }) {
+  const [fixes, setFixes] = useState<FixRecord[]>([]);
+  const { busy, run } = useAction();
+  const load = useCallback(() => {
+    api.recentFixes().then((all) => setFixes(all.filter((f) => Date.now() - f.at < RECENT_MS).slice(0, 5))).catch(() => {});
+  }, []);
+  useEffect(() => {
+    load();
+    window.addEventListener(FIXED_EVENT, load);
+    return () => window.removeEventListener(FIXED_EVENT, load);
+  }, [load]);
+  if (!fixes.length) return null;
+  const undo = async (f: FixRecord) => {
+    const done = await run(`undo:${f.id}`, () => api.undoFix(f.id), (r) => r.message);
+    if (done) { load(); onChanged?.(); }
+  };
+  return (
+    <div className="recent-fixes">
+      <h5>Recently fixed</h5>
+      <ul>
+        {fixes.map((f) => (
+          <li key={f.id} className={f.undone ? 'is-undone' : ''}>
+            {f.undone ? <Undo2 size={15} /> : <CheckCircle2 size={15} />}
+            <div className="recent-fix-text">
+              <strong>{f.label}</strong>
+              <span>{f.undone ? `Undone ${formatWhen(f.undoneAt as number)}` : f.message}</span>
+              <span className="muted-note">{f.title} · {formatWhen(f.at)}</span>
+            </div>
+            {f.undoable && (
+              <Button variant="ghost" icon={<Undo2 size={15} />} busy={busy === `undo:${f.id}`} onClick={() => undo(f)}>Undo</Button>
+            )}
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }

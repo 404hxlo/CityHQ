@@ -4,9 +4,38 @@ import {
 } from 'node:fs';
 import path from 'node:path';
 import { test } from 'node:test';
+import { mkdirSync, mkdtempSync } from 'node:fs';
+import os from 'node:os';
 import { findInstallSource } from './catalog.js';
 import { explainLogLines, explainMissingDependency, luaPlain } from './explain.js';
-import { parseGithubUrl } from './resources.js';
+import {
+  BUILT_IN_CATEGORY, builtInItems, parseGithubUrl, replacementsOf, scanSystem,
+} from './resources.js';
+import {
+  bestLink, buildDocIndex, docLinksIn, QB_HOME, repoFor, siteOf, withDocLinks,
+} from './docs.js';
+import {
+  columnsOf, createStatementFor, startBefore, startBeforeNote, tablesDefining, undoStartBefore,
+} from './fixes.js';
+import { sqlFilesCreating, stateProblems } from './problems.js';
+import { awakeMode } from './awake.js';
+import {
+  duplicateFindings, missingStartFindings, powercfgSeconds, sacState, startOrderFindings,
+} from './health.js';
+import {
+  adminRestarts, bootSegments, explainRestart, lastActivity, wholePause,
+} from './doctor.js';
+import { stripSqlComments } from './fixes.js';
+import { frameworkFit } from './inspect.js';
+import {
+  firewallCovers, listingStatus, parseFirewall, parseRoute,
+} from './reach.js';
+import { gameBuildName } from './profile.js';
+import { readCommand, setCommand } from './cfg.js';
+import { BOOT_MAX_MS, BOOT_STALL_MS, bootVerdict } from './control.js';
+import {
+  addBootLine, convarOn, parseBoot, readConvar, removeBootLine, setConvar,
+} from './cfg.js';
 import {
   createProcessWatch, isValidTime, lastOccurrence, nextOccurrence, warningDue,
 } from './scheduler.js';
@@ -588,4 +617,598 @@ test('GitHub links, including latest-release downloads', () => {
   assert.equal(parseGithubUrl('https://github.com/overextended/ox_lib/releases/latest/download/ox_lib.zip').download, 'https://github.com/overextended/ox_lib/releases/latest/download/ox_lib.zip');
   assert.equal(parseGithubUrl('https://github.com/a/b/releases/download/v1/b.zip').download, 'https://github.com/a/b/releases/download/v1/b.zip');
   assert.equal(parseGithubUrl('https://github.com/a/b').download, 'https://codeload.github.com/a/b/zip/HEAD');
+});
+
+
+// ---- Built-in FiveM resources (chat, monitor, yarn, webpack) on the Resources page ----
+
+const SYSTEM = [
+  { name: 'chat', description: 'Provides baseline chat functionality using a NUI-based interface.', version: '', author: '' },
+  { name: 'monitor', description: 'The official FiveM/RedM server web/in-game management platform.', version: '', author: '' },
+  { name: 'yarn', description: 'Builds resources with yarn.', version: '', author: '' },
+  { name: 'webpack', description: 'Builds resources with webpack.', version: '', author: '' },
+];
+const CHAT_ON = ['set resources_useSystemChat true', 'ensure chat', 'ensure some-chat-replacement', ''].join('\r\n');
+const byName = (items) => Object.fromEntries(items.map((i) => [i.name, i]));
+
+test('settings: the last line wins, quotes and comments are ignored, and case does not matter', () => {
+  const cfg = ['set resources_useSystemChat true', 'sets sv_projectName "My City" # shown in the list', 'SET Resources_UseSystemChat false', '# set resources_useSystemChat true', ''].join('\n');
+  assert.equal(readConvar(cfg, 'resources_useSystemChat'), 'false');
+  assert.equal(readConvar(cfg, 'sv_projectName'), 'My City');
+  assert.equal(readConvar(cfg, 'not_there'), null);
+  assert.equal(convarOn('true'), true);
+  assert.equal(convarOn('1'), true);
+  assert.equal(convarOn('false'), false);
+  assert.equal(convarOn(null), false);
+});
+
+test('settings: changing one keeps its line, set type and comment; a missing one goes in the app block', () => {
+  const changed = setConvar(['setr resources_useSystemChat true # was on', 'ensure chat', ''].join('\r\n'), 'resources_useSystemChat', 'false');
+  assert.equal(changed.split('\r\n')[0], 'setr resources_useSystemChat false # was on');
+  assert.ok(changed.includes('\r\n'), 'Windows line endings are kept');
+  const added = setConvar(CFG, 'resources_useSystemChat', 'true');
+  const lines = added.split('\n');
+  assert.ok(lines.indexOf('set resources_useSystemChat true') > lines.indexOf(BLOCK_START));
+  assert.ok(lines.indexOf('set resources_useSystemChat true') < lines.indexOf(BLOCK_END));
+  assert.equal(readConvar(added, 'resources_useSystemChat'), 'true');
+});
+
+test('built-in resources are listed in their own group, without a folder, and cannot be removed', () => {
+  const items = byName(builtInItems({ system: SYSTEM, diskNames: new Set(), cfg: CHAT_ON, live: new Map([['chat', { state: 'started' }], ['monitor', { state: 'started' }]]) }));
+  assert.deepEqual(Object.keys(items).sort(), ['chat', 'monitor', 'webpack', 'yarn']);
+  for (const item of Object.values(items)) {
+    assert.equal(item.category, BUILT_IN_CATEGORY);
+    assert.equal(item.folder, null);
+    assert.equal(item.canRemove, false);
+    assert.equal(item.builtIn, true);
+  }
+  assert.equal(items.chat.state, 'started');
+  assert.equal(items.yarn.state, 'stopped', 'not running is shown as stopped, not unknown');
+  assert.equal(items.chat.boot.enabled, true);
+  assert.deepEqual(items.chat.setting, { key: 'resources_useSystemChat', on: true });
+  assert.equal(items.yarn.setting, null);
+});
+
+test('txAdmin (monitor) stays locked on and says why', () => {
+  const { monitor } = byName(builtInItems({ system: SYSTEM, diskNames: new Set(), cfg: CHAT_ON, live: null }));
+  assert.equal(monitor.canStop, false);
+  assert.match(monitor.lockedReason, /txAdmin/);
+  assert.equal(monitor.state, 'offline');
+  assert.equal(monitor.boot.enabled, true, 'txAdmin always starts it, with no server.cfg line');
+  assert.equal(monitor.boot.source, 'always');
+});
+
+test('built-in chat only starts at boot while resources_useSystemChat is on', () => {
+  const off = CHAT_ON.replace('set resources_useSystemChat true', 'set resources_useSystemChat false');
+  const { chat } = byName(builtInItems({ system: SYSTEM, diskNames: new Set(), cfg: off, live: new Map() }));
+  assert.equal(chat.boot.enabled, false);
+  assert.deepEqual(chat.setting, { key: 'resources_useSystemChat', on: false });
+  assert.equal(chat.problem, null, 'off at boot and stopped is not a problem');
+});
+
+test('a running-at-boot built-in that is stopped is flagged', () => {
+  const { chat } = byName(builtInItems({ system: SYSTEM, diskNames: new Set(), cfg: CHAT_ON, live: new Map() }));
+  assert.equal(chat.problem, 'Should be running but is stopped');
+});
+
+test('a folder in resources/ with the same name replaces the built-in one', () => {
+  const items = byName(builtInItems({ system: SYSTEM, diskNames: new Set(['chat']), cfg: CHAT_ON, live: null }));
+  assert.equal(items.chat, undefined);
+  assert.ok(items.yarn);
+});
+
+test('turning built-in chat off and on again restores the same server.cfg lines', () => {
+  // Off: the start line is kept as an off-marker and the setting turns false.
+  let cfg = setConvar(removeBootLine(CHAT_ON, 'chat'), 'resources_useSystemChat', 'false');
+  let { chat } = byName(builtInItems({ system: SYSTEM, diskNames: new Set(), cfg, live: null }));
+  assert.equal(chat.boot.enabled, false);
+  assert.equal(chat.boot.turnedOffByApp, true);
+  assert.equal(parseBoot(cfg).names.has('some-chat-replacement'), true, 'the replacement chat keeps starting');
+  // On: the same line comes back in place, not a second copy in the app block.
+  cfg = setConvar(addBootLine(cfg, 'chat'), 'resources_useSystemChat', 'true');
+  assert.equal(cfg, CHAT_ON);
+  ({ chat } = byName(builtInItems({ system: SYSTEM, diskNames: new Set(), cfg, live: null })));
+  assert.equal(chat.boot.enabled, true);
+});
+
+test('built-in resources are read from FXServer\'s system_resources folder', async () => {
+  const dir = mkdtempSync(path.join(os.tmpdir(), 'cityhq-system-'));
+  try {
+    mkdirSync(path.join(dir, 'chat'));
+    writeFileSync(path.join(dir, 'chat', 'fxmanifest.lua'), "fx_version 'cerulean'\ndescription 'Provides baseline chat functionality.'\n");
+    mkdirSync(path.join(dir, 'not-a-resource'));
+    const found = await scanSystem(dir);
+    assert.deepEqual(found.map((f) => f.name), ['chat']);
+    assert.equal(found[0].description, 'Provides baseline chat functionality.');
+    assert.deepEqual(await scanSystem(path.join(dir, 'missing')), []);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// ---- Resources another one stands in for (provides), like qb-clothing and um-clothing-qb ----
+
+const DISK = [
+  { name: 'qb-clothing', provides: [] },
+  { name: 'um-clothing-qb', provides: ['illenium-appearance', 'qb-clothing'] },
+  { name: 'qb-multicharacter', provides: [] },
+  { name: 'um-ronin-multicharacter', provides: ['qb-multicharacter', 'um-multicharacter'] },
+  { name: 'oxmysql', provides: ['mysql-async', 'ghmattimysql'] },
+  { name: 'self-named', provides: ['self-named'] },
+];
+
+test('your real setup: qb-clothing is replaced by um-clothing-qb while it runs', () => {
+  // FiveM reports qb-clothing as started because it answers for um-clothing-qb.
+  const live = new Map([['qb-clothing', { state: 'started' }], ['um-clothing-qb', { state: 'started' }], ['oxmysql', { state: 'started' }]]);
+  const map = replacementsOf(DISK, live);
+  assert.equal(map.get('qb-clothing'), 'um-clothing-qb');
+  assert.equal(map.get('mysql-async'), 'oxmysql');
+  assert.equal(map.has('um-clothing-qb'), false);
+});
+
+test('a stand-in that is not running replaces nothing, so the original shows its own state', () => {
+  const live = new Map([['qb-clothing', { state: 'started' }], ['um-clothing-qb', { state: 'stopped' }]]);
+  assert.equal(replacementsOf(DISK, live).has('qb-clothing'), false);
+  assert.equal(replacementsOf(DISK, live).has('qb-multicharacter'), false, 'um-ronin-multicharacter is not in the live list');
+});
+
+test('a resource that names itself in provides does not replace itself, and nothing is known offline', () => {
+  const live = new Map([['self-named', { state: 'started' }]]);
+  assert.equal(replacementsOf(DISK, live).has('self-named'), false);
+  assert.equal(replacementsOf(DISK, null).size, 0);
+});
+
+// ---- Real documentation links for problem tips ----
+
+const found = (...pairs) => pairs.map(([url, file]) => ({ url, file }));
+const OTHERS = ['qb-core', 'qb-phone', 'qb-target', 'jg-advancedgarages', 'pma-voice', 'oxmysql'];
+
+test('docs: a docs page that names the script wins', () => {
+  const links = found(
+    ['https://docs.jgscripts.com/advanced-garages/installation', 'README.md'],
+    ['https://docs.jgscripts.com/advanced-garages/interaction-methods', 'config/config.lua'],
+  );
+  assert.equal(bestLink(links, 'jg-advancedgarages', OTHERS), 'https://docs.jgscripts.com/advanced-garages/installation');
+});
+
+test('docs: a readme that only links to other scripts it needs gives no docs', () => {
+  const links = found(['https://github.com/qbcore-framework/qb-core', 'README.md'], ['https://github.com/qbcore-framework/qb-phone', 'README.md']);
+  assert.equal(bestLink(links, 'qb-houses', OTHERS), null);
+});
+
+test('docs: a passing mention of another product does not count (pma-voice and vMenu)', () => {
+  const links = found(['https://docs.vespura.com/vmenu/faq/#q-how-do-i-disable-voice-chat', 'README.md']);
+  assert.equal(bestLink(links, 'pma-voice', OTHERS), null);
+});
+
+test('docs: a product docs site linked twice in the readme counts, even under another name', () => {
+  const links = found(
+    ['https://example-design.com/docs/some-admin-pro/getting-started/installation', 'README.md'],
+    ['https://example-design.com/docs/some-admin-pro/getting-started/configuration', 'README.md'],
+  );
+  assert.equal(bestLink(links, 'abc_admin', OTHERS), 'https://example-design.com/docs/some-admin-pro/getting-started/installation');
+});
+
+test('docs: a link in a documentation file counts, and badges and downloads never do', () => {
+  assert.equal(bestLink(found(['https://docs.example.org/scripts/animation-menu', 'documentation.md']), 'xy-animmenu', OTHERS), 'https://docs.example.org/scripts/animation-menu');
+  assert.deepEqual(docLinksIn('see https://img.shields.io/github/downloads/a/oxmysql/total and https://github.com/a/b/releases/latest/download/b.zip'), []);
+  assert.equal(bestLink(found(['https://github.com/someone/oxmysql.git', 'fxmanifest.lua']), 'oxmysql', OTHERS), 'https://github.com/someone/oxmysql.git');
+});
+
+test('docs: an author\'s GitBook site keeps its space name', () => {
+  assert.equal(siteOf('https://prompt-studio.gitbook.io/prompt-studio/maps/sandy'), 'https://prompt-studio.gitbook.io/prompt-studio');
+  assert.equal(siteOf('https://docs.picklemods.com/paid-resources/casinos/installation'), 'https://docs.picklemods.com/');
+});
+
+test('docs: the index uses own links, the author\'s site, and checked QBCore pages', async () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'cityhq-docs-'));
+  const make = (name, files = {}) => {
+    const dir = path.join(root, name);
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(path.join(dir, 'fxmanifest.lua'), "fx_version 'cerulean'\n");
+    for (const [f, text] of Object.entries(files)) writeFileSync(path.join(dir, f), text);
+    return { name, dir, provides: [], dependencies: [], categories: [] };
+  };
+  try {
+    const disk = [
+      make('studio_church', { 'readme.txt': 'Docs: https://studio-maps.gitbook.io/studio-maps' }),
+      make('studio_beach'),
+      make('glow_dj'),
+      make('zz_glow_mapdata', { 'readme.txt': 'More: https://glow-fivem.gitbook.io/glow-mlos/maps' }),
+      make('qb-realthing'),
+      make('qb-made-up'),
+      make('lonely-script'),
+    ];
+    const asked = [];
+    const fetcher = async (url) => { asked.push(url); return { status: url.endsWith('/qb-realthing') ? 200 : 404 }; };
+    const memory = new Map();
+    const cache = { get: async (u) => memory.get(u), set: async (u, v) => { memory.set(u, v); } };
+    const { index } = await buildDocIndex(disk, { fetcher, cache });
+    assert.equal(index.get('studio_church').source, 'author', 'a general docs site that does not name the script is labelled as the author\'s');
+    assert.equal(index.get('studio_church').url, 'https://studio-maps.gitbook.io/studio-maps');
+    assert.equal(index.get('studio_beach').url, 'https://studio-maps.gitbook.io/studio-maps', 'learned from the author\'s other script');
+    assert.equal(index.get('glow_dj').url, 'https://glow-fivem.gitbook.io/glow-mlos', 'matched by the site\'s own name');
+    assert.equal(index.get('qb-realthing').url, 'https://qbcore.org/docs/qbcore-resources/qb-realthing');
+    assert.equal(index.get('qb-made-up').url, QB_HOME, 'a page that does not exist falls back to the QBCore home');
+    assert.equal(index.has('lonely-script'), false);
+    const before = asked.length;
+    await buildDocIndex(disk, { fetcher, cache });
+    assert.equal(asked.length, before, 'each page is only checked once');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('docs: tips lead with the script\'s own docs, never YouTube, and search only when there are none', () => {
+  const problem = {
+    resource: 'some-script',
+    raw: '[script:some-script] error',
+    links: [
+      { kind: 'doc', label: 'FiveM docs: the fxmanifest file', url: 'https://docs.fivem.net/a' },
+      { kind: 'doc', label: 'FiveM docs: how resources work', url: 'https://docs.fivem.net/b' },
+      { kind: 'video', label: 'Find videos on YouTube', url: 'https://www.youtube.com/results?search_query=x' },
+      { kind: 'forum', label: 'Search the FiveM forum', url: 'https://forum.cfx.re/search?q=x' },
+    ],
+  };
+  const withDocs = withDocLinks(problem, new Map([['some-script', { url: 'https://docs.example.com/some-script', label: 'some-script documentation' }]]));
+  assert.deepEqual(withDocs.map((l) => l.url), ['https://docs.example.com/some-script', 'https://docs.fivem.net/a']);
+  const without = withDocLinks(problem, new Map());
+  assert.deepEqual(without.map((l) => l.kind), ['doc', 'doc', 'forum']);
+  assert.equal(without[2].url, 'https://forum.cfx.re/search?q=some-script', 'the search uses only the script\'s name');
+  assert.ok(!without.some((l) => l.kind === 'video'));
+});
+
+test('docs: a docs page named inside the error itself comes first', () => {
+  const problem = {
+    resource: 'phone-x',
+    raw: '[script:phone-x] [ERROR] API keys are not set. Visit https://docs.example.net/phone/configure-apikeys#keys to get them',
+    links: [{ kind: 'video', label: 'v', url: 'https://www.youtube.com/x' }],
+  };
+  const links = withDocLinks(problem, new Map());
+  assert.equal(links[0].url, 'https://docs.example.net/phone/configure-apikeys#keys');
+  assert.ok(!links.some((l) => l.kind === 'forum'), 'no search when the error names its own docs');
+});
+
+test('a missing script\'s GitHub page is found in the files of the script that needs it', () => {
+  const links = found(['https://github.com/SomeDev/x_bridge', 'fxmanifest.lua'], ['https://github.com/overextended/ox_lib', 'fxmanifest.lua']);
+  assert.equal(repoFor('x_bridge', links), 'https://github.com/SomeDev/x_bridge');
+  assert.equal(repoFor('x_jobcore', links), null);
+});
+
+// ---- One-click fixes ----
+
+const ORDER_CFG = [
+  'ensure ox_lib',
+  'ensure qb-core',
+  'ensure [qb]',
+  'ensure [standalone]',
+  'ensure some-script',
+  'ensure um-clothing-qb',
+  'ensure codem-chat',
+  '',
+].join('\r\n');
+
+test('your real fix: um-clothing-qb moves to just before [qb], and undo puts it back exactly', () => {
+  const moved = startBefore(ORDER_CFG, 'um-clothing-qb', 'qb-houses', ['[qb]']);
+  assert.equal(moved.changed, true);
+  const lines = moved.text.split('\r\n');
+  assert.deepEqual(lines.slice(1, 5), ['ensure qb-core', startBeforeNote('um-clothing-qb', 'qb-houses'), 'ensure um-clothing-qb', 'ensure [qb]']);
+  assert.equal(lines.filter((l) => l === 'ensure um-clothing-qb').length, 1);
+  assert.equal(moved.anchor, 'ensure some-script');
+  assert.equal(undoStartBefore(moved.text, 'um-clothing-qb', 'qb-houses', moved.anchor), ORDER_CFG);
+});
+
+test('the start-order fix does nothing when the order is already right, and refuses missing lines', () => {
+  assert.equal(startBefore(ORDER_CFG, 'qb-core', 'qb-houses', ['[qb]']).changed, false);
+  assert.throws(() => startBefore(ORDER_CFG, 'not-there', 'qb-houses', ['[qb]']), /no line that starts not-there/);
+  assert.throws(() => undoStartBefore(ORDER_CFG, 'um-clothing-qb', 'qb-houses', 'ensure some-script'), /can't be undone automatically/);
+});
+
+test('the SQL file that creates a missing table is picked first', () => {
+  const files = [
+    { file: 'sql/update.sql', text: 'ALTER TABLE player_outfits ADD COLUMN x INT;' },
+    { file: 'sql/install.sql', text: 'CREATE TABLE IF NOT EXISTS `player_outfit_codes` (\n `id` int(11) NOT NULL\n);' },
+  ];
+  assert.deepEqual(sqlFilesCreating('player_outfit_codes', files), ['sql/install.sql']);
+  assert.deepEqual(sqlFilesCreating('player_outfits', files), []);
+});
+
+const STATE_DISK = [
+  { name: 'qb-houses', categories: ['[qb]'], dependencies: ['qb-clothing'], provides: [] },
+  { name: 'qb-clothing', categories: ['[disabled]'], dependencies: [], provides: [] },
+  { name: 'um-clothing-qb', categories: ['[added]'], dependencies: [], provides: ['qb-clothing'] },
+  { name: 'some-script', categories: ['[added]'], dependencies: [], provides: [] },
+  { name: 'off-script', categories: ['[added]'], dependencies: [], provides: [] },
+];
+const STATE_CFG = ['ensure [qb]', 'ensure um-clothing-qb', 'ensure some-script', ''].join('\n');
+
+test('your real problem: qb-houses stopped at startup is explained, with the start-order fix', () => {
+  const live = new Map([['qb-houses', { state: 'stopped' }], ['qb-clothing', { state: 'started' }], ['um-clothing-qb', { state: 'started' }], ['some-script', { state: 'started' }], ['off-script', { state: 'stopped' }]]);
+  const items = stateProblems({ disk: STATE_DISK, cfg: STATE_CFG, live });
+  assert.equal(items.length, 1);
+  assert.equal(items[0].id, 'stopped-by-replacement:qb-houses:qb-clothing');
+  assert.deepEqual(items[0].actions[0].fix, { type: 'start-before', provider: 'um-clothing-qb', dependent: 'qb-houses', original: 'qb-clothing' });
+});
+
+test('a script set to start that isn\'t running gets a Start button, unless another problem already explains it', () => {
+  const live = new Map([['qb-houses', { state: 'started' }], ['um-clothing-qb', { state: 'started' }], ['some-script', { state: 'stopped' }], ['off-script', { state: 'stopped' }]]);
+  let items = stateProblems({ disk: STATE_DISK, cfg: STATE_CFG, live });
+  assert.deepEqual(items.map((i) => i.id), ['not-running:some-script'], 'off-script is off at boot, so it is left alone');
+  assert.deepEqual(items[0].actions[0].fix, { type: 'start', name: 'some-script' });
+  items = stateProblems({ disk: STATE_DISK, cfg: STATE_CFG, live, existing: new Set(['start-failed:some-script']) });
+  assert.equal(items.length, 0);
+  assert.deepEqual(stateProblems({ disk: STATE_DISK, cfg: STATE_CFG, live: null }), [], 'nothing is guessed while the server is off');
+});
+
+// ---- Rebuilding an empty table made with another script's layout ----
+
+const CLOTHING_SQL = [
+  'CREATE TABLE IF NOT EXISTS `skins_x` (',
+  '  `id` int(11) NOT NULL AUTO_INCREMENT,',
+  '  `citizenid` varchar(255) NOT NULL,',
+  '  PRIMARY KEY (`id`)',
+  ') ENGINE=InnoDB DEFAULT CHARSET=latin1;',
+  '',
+  'CREATE TABLE IF NOT EXISTS `outfits_x` (',
+  '  `id` int(11) NOT NULL AUTO_INCREMENT,',
+  "  `outfitname` varchar(50) NOT NULL DEFAULT '0',",
+  '  `props` varchar(1000) DEFAULT NULL,',
+  '  `components` varchar(1500) DEFAULT NULL,',
+  '  PRIMARY KEY (`id`),',
+  '  UNIQUE KEY `name_per_model` (`outfitname`,`props`),',
+  '  KEY `outfitname` (`outfitname`)',
+  ') ENGINE=InnoDB AUTO_INCREMENT=1 DEFAULT CHARSET=utf8mb4;',
+  '',
+  'CREATE TABLE IF NOT EXISTS `outfit_codes_x` (',
+  '  `id` int(11) NOT NULL AUTO_INCREMENT,',
+  '  `outfitid` int(11) NOT NULL,',
+  "  `code` varchar(50) NOT NULL DEFAULT '',",
+  '  PRIMARY KEY (`id`)',
+  ') ENGINE=InnoDB;',
+].join('\n');
+
+test('the CREATE TABLE for one table is cut out whole, up to its semicolon', () => {
+  const statement = createStatementFor('outfits_x', CLOTHING_SQL);
+  assert.ok(statement.startsWith('CREATE TABLE IF NOT EXISTS `outfits_x` ('));
+  assert.ok(statement.endsWith('DEFAULT CHARSET=utf8mb4'));
+  assert.ok(!statement.includes('outfit_codes_x'));
+  assert.equal(createStatementFor('not_there', CLOTHING_SQL), null);
+});
+
+test('only real columns are read from it, not keys', () => {
+  assert.deepEqual(columnsOf(createStatementFor('outfits_x', CLOTHING_SQL)), ['id', 'outfitname', 'props', 'components']);
+});
+
+test('your real error: "Unknown column components" leads to the table that defines it', () => {
+  const files = [{ file: 'sql/install.sql', text: CLOTHING_SQL }];
+  assert.deepEqual(tablesDefining('components', files, 'INSERT INTO outfits_x (citizenid, components) VALUES (?, ?)'), [{ table: 'outfits_x', file: 'sql/install.sql' }]);
+  assert.deepEqual(tablesDefining('code', files).map((t) => t.table), ['outfit_codes_x'], 'po.code is read as the column "code"');
+  // Two tables have "id": the one the failed query names wins.
+  assert.deepEqual(tablesDefining('id', files, 'SELECT * FROM outfit_codes_x WHERE id = 1').map((t) => t.table), ['outfit_codes_x']);
+  assert.equal(tablesDefining('id', files).length, 3, 'when the query names none, all are returned and no fix is offered');
+});
+
+// ---- Keeping the PC awake while the server runs ----
+
+test('keep-awake: nothing is held while the server is off or the switch is off', () => {
+  assert.equal(awakeMode({ enabled: true, screenOnBattery: true, serverRunning: false, onBattery: true }), 'off');
+  assert.equal(awakeMode({ enabled: false, screenOnBattery: true, serverRunning: true, onBattery: true }), 'off');
+});
+
+test('keep-awake: plugged in, the PC stays awake and the screen may turn off', () => {
+  assert.equal(awakeMode({ enabled: true, screenOnBattery: true, serverRunning: true, onBattery: false }), 'system');
+});
+
+test('keep-awake: on battery the screen stays on only when chosen', () => {
+  assert.equal(awakeMode({ enabled: true, screenOnBattery: false, serverRunning: true, onBattery: true }), 'system');
+  assert.equal(awakeMode({ enabled: true, screenOnBattery: true, serverRunning: true, onBattery: true }), 'display');
+});
+
+// ---- Health checks ----
+
+test('health: Windows sleep timers are read from powercfg', () => {
+  const out = 'Power Setting GUID: 29f6c1db\n    Current AC Power Setting Index: 0x0000012c\n    Current DC Power Setting Index: 0x000000b4\n';
+  assert.equal(powercfgSeconds(out, 'AC'), 300);
+  assert.equal(powercfgSeconds(out, 'DC'), 180);
+  assert.equal(powercfgSeconds('nothing', 'AC'), null);
+});
+
+test('health: Smart App Control state is read from the registry output', () => {
+  assert.equal(sacState('    VerifiedAndReputablePolicyState    REG_DWORD    0x0'), 0);
+  assert.equal(sacState('    VerifiedAndReputablePolicyState    REG_DWORD    0x1'), 1);
+  assert.equal(sacState('ERROR: not found'), null);
+});
+
+test('your real SQL: comments with commas in them are not read as columns (energy_dj)', () => {
+  const sql = "CREATE TABLE IF NOT EXISTS `props_x` (\n  `id` INT NOT NULL,\n  `coords` JSON NOT NULL, -- {x,y,z}\n  `rotation` JSON NOT NULL, /* {x,y,z} */\n  # old: `heading`\n  `note` VARCHAR(20) DEFAULT '-- not a comment',\n  PRIMARY KEY (`id`)\n);";
+  assert.deepEqual(columnsOf(createStatementFor('props_x', sql)), ['id', 'coords', 'rotation', 'note']);
+  assert.ok(stripSqlComments(sql).includes("'-- not a comment'"), 'text inside quotes is kept');
+});
+
+const H_DISK = [
+  { name: 'qb-houses', categories: ['[qb]'], dependencies: ['qb-clothing'], provides: [], dir: 'D:/s/resources/[qb]/qb-houses' },
+  { name: 'qb-clothing', categories: ['[disabled]'], dependencies: [], provides: [], dir: 'D:/s/resources/[disabled]/qb-clothing' },
+  { name: 'um-clothing-qb', categories: ['[added]'], dependencies: [], provides: ['qb-clothing'], dir: 'D:/s/resources/[added]/um-clothing-qb' },
+];
+
+test('health: the qb-houses trap is caught before it happens, and not once the order is right', () => {
+  const late = ['ensure qb-core', 'ensure [qb]', 'ensure um-clothing-qb', ''].join('\n');
+  const found = startOrderFindings(H_DISK, late);
+  assert.equal(found.length, 1);
+  assert.equal(found[0].status, 'bad');
+  assert.deepEqual(found[0].fix.fix, { type: 'start-before', provider: 'um-clothing-qb', dependent: 'qb-houses', original: 'qb-clothing' });
+  const early = ['ensure qb-core', 'ensure um-clothing-qb', 'ensure [qb]', ''].join('\n');
+  assert.equal(startOrderFindings(H_DISK, early).length, 0);
+});
+
+test('health: start lines for scripts that are not installed get a switch-off fix (not built-in ones)', () => {
+  const cfg = ['ensure chat', 'ensure clothes_images', 'ensure um-clothing-qb', 'ensure qb-clothing', ''].join('\n');
+  const found = missingStartFindings(H_DISK, cfg);
+  assert.deepEqual(found.map((f) => f.id), ['missing-start:clothes_images']);
+  assert.deepEqual(found[0].fix.fix, { type: 'cfg-off', name: 'clothes_images' });
+});
+
+test('health: the same script in two folders is pointed out', () => {
+  const disk = [...H_DISK, { name: 'qb-houses', categories: ['[added]'], dependencies: [], provides: [], dir: 'D:/s/resources/[added]/qb-houses' }];
+  const found = duplicateFindings(disk, 'D:/s');
+  assert.equal(found.length, 1);
+  assert.match(found[0].detail, /resources\/\[qb\]\/qb-houses and resources\/\[added\]\/qb-houses/);
+});
+
+// ---- Startup doctor ----
+
+const ADMIN = [
+  '======== txAdmin v8.1.2 atop fxserver 38435 Starting - 11/10/2026, 5:23:22 PM',
+  '[18:00:47][MONITOR] Restarting server: Resource "some_casino.pack" failed to start within the 1m30s time limit (P:37m11s|HB:--|HC:0s).',
+  '[18:32:19][MONITOR] Restarting server: Server is not responding (HB:0s|HC:18m35s).',
+  '[19:10:00][MONITOR] Restarting server: Server process close detected.',
+];
+const SERVER = [
+  '[TXADMIN] ======== [19368] FXServer Starting - 11/10/2026, 5:23:36 PM',
+  '[c-scripting-core] Creating script environments for some_casino.pack',
+  '[script:some_casino] employees_server.lua loaded',
+  '[citizen-server-impl] network thread hitch warning: timer interval of 1810397 milliseconds',
+  '[citizen-server-impl] sync thread hitch warning: timer interval of 1810391 milliseconds',
+  '[TXADMIN] ======== [12032] FXServer Starting - 11/10/2026, 6:00:53 PM',
+  '[c-scripting-core] Creating script environments for slow_script',
+  '[TXADMIN] ======== [222] FXServer Starting - 11/10/2026, 6:32:30 PM',
+  '[script:qb-control] [qb-control] ready',
+];
+
+test('doctor: txAdmin restarts and server starts are read with their times', () => {
+  const restarts = adminRestarts(ADMIN);
+  assert.equal(restarts.length, 3);
+  assert.equal(restarts[0].at.getHours(), 18);
+  assert.equal(restarts[0].at.getMinutes(), 0);
+  assert.equal(bootSegments(SERVER).length, 3);
+});
+
+test('your real restart: txAdmin blamed the casino, but the whole server was paused by sleep', () => {
+  const [first] = adminRestarts(ADMIN);
+  const [segment] = bootSegments(SERVER);
+  assert.equal(wholePause(segment.lines), 1810391);
+  const incident = explainRestart(first, segment, [{ from: first.at.getTime() - 1810000, to: first.at.getTime() - 3000 }]);
+  assert.equal(incident.kind, 'paused');
+  assert.match(incident.detail, /txAdmin named some_casino\.pack, but it was only the script loading/);
+  assert.equal(incident.fix, undefined, 'a sleep never blames a script');
+});
+
+test('doctor: a hang while awake points at the script that was loading, with a turn-off fix', () => {
+  const [, second] = adminRestarts(ADMIN);
+  const segment = bootSegments(SERVER)[1];
+  assert.deepEqual(lastActivity(segment.lines), { kind: 'resource', name: 'slow_script' });
+  const incident = explainRestart(second, segment, []);
+  assert.equal(incident.kind, 'hang');
+  assert.deepEqual(incident.fix.fix, { type: 'boot-off', name: 'slow_script' });
+});
+
+test('doctor: a restart CityHQ made itself is planned, not a crash', () => {
+  const third = adminRestarts(ADMIN)[2];
+  const segment = bootSegments(SERVER)[2];
+  assert.equal(explainRestart(third, segment, [], [{ state: 'restarting', at: third.at.getTime() - 60000 }]).kind, 'planned');
+  const crash = explainRestart(third, segment, [], []);
+  assert.equal(crash.kind, 'crash');
+  assert.equal(crash.suspect, null, 'after a finished start, the last script loaded is not blamed');
+});
+
+// ---- Install check: which framework a script is written for ----
+
+test('your real script: a config set to ESX is caught with the exact line', () => {
+  const fit = frameworkFit({ manifest: "fx_version 'cerulean'", configs: [{ file: 'config.lua', text: 'Config = {}\nConfig.Framework = "esx" -- "qb" or "esx"\n' }], folders: [] });
+  assert.equal(fit.status, 'bad');
+  assert.deepEqual(fit.openFile, { file: 'config.lua', line: 2, label: 'Open config.lua at line 2' });
+});
+
+test('install check: ESX-only, QBCore and bridged scripts are told apart', () => {
+  assert.equal(frameworkFit({ manifest: "shared_script '@es_extended/imports.lua'", configs: [], folders: [] }).status, 'bad');
+  assert.equal(frameworkFit({ manifest: "shared_script '@es_extended/imports.lua'", configs: [], folders: [{ parent: 'bridge', name: 'qb' }] }).status, 'ok');
+  assert.equal(frameworkFit({ manifest: "shared_script '@qb-core/shared/locale.lua'", configs: [], folders: [] }).status, 'ok');
+  assert.equal(frameworkFit({ manifest: '', configs: [{ file: 'config.lua', text: "Config.Framework = 'auto'" }], folders: [] }).status, 'ok');
+  assert.equal(frameworkFit({ manifest: "fx_version 'cerulean'", configs: [], folders: [] }).status, 'info', 'maps and cars need no framework');
+});
+
+// ---- Friends can't join ----
+
+test('friends: the router and this PC\'s address are read from "route print"', () => {
+  const text = 'IPv4 Route Table\n===\nActive Routes:\nNetwork Destination        Netmask          Gateway       Interface  Metric\n          0.0.0.0          0.0.0.0      192.168.0.1    192.168.0.50     35\n';
+  assert.deepEqual(parseRoute(text), { gateway: '192.168.0.1', localIp: '192.168.0.50' });
+  assert.equal(parseRoute('nothing'), null);
+});
+
+const RULES = parseFirewall([
+  'Rule Name:                            Cfx.re Platform Server (FXServer)',
+  '----------------------------------------------------------------------',
+  'Enabled:                              Yes',
+  'Direction:                            In',
+  'Profiles:                             Public',
+  'Protocol:                             UDP',
+  'LocalPort:                            Any',
+  'Program:                              D:\\qbcore-server\\server\\fxserver.exe',
+  'Action:                               Allow',
+  '',
+  'Rule Name:                            Cfx.re Platform Server (FXServer)',
+  'Enabled:                              Yes',
+  'Profiles:                             Public',
+  'Protocol:                             TCP',
+  'LocalPort:                            Any',
+  'Program:                              D:\\qbcore-server\\server\\fxserver.exe',
+  'Action:                               Allow',
+  '',
+  'Rule Name:                            fxserver.exe',
+  'Enabled:                              Yes',
+  'Profiles:                             Private',
+  'Protocol:                             TCP',
+  'LocalPort:                            Any',
+  'Program:                              C:\\users\\someone\\downloads\\other-server\\fxserver.exe',
+  'Action:                               Allow',
+].join('\r\n'));
+
+test('your real firewall: rules for this server count, rules for other servers in Downloads don\'t', () => {
+  assert.equal(RULES.length, 3);
+  assert.deepEqual(firewallCovers(RULES, { program: 'D:\\QBCore-Server\\server\\FXServer.exe', port: 30121, profile: 'Public' }), { tcp: true, udp: true });
+  assert.deepEqual(firewallCovers(RULES, { program: 'D:\\QBCore-Server\\server\\FXServer.exe', port: 30121, profile: 'Private' }), { tcp: false, udp: false }, 'a Public-only rule does not cover a Private network');
+  assert.deepEqual(firewallCovers(RULES, { program: 'C:\\users\\someone\\downloads\\other-server\\fxserver.exe', port: 1, profile: 'Private' }), { tcp: true, udp: false });
+});
+
+test('friends: what FiveM\'s server list said, read with the time since the server started', () => {
+  const start = (t) => `[TXADMIN] ======== [1] FXServer Starting - 11/10/2026, ${t}`;
+  const fail = '[citizen-server-impl] Server list query returned an error: Cfx failed to reach the server at 203.0.113.7:30121 - check if the sv_listingIpOverride';
+  const ready = '[script:qb-control] [qb-control] ready';
+  const at = (h, m) => new Date(2026, 10, 10, h, m).getTime();
+  assert.deepEqual(listingStatus([start('8:00:00 PM'), ready, fail], at(20, 30)), { status: 'blocked', publicIp: '203.0.113.7' });
+  assert.equal(listingStatus([start('7:00:00 PM'), fail, start('8:00:00 PM'), ready], at(20, 2)).status, 'pending', 'too soon after a start to know');
+  assert.equal(listingStatus([start('7:00:00 PM'), fail, start('8:00:00 PM'), ready], at(20, 2)).lastFailed, true);
+  assert.equal(listingStatus([start('7:00:00 PM'), fail, start('8:00:00 PM'), ready], at(20, 10)).status, 'ok', 'no complaint for a while after starting means it worked');
+});
+
+// ---- Server profile ----
+
+test('profile: player slots are read and changed in place, keeping the comment', () => {
+  const cfg = ['sv_maxclients 10 # slots', 'sets sv_projectName "x"', ''].join('\r\n');
+  assert.equal(readCommand(cfg, 'sv_maxclients'), '10');
+  const changed = setCommand(cfg, 'sv_maxclients', '32');
+  assert.equal(changed.split('\r\n')[0], 'sv_maxclients 32 # slots');
+  assert.equal(readCommand(setCommand(CFG, 'sv_maxclients', '48'), 'sv_maxclients'), '48', 'added to the app block when missing');
+  assert.equal(gameBuildName(3095), 'The Chop Shop');
+  assert.equal(gameBuildName(1), null);
+});
+
+// ---- Waiting for a boot: progress, not a fixed clock ----
+
+test('boot wait: a slow boot that keeps logging is never cut off at 3 minutes', () => {
+  const start = 0;
+  const min = 60000;
+  assert.equal(bootVerdict({ now: 4 * min, startedAt: start, lastProgress: 4 * min - 5000 }), 'wait');
+  assert.equal(bootVerdict({ now: 12 * min, startedAt: start, lastProgress: 11 * min }), 'wait');
+});
+
+test('boot wait: a boot with nothing new in its log for 5 minutes counts as stuck', () => {
+  assert.equal(BOOT_STALL_MS, 5 * 60000);
+  assert.equal(bootVerdict({ now: 9 * 60000, startedAt: 0, lastProgress: 3 * 60000 }), 'stalled');
+});
+
+test('boot wait: there is still a hard limit, and time the PC spent asleep does not count towards it', () => {
+  const now = BOOT_MAX_MS + 60000;
+  assert.equal(bootVerdict({ now, startedAt: 0, lastProgress: now - 1000 }), 'timeout');
+  assert.equal(bootVerdict({ now, startedAt: 0, lastProgress: now - 1000, asleepMs: 30 * 60000 }), 'wait', 'a 30-minute sleep during the boot is not held against it');
 });

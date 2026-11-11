@@ -1,6 +1,6 @@
 // The desktop window. The server runs on its own, so closing this never stops the game.
 import {
-  app, BrowserWindow, dialog, Menu, nativeImage, screen, session, shell, Tray,
+  app, BrowserWindow, dialog, Menu, nativeImage, powerMonitor, powerSaveBlocker, screen, session, shell, Tray,
 } from 'electron';
 import { appendFileSync, mkdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
@@ -135,9 +135,25 @@ function createTray() {
   tray.on('balloon-click', showWindow);
 }
 
+// Windows "stay awake" requests: 'system' lets the screen turn off; 'display' keeps it on as well.
+// Microsoft: a display request only stops sleep when a system request is held alongside it.
+let awakeBlockers = [];
+let awakeKind = 'off';
+function setKeepAwake(mode) {
+  if (mode === awakeKind) return;
+  for (const id of awakeBlockers) if (powerSaveBlocker.isStarted(id)) powerSaveBlocker.stop(id);
+  awakeBlockers = [];
+  if (mode === 'system' || mode === 'display') awakeBlockers.push(powerSaveBlocker.start('prevent-app-suspension'));
+  if (mode === 'display') awakeBlockers.push(powerSaveBlocker.start('prevent-display-sleep'));
+  awakeKind = mode;
+}
+
 function installDesktopHooks() {
   const loginOptions = { path: process.execPath, args: [AUTOSTART_FLAG] };
   setDesktopHooks({
+    setKeepAwake,
+    onBattery: () => powerMonitor.isOnBatteryPower(),
+    isKeepingAwake: () => awakeBlockers.some((id) => powerSaveBlocker.isStarted(id)),
     getOpenAtLogin: () => (app.isPackaged ? app.getLoginItemSettings(loginOptions).openAtLogin : false),
     setOpenAtLogin(enabled) {
       // A development copy must never register itself to run at startup.

@@ -1,5 +1,5 @@
 import {
-  Archive, Bell, Boxes, Building2, ExternalLink, FolderOpen, Gauge, KeyRound, Settings as SettingsIcon, Terminal, Users,
+  Archive, Bell, BookOpen, Boxes, Building2, CircleHelp, ExternalLink, FolderOpen, Gauge, HeartPulse, KeyRound, Settings as SettingsIcon, Terminal, Users,
 } from 'lucide-react';
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { api, onSignedOut } from './api';
@@ -8,6 +8,9 @@ import { City } from './pages/City';
 import { Console } from './pages/Console';
 import { GlobalSearch } from './Search';
 import { Files } from './pages/Files';
+import { Health } from './pages/Health';
+import { Learn } from './pages/Learn';
+import { Tour } from './Tour';
 import { Overview } from './pages/Overview';
 import { Players } from './pages/Players';
 import { Resources } from './pages/Resources';
@@ -16,9 +19,10 @@ import {
   Button, ConfirmProvider, Notice, ServerBadge, Spinner, ToastProvider, usePoll,
 } from './ui';
 
-type Page = 'overview' | 'city' | 'resources' | 'players' | 'files' | 'backups' | 'console' | 'settings';
+type Page = 'overview' | 'health' | 'city' | 'resources' | 'players' | 'files' | 'backups' | 'console' | 'settings' | 'learn';
 const NAV: { id: Page; label: string; icon: ReactNode }[] = [
   { id: 'overview', label: 'Overview', icon: <Gauge size={20} /> },
+  { id: 'health', label: 'Health', icon: <HeartPulse size={20} /> },
   { id: 'city', label: 'City', icon: <Building2 size={20} /> },
   { id: 'players', label: 'Players', icon: <Users size={20} /> },
   { id: 'resources', label: 'Resources', icon: <Boxes size={20} /> },
@@ -28,7 +32,9 @@ const NAV: { id: Page; label: string; icon: ReactNode }[] = [
   { id: 'settings', label: 'Settings', icon: <SettingsIcon size={20} /> },
 ];
 
-const isPage = (value: string): value is Page => NAV.some((n) => n.id === value);
+// Learn isn't in the menu (which is full on phones); it's reached from the ? button, Settings and search.
+const SEARCHABLE = [...NAV, { id: 'learn' as Page, label: 'Learn the basics', icon: <BookOpen size={20} /> }];
+const isPage = (value: string): value is Page => SEARCHABLE.some((n) => n.id === value);
 const pageFromHash = (): Page => {
   const hash = window.location.hash.slice(1);
   return isPage(hash) ? hash : 'overview';
@@ -130,8 +136,11 @@ function Shell({ local, onSignOut }: { local: boolean; onSignOut: () => void }) 
       <main className={`content ${page === 'console' ? 'content-console' : ''} ${page === 'files' ? 'content-files' : ''}`}>
         {page !== 'console' && page !== 'files' && (
           <header className="app-header">
-            <GlobalSearch pages={NAV} />
+            <GlobalSearch pages={SEARCHABLE} />
             <div className="app-header-right">
+              <a className="header-bell header-help" href="#learn" aria-label="Learn the basics" title="Learn the basics">
+                <CircleHelp size={18} />
+              </a>
               <button className="header-bell" aria-label={`${overview.data?.alerts.length || 0} alerts`} title="Alerts" onClick={() => goTo('overview')}>
                 <Bell size={18} />
                 {(overview.data?.alerts.length || 0) > 0 && <span className="bell-dot">{overview.data?.alerts.length}</span>}
@@ -147,6 +156,7 @@ function Shell({ local, onSignOut }: { local: boolean; onSignOut: () => void }) 
           </header>
         )}
         {page === 'overview' && <Overview data={overview.data} error={overview.error} refresh={overview.refresh} local={local} goTo={goTo} />}
+        {page === 'health' && <Health />}
         {page === 'city' && <City online={online} helperOutdated={Boolean(overview.data?.helperOutdated)} />}
         {page === 'resources' && <Resources />}
         {page === 'players' && <Players gamePort={overview.data?.gamePort ?? 30121} />}
@@ -154,7 +164,9 @@ function Shell({ local, onSignOut }: { local: boolean; onSignOut: () => void }) 
         {page === 'backups' && <Backups />}
         {page === 'console' && <Console online={online} />}
         {page === 'settings' && <SettingsPage online={online} onSignOut={onSignOut} />}
+        {page === 'learn' && <Learn />}
       </main>
+      <Tour />
     </div>
   );
 }

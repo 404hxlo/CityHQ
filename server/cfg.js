@@ -105,6 +105,61 @@ export function removeBootLine(text, name) {
   )).join(eol);
 }
 
+const CONVAR_LINE = /^(\s*)(set[rsa]?)\s+(\S+)\s+(.*?)\s*$/i;
+
+/** The value server.cfg gives a setting (set, sets, setr or seta), or null when it isn't set. The last one wins. */
+export function readConvar(text, key) {
+  let value = null;
+  for (const raw of text.split(/\r?\n/)) {
+    const m = splitComment(raw)[0].match(CONVAR_LINE);
+    if (m && m[3].toLowerCase() === key.toLowerCase()) value = m[4].replace(/^["']|["']$/g, '');
+  }
+  return value;
+}
+
+/** True for the ways people write "on" in server.cfg. */
+export const convarOn = (value) => value !== null && /^(1|true|on|yes)$/i.test(value.trim());
+
+/** Sets a setting: every existing line for it is changed in place, or one is added to the app's block. */
+export function setConvar(text, key, value) {
+  const eol = EOL(text);
+  let found = false;
+  const lines = text.split(/\r?\n/).map((raw) => {
+    const [code, comment] = splitComment(raw);
+    const m = code.match(CONVAR_LINE);
+    if (!m || m[3].toLowerCase() !== key.toLowerCase()) return raw;
+    found = true;
+    return `${m[1]}${m[2]} ${m[3]} ${value}${comment ? ` ${comment.trim()}` : ''}`;
+  });
+  if (found) return lines.join(eol);
+  return withBlock(text, (block) => { block.push(`set ${key} ${value}`); });
+}
+
+/** The value of a command line such as "sv_maxclients 10" (not "set ..."), or null. The last one wins. */
+export function readCommand(text, key) {
+  let value = null;
+  for (const raw of text.split(/\r?\n/)) {
+    const m = splitComment(raw)[0].match(/^\s*(\S+)\s+(.*?)\s*$/);
+    if (m && m[1].toLowerCase() === key.toLowerCase()) value = m[2].replace(/^["']|["']$/g, '');
+  }
+  return value;
+}
+
+/** Sets a command line such as "sv_maxclients 32": changed in place, or added to the app's block. */
+export function setCommand(text, key, value) {
+  const eol = EOL(text);
+  let found = false;
+  const lines = text.split(/\r?\n/).map((raw) => {
+    const [code, comment] = splitComment(raw);
+    const m = code.match(/^(\s*)(\S+)\s+/);
+    if (!m || m[2].toLowerCase() !== key.toLowerCase()) return raw;
+    found = true;
+    return `${m[1]}${m[2]} ${value}${comment ? ` ${comment.trim()}` : ''}`;
+  });
+  if (found) return lines.join(eol);
+  return withBlock(text, (block) => { block.push(`${key} ${value}`); });
+}
+
 /** Deletes every start line and off-marker for name; used when a resource is removed. */
 export function forgetBootLines(text, name) {
   const eol = EOL(text);

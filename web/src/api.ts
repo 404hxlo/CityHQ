@@ -5,7 +5,49 @@ export type ProblemAction =
   | { kind: 'open-file'; label: string; path: string; line?: number }
   | { kind: 'open-resource'; label: string; name: string }
   | { kind: 'install'; label: string; url: string; name: string }
-  | { kind: 'run-sql'; label: string; name: string; file: string };
+  | { kind: 'run-sql'; label: string; name: string; file: string }
+  /** A one-click fix: the server plans and checks it again from the problem id when pressed. */
+  | { kind: 'fix'; label: string; confirm: string };
+export interface FixResult { message: string; fixId: string; undoable: boolean }
+/** A one-click fix offered on the Health page; the server plans it again from the item's id. */
+export interface PlannedFix { label: string; confirm: string }
+export interface HealthFinding {
+  id: string; status: 'ok' | 'warn' | 'bad' | 'info'; title: string; detail: string; steps: string[];
+  fix?: PlannedFix; goTo?: string;
+}
+export interface DoctorIncident {
+  id: string; at: number; kind: 'paused' | 'planned' | 'crash' | 'license' | 'stuck-script' | 'hang' | 'other';
+  title: string; detail: string; advice?: string; suspect?: string | null; fix?: PlannedFix;
+}
+export interface DoctorReport { summary: string; incidents: DoctorIncident[] }
+/** Server profile: what server.cfg still controls, and where the server-list details now live. */
+export interface ServerProfile { maxClients: number | null; gameBuild: number | null; gameBuildName: string | null; portalUrl: string }
+/** Friends can't join? Everything between the server and players outside the home network. */
+export interface ReachReport {
+  port: number; localIp: string | null; gateway: string | null; profile: string | null; listening: boolean;
+  firewall: { tcp: boolean; udp: boolean; ok: boolean } | null;
+  listing: { status: 'ok' | 'blocked' | 'pending'; publicIp: string | null; lastFailed?: boolean };
+  firewallCommand: string; local: boolean;
+}
+/** The install check for one script: what it needs to work here, with fixes where safe. */
+export interface ScriptCheck extends HealthFinding {
+  install?: { label: string; url: string };
+  openFile?: { path: string; line: number; label: string };
+}
+export interface ScriptReport {
+  name: string; checks: ScriptCheck[];
+  docs: { url: string; label: string } | null;
+  notes: { file: string; text: string } | null;
+}
+/** One change made through CityHQ, newest first, with Undo when there's a way back. */
+export interface ChangeRecord {
+  id: string; at: number; kind: string; title: string; detail: string; undoHint: string;
+  undone: boolean; undoneAt?: number; undoable: boolean;
+}
+export interface FixRecord {
+  id: string; at: number; problemId: string; title: string; label: string; message: string;
+  undone: boolean; undoneAt?: number; undoable: boolean;
+}
 export interface Problem {
   id: string; rule: string; severity: 'error' | 'warning'; resource?: string | null; count: number;
   title: string; what: string; fix: string[]; actions: ProblemAction[]; links: ProblemLink[]; raw: string;
@@ -23,6 +65,11 @@ export interface Automation {
   autoStartServer: boolean;
   autoRecover: boolean;
   openAtLogin: boolean | null;
+  /** Ask Windows not to sleep while the server runs; the rest is what's happening right now. */
+  keepAwake: {
+    enabled: boolean; screenOnBattery: boolean;
+    supported: boolean; holding: 'off' | 'system' | 'display'; active: boolean; serverRunning: boolean; onBattery: boolean;
+  };
 }
 export type BackupPart = 'database' | 'settings' | 'scripts';
 export interface ServerBackup { id: string; createdAt: number; reason: string; parts: BackupPart[]; size: number; tables?: number; skipped: string[] }
@@ -54,12 +101,22 @@ export interface Overview {
 }
 
 export interface Resource {
-  name: string; folder: string; category: string; version: string; description: string; author: string;
+  /** null for resources built into FiveM, which have no folder in resources/. */
+  name: string; folder: string | null; category: string; version: string; description: string; author: string;
   state: string;
-  boot: { enabled: boolean; source: 'line' | 'category' | 'none'; turnedOffByApp: boolean };
+  /** source 'always': started by txAdmin itself (monitor), not by server.cfg. */
+  boot: { enabled: boolean; source: 'line' | 'category' | 'none' | 'always'; turnedOffByApp: boolean };
   dependencies: string[]; missingDependencies: string[]; dependents: string[];
   installable: { name: string; url: string; from: string; resource?: string }[];
   canStop: boolean; canRemove: boolean; warnOnStop: boolean; hasEasyConfig: boolean;
+  /** Ships inside FXServer (chat, monitor, yarn, webpack). */
+  builtIn?: boolean;
+  /** A server.cfg setting the "start with the server" switch also changes, such as resources_useSystemChat. */
+  setting?: { key: string; on: boolean } | null;
+  /** Why it can't be stopped, when it can't. */
+  lockedReason?: string | null;
+  /** A running resource that stands in for this one (its `provides`), such as um-clothing-qb for qb-clothing. */
+  replacedBy?: string | null;
   problem: string | null;
 }
 export interface ResourceList { serverOnline: boolean; resources: Resource[] }
@@ -209,6 +266,21 @@ export const api = {
   cancelRestartLater: () => request('DELETE', '/api/server/restart-later'),
   announce: (message: string) => request<{ players: number }>('POST', '/api/announce', { message }),
   problems: (fresh = false) => request<Problem[]>('GET', `/api/problems${fresh ? '?fresh=1' : ''}`),
+  fixProblem: (id: string) => request<FixResult>('POST', '/api/problems/fix', { id }),
+  profile: () => request<ServerProfile>('GET', '/api/profile'),
+  setSlots: (maxClients: number) => request<ServerProfile>('PUT', '/api/profile/slots', { maxClients }),
+  reach: () => request<ReachReport>('GET', '/api/reach'),
+  reachFirewall: () => request<{ asked: boolean }>('POST', '/api/reach/firewall'),
+  scriptCheck: (name: string) => request<ScriptReport>('GET', `/api/resources/${q(name)}/check`),
+  scriptCheckFix: (name: string, id: string) => request<FixResult>('POST', `/api/resources/${q(name)}/check/fix`, { id }),
+  history: () => request<ChangeRecord[]>('GET', '/api/history'),
+  undoChange: (id: string) => request<{ message: string }>('POST', `/api/history/${q(id)}/undo`),
+  health: () => request<HealthFinding[]>('GET', '/api/health'),
+  healthFix: (id: string) => request<FixResult>('POST', '/api/health/fix', { id }),
+  doctor: () => request<DoctorReport>('GET', '/api/health/doctor'),
+  doctorFix: (id: string) => request<FixResult>('POST', '/api/health/doctor/fix', { id }),
+  recentFixes: () => request<FixRecord[]>('GET', '/api/problems/fixes'),
+  undoFix: (id: string) => request<{ message: string }>('POST', `/api/problems/fixes/${q(id)}/undo`),
   events: () => request<AppEvent[]>('GET', '/api/events'),
   markSeen: (id?: string) => request('POST', '/api/events/seen', { id }),
 
@@ -219,7 +291,10 @@ export const api = {
   openBackupsFolder: () => request('POST', '/api/backups/open-folder'),
 
   automation: () => request<Automation>('GET', '/api/automation'),
-  setAutomation: (patch: Partial<Omit<Automation, 'backups'>> & { backups?: Partial<Automation['backups']> }) => request<Automation>('PUT', '/api/automation', patch),
+  setAutomation: (patch: Partial<Omit<Automation, 'backups' | 'keepAwake'>> & {
+    backups?: Partial<Automation['backups']>;
+    keepAwake?: { enabled?: boolean; screenOnBattery?: boolean };
+  }) => request<Automation>('PUT', '/api/automation', patch),
 
   console: (since?: number) => request<ConsoleChunk>('GET', `/api/console${since === undefined ? '' : `?since=${since}`}`),
   command: (command: string) => request('POST', '/api/console/command', { command }),

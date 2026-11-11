@@ -1,19 +1,38 @@
 // The server's overall state, and start / stop / restart.
-import { readFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { stat } from 'node:fs/promises';
 import path from 'node:path';
 import { agentRequest, installAgent, installedAgentVersion } from './agent.js';
 import { applyBackupParts, createBackup, readBackup } from './backups.js';
 import { ensureCfgBlock } from './resources.js';
 import {
-  FXSERVER_LOG, GAME_PORT, HttpError, findServerData, TX_PROFILE, TXADMIN_PORT,
+  FXSERVER_LOG, GAME_PORT, HttpError, findServerData, STATE_DIR, TX_PROFILE, TXADMIN_PORT,
 } from './paths.js';
 import {
   getHistory, getProcessState, isPortOpen, killTree, startTxAdmin, waitFor,
 } from './processes.js';
 import { fatalErrorBox, whyStartFailed } from './startup.js';
 
-const BOOT_MS = 180000;
+// A boot is given as long as it keeps making progress (the server log keeps growing), up to a hard
+// limit. Big servers take well over 3 minutes, and a fixed clock cut healthy boots short.
+export const BOOT_STALL_MS = 5 * 60 * 1000;
+export const BOOT_MAX_MS = 25 * 60 * 1000;
+// A gap this long between two checks a second or two apart means the PC was asleep.
+const SLEPT_GAP_MS = 30000;
 const CLOSED_FOR_MS = 6000;
+
+/**
+ * Whether to keep waiting for a boot: 'wait', 'stalled' (nothing new in the log for too long) or
+ * 'timeout' (over the hard limit). Time the PC spent asleep doesn't count, since the server can't
+ * make progress then either.
+ */
+export function bootVerdict({ now, startedAt, lastProgress, stallMs = BOOT_STALL_MS, maxMs = BOOT_MAX_MS, asleepMs = 0 }) {
+  if (now - startedAt - asleepMs > maxMs) return 'timeout';
+  if (now - lastProgress > stallMs) return 'stalled';
+  return 'wait';
+}
+
+const logSize = async () => { try { return (await stat(FXSERVER_LOG)).size; } catch { return 0; } };
 
 const STATUS_MS = 2000;
 let liveStatus = null;
@@ -92,9 +111,23 @@ export function getOverview() {
   };
 }
 
+const ACTIONS_FILE = path.join(STATE_DIR, 'control-actions.json');
+
+/** CityHQ's own starts, stops and restarts, so the startup doctor doesn't mistake them for crashes. */
+export function controlActions() {
+  try { return JSON.parse(readFileSync(ACTIONS_FILE, 'utf8')); } catch { return []; }
+}
+function rememberAction(state) {
+  try {
+    mkdirSync(STATE_DIR, { recursive: true });
+    writeFileSync(ACTIONS_FILE, JSON.stringify([{ state, at: Date.now() }, ...controlActions()].slice(0, 50)));
+  } catch { /* only used for explanations */ }
+}
+
 async function exclusive(state, message, run) {
   if (action) throw new HttpError(409, `Please wait: ${action.message}`);
   action = { state, message };
+  rememberAction(state);
   try {
     return await run();
   } finally {
@@ -120,13 +153,29 @@ const gameOnline = async () => {
  * startup, it stops waiting straight away and says why, instead of making people wait out the
  * whole time for something that already failed.
  */
-export async function waitForBoot(startedAt, timeoutMs = BOOT_MS) {
-  const deadline = Date.now() + timeoutMs;
+export async function waitForBoot(startedAt, { stallMs = BOOT_STALL_MS, maxMs = BOOT_MAX_MS } = {}) {
   let seen = false;
   let goneSince = 0;
   let lastBoxCheck = 0;
-  while (Date.now() < deadline) {
+  let lastSize = await logSize();
+  let lastProgress = Date.now();
+  let lastTick = Date.now();
+  let asleepMs = 0;
+  for (;;) {
     if (await gameOnline()) return { ok: true };
+    const now = Date.now();
+    if (now - lastTick > SLEPT_GAP_MS) {
+      // The PC slept: the server couldn't progress either, so start the stall clock again.
+      asleepMs += now - lastTick;
+      lastProgress = now;
+    }
+    lastTick = now;
+    const size = await logSize();
+    if (size !== lastSize) { lastSize = size; lastProgress = now; }
+    const verdict = bootVerdict({ now, startedAt, lastProgress, stallMs, maxMs, asleepMs });
+    if (verdict !== 'wait') {
+      return { ok: false, stalled: true, reason: await whyStartFailed(startedAt, { closed: false, stalledMs: verdict === 'stalled' ? now - lastProgress : 0 }) };
+    }
     const p = getProcessState();
     if (p.monitor) {
       seen = true;
@@ -148,7 +197,6 @@ export async function waitForBoot(startedAt, timeoutMs = BOOT_MS) {
     }
     await new Promise((r) => setTimeout(r, 1500));
   }
-  return { ok: false, reason: await whyStartFailed(startedAt, { closed: false }) };
 }
 
 /** Keeps qb-control and its server.cfg lines in place before each boot. */
@@ -254,7 +302,11 @@ export function restartServer(reason) {
         const g = getProcessState().game;
         return g && g.pid !== oldGame;
       }, 45000);
-      if (relaunched && await waitFor(gameOnline, 120000, 1500)) return { restarted: true };
+      if (relaunched) {
+        // Give txAdmin's relaunch as long as it keeps making progress; only a stuck boot is redone.
+        const boot = await waitForBoot(Date.now());
+        if (boot.ok) return { restarted: true };
+      }
     }
 
     // Nothing running, or txAdmin did not bring it back: restart from the top.

@@ -8,7 +8,7 @@ import {
 } from '../api';
 import { LineChart } from '../Chart';
 import { openPlayer } from '../nav';
-import { ProblemList } from '../Problems';
+import { ProblemList, RecentFixes } from '../Problems';
 import {
   Button, Empty, formatBytes, formatUptime, formatWhen, Modal, Notice, Segmented, ServerBadge, Spinner, Toggle,
   useAction, useConfirm, usePoll,
@@ -409,6 +409,7 @@ export function Overview({ data, error, refresh, local, goTo }: Props) {
           {data.problems.length === 0
             ? <p className="muted-note">Nothing wrong in the server's latest startup log.</p>
             : <ProblemList problems={data.problems} onChanged={refresh} />}
+          <RecentFixes onChanged={refresh} />
           {data.problems.length > 0 && <button className="link" onClick={() => goTo('console')}>Open the full console</button>}
         </section>
 

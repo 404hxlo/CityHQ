@@ -1,12 +1,13 @@
 import {
-  CheckCircle2, Code2, Eye, History, Maximize2, Minimize2, RotateCcw, Search, SlidersHorizontal, Undo2, WrapText,
+  CheckCircle2, ChevronDown, ChevronUp, Code2, Eye, History, Maximize2, Minimize2, RotateCcw, Search, SlidersHorizontal, Undo2, WrapText,
 } from 'lucide-react';
 import {
-  lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode,
+  lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode, type RefObject,
 } from 'react';
 import {
   api, ApiError, type EditableFile, type Field, type FileEntry, type FileVersion, type Problem, type RestartResult,
 } from './api';
+import type { FindInfo } from './CodeEditor';
 import { ProblemList } from './Problems';
 import {
   Button, Empty, formatBytes, formatWhen, Modal, Notice, Segmented, Spinner, Toggle, useAction, useConfirm, useToast,
@@ -97,6 +98,53 @@ function FieldList({ fields, changes, onChange }: { fields: Field[]; changes: Ch
   );
 }
 
+const NO_FIND: FindInfo = { current: 0, total: 0, capped: false };
+
+/** The code view's find bar: Enter goes to the next match, Shift+Enter back, Esc clears. */
+function FindBar({ inputRef, text, info, onText, onStep }: {
+  inputRef: RefObject<HTMLInputElement | null>;
+  text: string;
+  info: FindInfo;
+  onText: (text: string) => void;
+  onStep: (dir: 1 | -1) => void;
+}) {
+  const count = info.total
+    ? `${info.current || '-'} of ${info.total}${info.capped ? '+' : ''}`
+    : 'No matches';
+  return (
+    <div className={`search code-find ${text && !info.total ? 'no-match' : ''}`} role="search">
+      <Search size={16} />
+      <input
+        ref={inputRef}
+        type="text"
+        placeholder="Find in this file"
+        aria-label="Find in this file"
+        spellCheck={false}
+        value={text}
+        onChange={(e) => onText(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') {
+            e.preventDefault();
+            onStep(e.shiftKey ? -1 : 1);
+          } else if (e.key === 'Escape') {
+            // Esc here never closes full screen: it clears the text, then leaves the box.
+            e.preventDefault();
+            e.stopPropagation();
+            if (text) onText(''); else e.currentTarget.blur();
+          }
+        }}
+      />
+      {text && <span className="find-count" aria-live="polite">{count}</span>}
+      <button type="button" className="icon-btn" title="Previous match (Shift+Enter)" aria-label="Previous match" disabled={!info.total} onClick={() => onStep(-1)}>
+        <ChevronUp size={16} />
+      </button>
+      <button type="button" className="icon-btn" title="Next match (Enter)" aria-label="Next match" disabled={!info.total} onClick={() => onStep(1)}>
+        <ChevronDown size={16} />
+      </button>
+    </div>
+  );
+}
+
 function VersionsModal({ scope, path, onClose, onRestored }: { scope: string; path: string; onClose: () => void; onRestored: (f: EditableFile) => void }) {
   const [versions, setVersions] = useState<FileVersion[] | null>(null);
   const { busy, run } = useAction();
@@ -164,6 +212,10 @@ export function FileEditor({
   const [wrap, setWrap] = useState(loadWrapPreference);
   const [mistake, setMistake] = useState<{ line?: number; plain: string; message?: string } | null>(null);
   const [jump, setJump] = useState<{ line: number; token: number } | null>(null);
+  const [findText, setFindText] = useState('');
+  const [findStep, setFindStep] = useState<{ dir: 1 | -1; token: number } | null>(null);
+  const [findInfo, setFindInfo] = useState<FindInfo>(NO_FIND);
+  const findInput = useRef<HTMLInputElement>(null);
   const [lastSave, setLastSave] = useState<{ backupId: string; at: number; checked: boolean } | null>(null);
   const [failure, setFailure] = useState<{ backupId: string; message: string | null; problems: Problem[] } | null>(null);
   const { busy, run } = useAction();
@@ -186,6 +238,33 @@ export function FileEditor({
     saveWrapPreference(!wrap);
     setWrap(!wrap);
   };
+
+  const stepFind = (dir: 1 | -1) => setFindStep({ dir, token: Date.now() + Math.random() });
+  const updateFindInfo = useCallback((next: FindInfo) => {
+    setFindInfo((cur) => (cur.current === next.current && cur.total === next.total && cur.capped === next.capped ? cur : next));
+  }, []);
+  /** Ctrl+F: puts the selected text (if any) in the find bar and moves there. */
+  const focusFind = useCallback((selected = '') => {
+    if (selected) setFindText(selected);
+    requestAnimationFrame(() => {
+      findInput.current?.focus();
+      findInput.current?.select();
+    });
+  }, []);
+
+  // Ctrl+F also works when the editor itself is not focused (the editor handles it when it is).
+  const codeOpen = Boolean(doc) && mode === 'code';
+  useEffect(() => {
+    if (!codeOpen) return undefined;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.defaultPrevented || !(e.ctrlKey || e.metaKey) || e.altKey || e.key.toLowerCase() !== 'f') return;
+      if (document.querySelector('.modal')) return;
+      e.preventDefault();
+      focusFind();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [codeOpen, focusFind]);
 
   const dirty = mode === 'simple' ? Object.keys(changes).length > 0 : Boolean(doc && !doc.readOnly && code !== doc.content);
   useEffect(() => { onDirtyChange?.(dirty); }, [dirty, onDirtyChange]);
@@ -322,6 +401,7 @@ export function FileEditor({
             <Button variant="ghost" className={wrap ? 'is-on' : ''} aria-pressed={wrap} title="Keep long lines inside the box" icon={<WrapText size={16} />} onClick={toggleWrap}>Wrap lines</Button>
           )}
           {doc && !doc.readOnly && <Button variant="ghost" icon={<History size={16} />} onClick={() => setShowVersions(true)}>Backups</Button>}
+          {codeOpen && <FindBar inputRef={findInput} text={findText} info={findInfo} onText={setFindText} onStep={stepFind} />}
           {doc && (
             <Button
               variant="ghost"
@@ -386,7 +466,19 @@ export function FileEditor({
       {doc && mode === 'code' && (
         <div className="code-frame">
           <Suspense fallback={<Spinner label="Loading editor" />}>
-            <CodeEditor path={path} value={code} onChange={setCode} readOnly={doc.readOnly} line={line} wrap={wrap} jump={jump} />
+            <CodeEditor
+              path={path}
+              value={code}
+              onChange={setCode}
+              readOnly={doc.readOnly}
+              line={line}
+              wrap={wrap}
+              jump={jump}
+              find={findText}
+              findStep={findStep}
+              onFindInfo={updateFindInfo}
+              onFindKey={focusFind}
+            />
           </Suspense>
         </div>
       )}

@@ -1,8 +1,10 @@
 import {
-  Archive, Database, FolderOpen, History, Loader2, RotateCcw, Save, ScrollText, Settings2, Trash2,
+  Archive, Database, FolderOpen, History, Loader2, RotateCcw, Save, ScrollText, Settings2, Trash2, Undo2,
 } from 'lucide-react';
 import { useState } from 'react';
-import { api, type BackupPart, type ServerBackup } from '../api';
+import {
+  api, type BackupPart, type ChangeRecord, type ServerBackup,
+} from '../api';
 import {
   Button, Empty, formatBytes, formatWhen, Modal, Notice, Spinner, Toggle, useAction, useConfirm, usePoll,
 } from '../ui';
@@ -12,7 +14,55 @@ const REASONS: Record<string, string> = {
   nightly: 'Automatic',
   'before-restore': 'Made before a restore',
   'before-sql': 'Made before running a database file',
+  'before-fix': 'Made before a one-click fix',
 };
+
+const CHANGES_SHOWN = 12;
+
+/** Everything changed through CityHQ, newest first, each with Undo where there's a way back. */
+function ChangeHistory() {
+  const { data, refresh } = usePoll(api.history, 15000);
+  const { busy, run } = useAction();
+  const confirm = useConfirm();
+  const [all, setAll] = useState(false);
+  const changes = data || [];
+  const shown = all ? changes : changes.slice(0, CHANGES_SHOWN);
+  const undo = async (c: ChangeRecord) => {
+    const ok = await confirm({
+      title: `Undo "${c.title}"?`,
+      body: <p>{c.undoHint || 'This reverses that change.'}</p>,
+      confirm: 'Undo',
+      danger: c.kind === 'sql',
+    });
+    if (!ok) return;
+    if (await run(c.id, () => api.undoChange(c.id), (r) => r.message)) refresh();
+  };
+  return (
+    <section className="card">
+      <h3 className="card-title"><History size={16} />What changed</h3>
+      <p className="muted-note">Everything changed through CityHQ: edited files, scripts installed, removed or switched on and off, database files run, admin roles and one-click fixes. If something stops working, look here for what changed and undo it.</p>
+      {!data && <Spinner />}
+      {data && changes.length === 0 && <p className="muted-note">Nothing has been changed yet.</p>}
+      {changes.length > 0 && (
+        <ul className="change-list">
+          {shown.map((c) => (
+            <li key={c.id} className={`change-row ${c.undone ? 'is-undone' : ''}`}>
+              <div className="change-text">
+                <strong>{c.title}</strong>
+                {c.detail && <span className="muted-note">{c.detail}</span>}
+                <span className="muted-note">{formatWhen(c.at)}{c.undone ? ` · undone ${formatWhen(c.undoneAt as number)}` : ''}</span>
+              </div>
+              {c.undoable && <Button variant="ghost" icon={<Undo2 size={15} />} busy={busy === c.id} onClick={() => undo(c)}>Undo</Button>}
+            </li>
+          ))}
+        </ul>
+      )}
+      {changes.length > CHANGES_SHOWN && (
+        <button className="link" onClick={() => setAll(!all)}>{all ? 'Show fewer' : `Show all ${changes.length}`}</button>
+      )}
+    </section>
+  );
+}
 
 const PART_INFO: Record<BackupPart, { label: string; help: string; icon: React.ReactNode }> = {
   database: { label: 'Players and progress', help: 'Characters, money, items, vehicles and everything else in the database.', icon: <Database size={16} /> },
@@ -178,6 +228,8 @@ export function Backups() {
           ))}
         </ul>
       )}
+
+      <ChangeHistory />
 
       {restoring && <RestoreDialog backup={restoring} onClose={() => setRestoring(null)} onDone={() => { setRestoring(null); refresh(); }} />}
     </div>

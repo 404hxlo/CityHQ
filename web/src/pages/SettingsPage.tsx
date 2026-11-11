@@ -1,9 +1,14 @@
 import {
-  ExternalLink, FolderOpen, KeyRound, LogOut, Plus, QrCode, RefreshCw, Server, Smartphone, Timer, X,
+  BookOpen, Compass, ExternalLink, FolderOpen, KeyRound, LogOut, Plus, QrCode, RefreshCw, Server, Smartphone, Timer, X,
 } from 'lucide-react';
 import { useEffect, useState } from 'react';
-import { api, SERVER_SCOPE, type Settings } from '../api';
+import {
+  api, SERVER_SCOPE, type Automation as AutomationData, type Settings,
+} from '../api';
 import { AdminsCard } from '../Admins';
+import { ProfileCard } from '../Profile';
+import { Term } from '../Term';
+import { startTour } from '../Tour';
 import { SettingsEditor } from '../SettingsEditor';
 import {
   Button, Notice, Spinner, Toggle, useAction, useConfirm, usePoll,
@@ -106,6 +111,43 @@ function SwitchRow({ title, help, checked, disabled, onChange }: { title: string
   );
 }
 
+/** What the keep-awake setting is doing right now, in plain words. */
+function awakeNow(k: AutomationData['keepAwake']) {
+  if (!k.enabled) return 'Off. Windows may put the PC to sleep and pause the server.';
+  if (!k.serverRunning) return 'Waiting: it starts keeping the PC awake when the server runs.';
+  if (k.holding === 'display') return 'Keeping the PC and its screen awake now (on battery).';
+  if (k.onBattery) return 'Keeping the PC awake now, but it\'s on battery: Windows still sleeps a few minutes after its sleep timer unless the screen stays on. Plug it in, or turn on the screen option above.';
+  return 'Keeping the PC awake now. The screen can still turn off.';
+}
+
+function KeepAwake({ state, saving, update }: {
+  state: AutomationData['keepAwake'];
+  saving: boolean;
+  update: (patch: Parameters<typeof api.setAutomation>[0]) => Promise<void>;
+}) {
+  return (
+    <>
+      <SwitchRow
+        title="Keep this PC awake while the server runs"
+        help="When the PC sleeps, the server freezes, and txAdmin restarts it when the PC wakes. Closing the lid or pressing the power button still puts it to sleep."
+        checked={state.enabled}
+        disabled={saving}
+        onChange={(enabled) => update({ keepAwake: { enabled } })}
+      />
+      {state.enabled && (
+        <SwitchRow
+          title="On battery, keep the screen on too"
+          help="On battery, Windows only stays awake with the screen on. This uses more battery."
+          checked={state.screenOnBattery}
+          disabled={saving}
+          onChange={(screenOnBattery) => update({ keepAwake: { screenOnBattery } })}
+        />
+      )}
+      <p className="muted-note awake-now">{awakeNow(state)}</p>
+    </>
+  );
+}
+
 function Automation() {
   const { data, setData } = usePoll(api.automation, 0);
   const { busy, run } = useAction();
@@ -146,6 +188,7 @@ function Automation() {
         disabled={saving}
         onChange={(autoRecover) => update({ autoRecover })}
       />
+      {data.keepAwake.supported && <KeepAwake state={data.keepAwake} saving={saving} update={update} />}
       <SwitchRow
         title="Scheduled restarts"
         help="Restarting daily keeps a server running smoothly. Players are warned in game 15, 5 and 1 minutes before, and their progress is saved."
@@ -192,6 +235,19 @@ export function SettingsPage({ online, onSignOut }: { online: boolean; onSignOut
         {!data.local && <Button icon={<LogOut size={16} />} onClick={() => run('signout', async () => onSignOut())}>Sign out</Button>}
       </header>
 
+      <ProfileCard />
+
+      <section className="card help-card">
+        <div>
+          <h3 className="card-title"><BookOpen size={16} />New to running a server?</h3>
+          <p className="muted-note">The Learn page explains how it all fits together and every term in plain words. The tour shows where everything is in CityHQ.</p>
+        </div>
+        <div className="button-row">
+          <a className="btn btn-default" href="#learn"><BookOpen size={15} /><span>Learn the basics</span></a>
+          <Button icon={<Compass size={15} />} onClick={startTour}>Take the tour</Button>
+        </div>
+      </section>
+
       <Automation />
 
       {data.local ? <PhoneAccess settings={data} reload={refresh} /> : (
@@ -199,7 +255,7 @@ export function SettingsPage({ online, onSignOut }: { online: boolean; onSignOut
       )}
 
       <section className="card">
-        <h3 className="card-title"><Server size={16} />Server settings (server.cfg)</h3>
+        <h3 className="card-title"><Server size={16} />Server settings (<Term id="servercfg">server.cfg</Term>)</h3>
         <AdminsCard />
         <p className="muted-note">Your license key and database password stay hidden here and are kept when you save.</p>
         <SettingsEditor

@@ -1,5 +1,5 @@
 import {
-  AlertTriangle, Check, CheckCircle2, CircleSlash, Loader2, Power, X, XCircle,
+  AlertTriangle, ArrowLeftRight, Check, CheckCircle2, CircleSlash, Loader2, Power, X, XCircle,
 } from 'lucide-react';
 import {
   createContext, useCallback, useContext, useEffect, useRef, useState,
@@ -274,12 +274,13 @@ const RESOURCE_STATES: Record<string, { label: string; tone: string; icon: React
   missing: { label: 'Not loaded', tone: 'muted', icon: <CircleSlash size={14} /> },
   unknown: { label: 'Not loaded', tone: 'muted', icon: <CircleSlash size={14} /> },
   offline: { label: 'Server off', tone: 'muted', icon: <Power size={14} /> },
+  replaced: { label: 'Replaced', tone: 'muted', icon: <ArrowLeftRight size={14} /> },
 };
 
-export function ResourceBadge({ state, problem }: { state: string; problem?: string | null }) {
+export function ResourceBadge({ state, problem, title }: { state: string; problem?: string | null; title?: string }) {
   const s = RESOURCE_STATES[state] || RESOURCE_STATES.unknown;
   if (problem) return <span className="badge tone-bad" title={problem}><AlertTriangle size={14} />{state === 'started' ? 'Needs attention' : 'Problem'}</span>;
-  return <span className={`badge tone-${s.tone}`}>{s.icon}{s.label}</span>;
+  return <span className={`badge tone-${s.tone}`} title={title}>{s.icon}{s.label}</span>;
 }
 
 // ---------------------------------------------------------------- formatting

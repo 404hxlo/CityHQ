@@ -12,12 +12,13 @@ import { agentRequest } from './agent.js';
 import { createBackup } from './backups.js';
 import { findInstallSource } from './catalog.js';
 import {
-  addBootLine, connectionStringOf, ensureManagedBlock, forgetBootLines, parseBoot, parseConnection, readCfg,
-  removeBootLine, writeCfg,
+  addBootLine, connectionStringOf, convarOn, ensureManagedBlock, forgetBootLines, parseBoot, parseConnection, readCfg,
+  readConvar, removeBootLine, setConvar, writeCfg,
 } from './cfg.js';
 import {
-  DB_CLI, findServerData, HttpError, resolveInside, STATE_DIR, TMP_DIR, TRASH_DIR,
+  DB_CLI, findServerData, FXSERVER_DIR, HttpError, resolveInside, STATE_DIR, TMP_DIR, TRASH_DIR,
 } from './paths.js';
+import { recordChange } from './history.js';
 import { moveFolderSafely } from './retry.js';
 
 const exec = promisify(execFile);
@@ -27,7 +28,16 @@ const DISABLED_CATEGORY = '[disabled]';
 const ADDED_CATEGORY = '[added]';
 const NEVER_REMOVE = new Set(['qb-core', 'oxmysql', 'qb-control', 'monitor']);
 const NEVER_STOP = new Set(['qb-control', 'monitor']);
+const LOCKED_REASON = {
+  'qb-control': 'CityHQ uses qb-control to talk to the server, so it has to stay on.',
+  monitor: 'monitor is txAdmin, which runs the server, so it has to stay on.',
+};
 const WARN_ON_STOP = new Set(['qb-core', 'oxmysql', 'sessionmanager', 'spawnmanager', 'mapmanager', 'chat']);
+// Resources that ship inside FXServer itself (chat, txAdmin's monitor, yarn, webpack).
+const SYSTEM_DIR = path.join(FXSERVER_DIR, 'citizen', 'system_resources');
+export const BUILT_IN_CATEGORY = 'Built into FiveM';
+// Built-in resources FXServer only offers while a server.cfg setting is on.
+export const SYSTEM_SWITCHES = { chat: 'resources_useSystemChat' };
 // Unpacking needs room for the archive and everything inside it at the same time.
 const UNPACK_ROOM_FACTOR = 2.2;
 
@@ -119,6 +129,61 @@ export async function scanDisk() {
 
 export const findResourceDir = async (name) => (await scanDisk()).find((r) => r.name === name) || null;
 
+/** The resources built into FXServer, which have no folder in resources/. */
+export async function scanSystem(dir = SYSTEM_DIR) {
+  let entries = [];
+  try { entries = await readdir(dir, { withFileTypes: true }); } catch { return []; }
+  const found = [];
+  for (const e of entries) {
+    if (!e.isDirectory()) continue;
+    const manifest = await manifestText(path.join(dir, e.name));
+    if (manifest !== null) found.push({ ...parseManifest(manifest), name: e.name });
+  }
+  return found;
+}
+
+/**
+ * List entries for built-in resources. A folder of the same name in resources/ wins, as it does
+ * for FXServer. A switched built-in (chat) only counts as starting at boot while its setting is on.
+ */
+export function builtInItems({ system, diskNames, cfg, live, dependents = new Map() }) {
+  const boot = parseBoot(cfg);
+  return system.filter((s) => !diskNames.has(s.name)).map((s) => {
+    const key = SYSTEM_SWITCHES[s.name];
+    const settingOn = !key || convarOn(readConvar(cfg, key));
+    // txAdmin starts monitor itself, so it never needs a server.cfg line.
+    const always = NEVER_STOP.has(s.name);
+    const bootEnabled = always || (boot.names.has(s.name) && settingOn);
+    const state = live ? (live.get(s.name)?.state || 'stopped') : 'offline';
+    return {
+      name: s.name,
+      folder: null,
+      category: BUILT_IN_CATEGORY,
+      version: s.version,
+      description: s.description,
+      author: s.author,
+      state,
+      boot: {
+        enabled: bootEnabled,
+        source: always ? 'always' : boot.names.has(s.name) ? 'line' : 'none',
+        turnedOffByApp: boot.turnedOff.has(s.name),
+      },
+      dependencies: [],
+      missingDependencies: [],
+      installable: [],
+      dependents: dependents.get(s.name) || [],
+      canStop: !NEVER_STOP.has(s.name),
+      canRemove: false,
+      warnOnStop: WARN_ON_STOP.has(s.name),
+      hasEasyConfig: false,
+      builtIn: true,
+      setting: key ? { key, on: settingOn } : null,
+      lockedReason: LOCKED_REASON[s.name] || null,
+      problem: state === 'stopped' && bootEnabled ? 'Should be running but is stopped' : null,
+    };
+  });
+}
+
 async function readDisabled() {
   try { return JSON.parse(await readFile(DISABLED_FILE, 'utf8')); } catch { return {}; }
 }
@@ -126,6 +191,24 @@ async function writeDisabled(map) {
   await mkdir(STATE_DIR, { recursive: true });
   await writeFile(DISABLED_FILE, JSON.stringify(map, null, 2));
 }
+
+/**
+ * Which resources a running one stands in for, from its `provides` (qb-clothing -> um-clothing-qb).
+ * FiveM answers for the stand-in when asked about the replaced name, and sends start, stop and
+ * restart for that name to the stand-in too, so the replaced one can't be told apart or controlled.
+ */
+export function replacementsOf(disk, live) {
+  const map = new Map();
+  if (!live) return map;
+  for (const r of disk) {
+    if (live.get(r.name)?.state !== 'started') continue;
+    for (const p of r.provides) if (p !== r.name && !map.has(p)) map.set(p, r.name);
+  }
+  return map;
+}
+
+/** Every resource's state on the running server, or null when it's offline. */
+export const liveStates = () => liveMap();
 
 const liveMap = async () => {
   try {
@@ -140,6 +223,7 @@ const CATEGORY_LAST = new Set(['[examples]', '[test]', '[disabled]']);
 function categoryRank(category) {
   const i = CATEGORY_ORDER.indexOf(category);
   if (i !== -1) return i;
+  if (category === BUILT_IN_CATEGORY) return 90;
   return CATEGORY_LAST.has(category) ? 100 : 50;
 }
 
@@ -149,9 +233,10 @@ const hasEasyConfig = (r) => existsSync(path.join(r.dir, 'config.lua'))
 
 export async function listResources() {
   const { cfgPath, dataPath } = serverData();
-  const [disk, live, cfg, disabled] = await Promise.all([scanDisk(), liveMap(), readCfg(cfgPath), readDisabled()]);
+  const [disk, live, cfg, disabled, system] = await Promise.all([scanDisk(), liveMap(), readCfg(cfgPath), readDisabled(), scanSystem()]);
   const boot = parseBoot(cfg);
-  const allNames = new Set(disk.flatMap((r) => [r.name, ...r.provides]));
+  // Built-in ones count too, so a resource that needs yarn isn't shown as missing it.
+  const allNames = new Set([...disk.flatMap((r) => [r.name, ...r.provides]), ...system.map((s) => s.name)]);
   const needs = new Map();
   for (const r of disk) {
     for (const d of r.dependencies) {
@@ -160,12 +245,19 @@ export async function listResources() {
     }
   }
   const dependents = new Map(disk.map((r) => [r.name, [...new Set([r.name, ...r.provides].flatMap((n) => needs.get(n) || []))]]));
+  for (const s of system) if (!dependents.has(s.name)) dependents.set(s.name, needs.get(s.name) || []);
+  const replaced = replacementsOf(disk, live);
   const items = disk.map((r) => {
     const liveEntry = live?.get(r.name);
     const viaCategory = r.categories.some((c) => boot.categories.has(c));
     const bootEnabled = boot.names.has(r.name) || viaCategory;
-    const state = live ? (liveEntry?.state || 'unknown') : 'offline';
+    const replacedBy = replaced.get(r.name) || null;
+    const state = replacedBy ? 'replaced' : live ? (liveEntry?.state || 'unknown') : 'offline';
     const missingDeps = r.dependencies.filter((d) => !allNames.has(d) && !live?.has(d));
+    let problem = null;
+    if (replacedBy && bootEnabled) problem = `${replacedBy} replaces it, so it can't run. Turn off "At boot"`;
+    else if (state === 'stopped' && bootEnabled) problem = 'Should be running but is stopped';
+    else if (missingDeps.length) problem = `Missing: ${missingDeps.join(', ')}`;
     return {
       name: r.name,
       folder: path.relative(dataPath, r.dir).replaceAll('\\', '/'),
@@ -187,36 +279,85 @@ export async function listResources() {
       canRemove: !NEVER_REMOVE.has(r.name),
       warnOnStop: WARN_ON_STOP.has(r.name),
       hasEasyConfig: hasEasyConfig(r),
-      problem: state === 'stopped' && bootEnabled ? 'Should be running but is stopped' : missingDeps.length ? `Missing: ${missingDeps.join(', ')}` : null,
+      builtIn: false,
+      setting: null,
+      lockedReason: LOCKED_REASON[r.name] || null,
+      replacedBy,
+      problem,
     };
   });
+  items.push(...builtInItems({ system, diskNames: new Set(disk.map((r) => r.name)), cfg, live, dependents }));
   items.sort((a, b) => categoryRank(a.category) - categoryRank(b.category)
     || a.category.localeCompare(b.category) || a.name.localeCompare(b.name));
   return { serverOnline: Boolean(live), resources: items };
 }
 
-export async function resourceAction(name, action) {
+/** Refuses to start, stop or restart a resource that must stay on, or one FiveM would swap for its stand-in. */
+export async function assertCanControl(name) {
   if (!isValidName(name)) throw new HttpError(400, 'Invalid resource name');
-  if (!['start', 'stop', 'restart', 'ensure'].includes(action)) throw new HttpError(400, 'Invalid action');
   if (NEVER_STOP.has(name)) throw new HttpError(400, `${name} is needed by the server and cannot be changed`);
+  const [disk, live] = await Promise.all([scanDisk(), liveMap()]);
+  const by = replacementsOf(disk, live).get(name);
+  if (by) {
+    throw new HttpError(409, `${by} replaces ${name} and is running, so FiveM would do this to ${by} instead. Stop ${by} first if you want to use ${name}.`);
+  }
+}
+
+export async function resourceAction(name, action) {
+  if (!['start', 'stop', 'restart', 'ensure'].includes(action)) throw new HttpError(400, 'Invalid action');
+  await assertCanControl(name);
   // A resource with gigabytes of game files can take a while to mount.
   const result = await agentRequest('/resources/action', { method: 'POST', body: { name, action }, timeoutMs: 120000 });
   if (action !== 'stop' && result.state !== 'started' && result.state !== 'starting') {
+    const key = SYSTEM_SWITCHES[name];
+    if (key && (await scanDisk()).every((r) => r.name !== name)) {
+      throw new HttpError(400, `${name} is built into FiveM and is switched off (${key}). Turn on "Start with the server", then restart the server to use it.`);
+    }
     throw new HttpError(400, `${name} did not start. Check the Console page for the reason.`);
   }
   return result;
 }
 
+/** Built-in resources start from a server.cfg line; chat also needs its setting on. */
+async function setBuiltInBoot(cfgPath, cfg, name, enabled) {
+  let next = cfg;
+  if (enabled) {
+    if (!parseBoot(next).names.has(name)) next = addBootLine(next, name);
+  } else {
+    next = removeBootLine(next, name);
+  }
+  const key = SYSTEM_SWITCHES[name];
+  if (key) next = setConvar(next, key, enabled ? 'true' : 'false');
+  if (next !== cfg) await writeCfg(cfgPath, next);
+  return { name, enabled, stoppedNow: false, builtIn: true };
+}
+
 export const refreshResources = () => agentRequest('/refresh', { method: 'POST', timeoutMs: 10000 }).catch(() => null);
 
-/** Switches whether a resource starts with the server. */
-export async function setBoot(name, enabled) {
+/** Switches whether a resource starts with the server, and notes it in the change history. */
+export async function setBoot(name, enabled, { record = true } = {}) {
+  const result = await switchBoot(name, enabled);
+  if (record) {
+    recordChange({
+      kind: 'boot',
+      title: enabled ? `${name} starts with the server` : `${name} no longer starts with the server`,
+      undo: { type: 'boot', name, enabled: !enabled },
+      undoHint: enabled ? `${name} won't start with the server again.` : `${name} will start with the server again.`,
+    });
+  }
+  return result;
+}
+
+async function switchBoot(name, enabled) {
   if (!isValidName(name)) throw new HttpError(400, 'Invalid resource name');
   if (NEVER_STOP.has(name)) throw new HttpError(400, `${name} must always start with the server`);
   const { cfgPath, dataPath } = serverData();
   let cfg = await readCfg(cfgPath);
   const resource = await findResourceDir(name);
-  if (!resource) throw new HttpError(404, 'That resource was not found');
+  if (!resource) {
+    if ((await scanSystem()).some((s) => s.name === name)) return setBuiltInBoot(cfgPath, cfg, name, enabled);
+    throw new HttpError(404, 'That resource was not found');
+  }
   const disabled = await readDisabled();
 
   if (enabled) {
@@ -342,6 +483,9 @@ async function installFromFolder(root, hintName, { preferHint = false, keepSourc
   const available = new Set((await scanDisk()).flatMap((r) => [r.name, ...r.provides]));
   for (const item of installed) item.missingDependencies = item.dependencies.filter((d) => !available.has(d));
   await refreshResources();
+  for (const item of installed) {
+    recordChange({ kind: 'install', title: `Installed ${item.name}`, undo: { type: 'remove', name: item.name }, undoHint: `${item.name} is stopped and moved to Recently removed, where it can be restored.` });
+  }
   return { installed };
 }
 
@@ -462,7 +606,7 @@ export async function runSql(name, file) {
   const conn = parseConnection(connectionStringOf(await readCfg(cfgPath)));
   if (!conn?.database) throw new HttpError(400, 'Could not read the database settings from server.cfg');
   // SQL files can change or delete data, so keep a way back.
-  await createBackup('before-sql', { parts: ['database'] });
+  const before = await createBackup('before-sql', { parts: ['database'] });
   const args = [
     `--host=${conn.host}`, `--port=${conn.port}`, `--user=${conn.user}`, '--skip-ssl', '--default-character-set=utf8mb4',
     conn.database, '--batch', '--execute', `source ${sqlPath.replaceAll('\\', '/')}`,
@@ -472,6 +616,13 @@ export async function runSql(name, file) {
   } catch (err) {
     throw new HttpError(400, `The SQL file failed: ${String(err.stderr || err.message).trim().split('\n').slice(-2).join(' ')}`);
   }
+  recordChange({
+    kind: 'sql',
+    title: `Ran ${path.basename(file)} for ${name}`,
+    detail: `Database backup ${before.id} was made first.`,
+    undo: { type: 'restore-db', backupId: before.id },
+    undoHint: `The database goes back to backup ${before.id}, made just before this. The server is stopped while that happens and players are disconnected, and anything saved since then is lost.`,
+  });
   return { ran: file };
 }
 
@@ -488,6 +639,8 @@ export async function removeResource(name) {
   const dest = path.join(TRASH_DIR, id);
   await mkdir(TRASH_DIR, { recursive: true });
   const rel = path.relative(path.join(dataPath, 'resources'), resource.dir);
+  const boot = parseBoot(await readCfg(cfgPath));
+  const startedAtBoot = boot.names.has(name) || resource.categories.some((c) => boot.categories.has(c));
   await moveFolderSafely(resource.dir, dest, name);
   await writeFile(`${dest}.json`, JSON.stringify({ name, origin: rel, removedAt: Date.now() }));
   await writeCfg(cfgPath, forgetBootLines(await readCfg(cfgPath), name));
@@ -495,6 +648,12 @@ export async function removeResource(name) {
   const disabled = await readDisabled();
   if (disabled[name]) { delete disabled[name]; await writeDisabled(disabled); }
   await refreshResources();
+  recordChange({
+    kind: 'remove',
+    title: `Removed ${name}`,
+    undo: { type: 'restore-trash', id, name, boot: startedAtBoot },
+    undoHint: `${name} comes back from Recently removed${startedAtBoot ? ' and starts with the server again' : ''}.`,
+  });
   return { removed: name, id };
 }
 
@@ -526,6 +685,7 @@ export async function restoreFromTrash(id) {
   await moveFolderSafely(src, dest, meta.name);
   await rm(metaFile, { force: true });
   await refreshResources();
+  recordChange({ kind: 'restore', title: `Brought back ${meta.name}`, undo: { type: 'remove', name: meta.name }, undoHint: `${meta.name} is moved to Recently removed again.` });
   return { restored: meta.name };
 }
 

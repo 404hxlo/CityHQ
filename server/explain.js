@@ -253,6 +253,7 @@ const RULES = [
         return finish(raw, {
           key: `sql-table:${resource}:${table}`,
           needsSqlFor: resource,
+          sqlTable: table,
           resource,
           title: `${resource} needs a database table that doesn't exist`,
           what: `It tried to read the table "${table}". This usually means the resource came with a database (.sql) file that was never run.`,
@@ -265,6 +266,9 @@ const RULES = [
         return finish(raw, {
           key: `sql-column:${resource}:${column}`,
           needsSqlFor: resource,
+          // "po.code" is column "code" of whatever table the query called "po".
+          sqlColumn: column.split('.').pop(),
+          sqlQuery: following,
           resource,
           title: `${resource} expects a database column that doesn't exist`,
           what: `It asked for "${column}", which isn't in your database. A resource update often adds columns through a new .sql file.`,

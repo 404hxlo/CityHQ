@@ -8,6 +8,8 @@ import {
   api, type InstalledResource, type Problem, type Resource, type TrashItem,
 } from '../api';
 import { openFilesAt, takeResourceTargets } from '../nav';
+import { InstallCheck } from '../InstallCheck';
+import { Term } from '../Term';
 import { ProblemList } from '../Problems';
 import { SettingsEditor } from '../SettingsEditor';
 import {
@@ -52,6 +54,15 @@ function useResourceActions(reload: () => Promise<unknown> | void) {
   };
 
   const setBoot = async (r: Resource, enabled: boolean) => {
+    if (enabled && r.replacedBy) {
+      const ok = await confirm({
+        title: `Start ${r.name} with the server?`,
+        body: <p>{r.replacedBy} replaces {r.name}, so only one of them can run. Whichever starts last will stop the other, along with anything that needs it.</p>,
+        confirm: 'Turn on anyway',
+        danger: true,
+      });
+      if (!ok) return;
+    }
     if (!enabled && (r.boot.source === 'category' || r.dependents.length)) {
       const body: ReactNode = (
         <>
@@ -116,7 +127,7 @@ function ResourceDetail({ resource, serverOnline, onClose, reload }: { resource:
     <Drawer onClose={onClose} label={resource.name}>
       <header className="drawer-head">
         <div>
-          <ResourceBadge state={resource.state} problem={resource.problem} />
+          <ResourceBadge state={resource.state} problem={resource.problem} title={resource.replacedBy ? `Replaced by ${resource.replacedBy}` : undefined} />
           <h2>{resource.name}</h2>
           <p className="muted-note">
             {[resource.version && `Version ${resource.version}`, resource.author && `by ${resource.author}`, resource.category].filter(Boolean).join(' · ')}
@@ -128,7 +139,7 @@ function ResourceDetail({ resource, serverOnline, onClose, reload }: { resource:
 
       <div className="drawer-controls">
         <div className="button-row">
-          {isRunning ? (
+          {resource.replacedBy ? null : isRunning ? (
             <>
               <Button variant="primary" icon={<RotateCw size={15} />} busy={busy === `${resource.name}:restart`} disabled={!serverOnline || !resource.canStop} onClick={() => act(resource, 'restart')}>Restart</Button>
               <Button icon={<Square size={14} />} busy={busy === `${resource.name}:stop`} disabled={!serverOnline || !resource.canStop} onClick={() => act(resource, 'stop')}>Stop</Button>
@@ -139,13 +150,26 @@ function ResourceDetail({ resource, serverOnline, onClose, reload }: { resource:
         </div>
         <label className="boot-switch">
           <Toggle checked={resource.boot.enabled} disabled={!resource.canStop || busy === `${resource.name}:boot`} onChange={(v) => setBoot(resource, v)} label="Start with the server" />
-          <span>Start with the server</span>
+          <span><Term id="ensure">Start with the server</Term></span>
         </label>
       </div>
 
-      {!resource.canStop && <Notice kind="info">The app uses {resource.name} to talk to the server, so it has to stay on.</Notice>}
+      {!resource.canStop && <Notice kind="info">{resource.lockedReason || `${resource.name} is needed by the server, so it has to stay on.`}</Notice>}
+      {resource.replacedBy && (
+        <Notice kind="info">
+          {resource.replacedBy} replaces {resource.name} (its own files say so), so {resource.name} doesn't run while {resource.replacedBy} does.
+          Start and Stop are hidden here, because FiveM would apply them to {resource.replacedBy} instead.
+        </Notice>
+      )}
+      {resource.builtIn && resource.canStop && (
+        <Notice kind="info">
+          {resource.name} is built into FiveM, so it has no folder or settings files to change here.
+          {resource.setting && ` Its "Start with the server" switch also sets ${resource.setting.key} in server.cfg, which takes effect when the server restarts.`}
+        </Notice>
+      )}
       {resource.problem && !problems.length && <Notice>{resource.problem}. Check the Console page for details.</Notice>}
       {problems.length > 0 && <ProblemList problems={problems} onChanged={loadExtras} />}
+      {resource.folder && <InstallCheck name={resource.name} />}
       {resource.dependencies.length > 0 && (
         <div className="chip-line">
           <span className="muted-note">Needs</span>
@@ -164,19 +188,25 @@ function ResourceDetail({ resource, serverOnline, onClose, reload }: { resource:
         </div>
       )}
 
-      <SettingsEditor
-        scope={resource.name}
-        restartLabel={isRunning ? 'Save and restart resource' : 'Save and start resource'}
-        onRestart={serverOnline && resource.canStop ? async () => { const result = await api.restartChecked(resource.name); await reload(); return result; } : undefined}
-        restartHint="Changes apply the next time this resource starts."
-      />
+      {resource.folder && (
+        <SettingsEditor
+          scope={resource.name}
+          restartLabel={isRunning ? 'Save and restart resource' : 'Save and start resource'}
+          onRestart={serverOnline && resource.canStop && !resource.replacedBy ? async () => { const result = await api.restartChecked(resource.name); await reload(); return result; } : undefined}
+          restartHint="Changes apply the next time this resource starts."
+        />
+      )}
 
-      <footer className="drawer-foot button-row">
-        <Button variant="ghost" icon={<FolderOpen size={15} />} onClick={async () => { if (await canLeave()) openFilesAt(resource.folder); }}>Browse all its files</Button>
-        {resource.canRemove && (
-          <Button variant="ghost" className="text-danger" icon={<Trash2 size={15} />} busy={removing === 'remove'} onClick={remove}>Remove this resource</Button>
-        )}
-      </footer>
+      {(resource.folder || resource.canRemove) && (
+        <footer className="drawer-foot button-row">
+          {resource.folder && (
+            <Button variant="ghost" icon={<FolderOpen size={15} />} onClick={async () => { if (await canLeave() && resource.folder) openFilesAt(resource.folder); }}>Browse all its files</Button>
+          )}
+          {resource.canRemove && (
+            <Button variant="ghost" className="text-danger" icon={<Trash2 size={15} />} busy={removing === 'remove'} onClick={remove}>Remove this resource</Button>
+          )}
+        </footer>
+      )}
     </Drawer>
   );
 }
@@ -201,6 +231,7 @@ function InstallResult({ item, serverOnline, onDone }: { item: InstalledResource
     <div className="install-result">
       <h3>{item.name}{item.version && <small> v{item.version}</small>}</h3>
       {item.description && <p className="muted-note">{item.description}</p>}
+      <InstallCheck name={item.name} open />
       {item.missingDependencies.length > 0 && <Notice>It needs resources you do not have: {item.missingDependencies.join(', ')}. Install those first or it will not start.</Notice>}
       {item.sqlFiles.length > 0 && (
         <div className="sql-box">
@@ -457,15 +488,17 @@ export function Resources() {
                 <li key={r.name} className="resource-row">
                   <button className="resource-open" onClick={() => setSelected(r.name)}>
                     <span className="resource-name">{r.name}</span>
-                    {r.description && <span className="resource-desc">{r.description}</span>}
+                    {r.replacedBy
+                      ? <span className="resource-desc">Replaced by {r.replacedBy}</span>
+                      : r.description && <span className="resource-desc">{r.description}</span>}
                   </button>
-                  <div className="resource-state"><ResourceBadge state={r.state} problem={r.problem} /></div>
+                  <div className="resource-state"><ResourceBadge state={r.state} problem={r.problem} title={r.replacedBy ? `Replaced by ${r.replacedBy}` : undefined} /></div>
                   <div className="resource-boot">
                     <Toggle checked={r.boot.enabled} disabled={!r.canStop || busy === `${r.name}:boot`} onChange={(v) => setBoot(r, v)} label={`Start ${r.name} with the server`} />
                     <span className="boot-label">At boot</span>
                   </div>
                   <div className="resource-actions">
-                    {running ? (
+                    {r.replacedBy ? null : running ? (
                       <>
                         <Button variant="ghost" title={`Restart ${r.name}`} aria-label={`Restart ${r.name}`} icon={<RotateCw size={16} />} busy={busy === `${r.name}:restart`} disabled={!serverOnline || !r.canStop} onClick={() => act(r, 'restart')} />
                         <Button variant="ghost" title={`Stop ${r.name}`} aria-label={`Stop ${r.name}`} icon={<Square size={15} />} busy={busy === `${r.name}:stop`} disabled={!serverOnline || !r.canStop} onClick={() => act(r, 'stop')} />

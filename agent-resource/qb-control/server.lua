@@ -305,23 +305,36 @@ function playerActions.setGang(src, body)
     return 'Gang updated'
 end
 
+-- Servers can swap qb-inventory for tgiann-inventory, which takes the same basic item calls.
+local INVENTORIES = { 'tgiann-inventory', 'qb-inventory' }
+local function inventoryResource()
+    for _, name in ipairs(INVENTORIES) do
+        if GetResourceState(name) == 'started' then return name end
+    end
+end
+
 local function changeItem(src, body, adding)
     local QB = qbPlayer(src)
     local item = text(body.item, 60)
     local amount = wholeNumber(body.amount, 1, 100000)
     if not item or not QB.Shared.Items[item] then error('Unknown item') end
     if not amount then error('Enter an amount of 1 or more') end
-    if GetResourceState('qb-inventory') ~= 'started' then error('qb-inventory is not running') end
+    local inv = inventoryResource()
+    if not inv then error('No inventory script is running (tgiann-inventory or qb-inventory)') end
     local ok
-    if adding then
-        ok = exports['qb-inventory']:AddItem(src, item, amount, false, false, REASON)
+    if inv == 'tgiann-inventory' then
+        if adding then ok = exports[inv]:AddItem(src, item, amount) else ok = exports[inv]:RemoveItem(src, item, amount) end
+    elseif adding then
+        ok = exports[inv]:AddItem(src, item, amount, false, false, REASON)
     else
-        ok = exports['qb-inventory']:RemoveItem(src, item, amount, false, REASON)
+        ok = exports[inv]:RemoveItem(src, item, amount, false, REASON)
     end
     if not ok then
         error(adding and 'The inventory has no room for that' or 'The player does not have that many')
     end
-    TriggerClientEvent('qb-inventory:client:ItemBox', src, QB.Shared.Items[item], adding and 'add' or 'remove', amount)
+    if inv == 'qb-inventory' then
+        TriggerClientEvent('qb-inventory:client:ItemBox', src, QB.Shared.Items[item], adding and 'add' or 'remove', amount)
+    end
 end
 
 function playerActions.giveItem(src, body)
