@@ -9,6 +9,7 @@ const FILE = path.join(STATE_DIR, 'history.json');
 const KEEP = 300;
 const undoers = new Map();
 let writing = Promise.resolve();
+const undoing = new Set();
 // One-click fixes keep their own log; it's plugged in from app.js to keep imports one-way.
 let fixLog = { list: async () => [], undo: async () => { throw new HttpError(400, 'Fixes are not available.'); } };
 
@@ -22,9 +23,16 @@ async function readAll() {
   try { return JSON.parse(await readFile(FILE, 'utf8')); } catch { return []; }
 }
 
+/** Runs a read-and-write of the history file after the ones before it, so none is lost. */
+function queue(task) {
+  const run = writing.then(task);
+  writing = run.catch(() => {});
+  return run;
+}
+
 /** Remembers a change. Never throws: history must not break the change itself. */
 export function recordChange({ kind, title, detail = '', undo = null, undoHint = '' }) {
-  writing = writing.then(async () => {
+  return queue(async () => {
     try {
       const list = await readAll();
       const id = `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
@@ -33,7 +41,6 @@ export function recordChange({ kind, title, detail = '', undo = null, undoHint =
       await writeFile(FILE, JSON.stringify(list.slice(0, KEEP), null, 1));
     } catch { /* only a record */ }
   });
-  return writing;
 }
 
 /** The newest changes first, one-click fixes included, each saying whether it can be undone. */
@@ -48,22 +55,29 @@ export async function listChanges(limit = 100) {
 
 export async function undoChange(id) {
   if (String(id).startsWith('fix:')) return fixLog.undo(String(id).slice(4));
-  await writing;
-  const list = await readAll();
-  const record = list.find((c) => c.id === id);
-  if (!record) throw new HttpError(404, 'That change was not found.');
-  if (record.undone) throw new HttpError(409, 'That change was already undone.');
-  const undo = record.undo && undoers.get(record.undo.type);
-  if (!undo) throw new HttpError(400, 'This change can\'t be undone here.');
-  const message = await undo(record.undo);
-  // Re-read: the undo itself may have recorded a new change.
-  await writing;
-  const fresh = await readAll();
-  const again = fresh.find((c) => c.id === id);
-  if (again) {
-    again.undone = true;
-    again.undoneAt = Date.now();
-    await writeFile(FILE, JSON.stringify(fresh, null, 1));
+  // A second press (or another device) while the first undo is still running must not run it again.
+  if (undoing.has(id)) throw new HttpError(409, 'That change is already being undone.');
+  undoing.add(id);
+  try {
+    await writing;
+    const list = await readAll();
+    const record = list.find((c) => c.id === id);
+    if (!record) throw new HttpError(404, 'That change was not found.');
+    if (record.undone) throw new HttpError(409, 'That change was already undone.');
+    const undo = record.undo && undoers.get(record.undo.type);
+    if (!undo) throw new HttpError(400, 'This change can\'t be undone here.');
+    const message = await undo(record.undo);
+    // Re-read inside the queue: the undo itself, or another request, may have recorded a change.
+    await queue(async () => {
+      const fresh = await readAll();
+      const again = fresh.find((c) => c.id === id);
+      if (!again) return;
+      again.undone = true;
+      again.undoneAt = Date.now();
+      await writeFile(FILE, JSON.stringify(fresh, null, 1));
+    });
+    return { message: message || `Undone: ${record.title}` };
+  } finally {
+    undoing.delete(id);
   }
-  return { message: message || `Undone: ${record.title}` };
 }

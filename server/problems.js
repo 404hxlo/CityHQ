@@ -11,6 +11,7 @@ import {
   fixedThisBoot, recordFix, runFix, tablesDefining,
 } from './fixes.js';
 import { findServerData, HttpError } from './paths.js';
+import { getProcessState } from './processes.js';
 import {
   assertCanControl, listSqlFiles, liveStates, replacementsOf, scanDisk,
 } from './resources.js';
@@ -19,6 +20,7 @@ const CACHE_MS = 5000;
 const DOCS_MS = 10 * 60 * 1000;
 let cached = { at: 0, value: [], boot: null };
 let docCache = { at: 0, key: '', value: null };
+let lastBoot = { pid: null, marker: null };
 
 /** The documentation index, rebuilt every ten minutes or when the installed scripts change. */
 async function docIndex(disk) {
@@ -243,7 +245,13 @@ export async function currentProblems({ fresh = false } = {}) {
   // Only the latest boot matters; older errors may already be fixed.
   const texts = log.lines.map((l) => l.text);
   const boot = texts.findLastIndex((t) => t.includes('FXServer Starting'));
-  const bootMarker = boot >= 0 ? texts[boot] : null;
+  // The start line can scroll out of the log tail. The game process id changes at each restart, so
+  // the marker seen with this process is kept, or the id itself stands in for it.
+  const pid = getProcessState().game?.pid ?? null;
+  let bootMarker = boot >= 0 ? texts[boot] : null;
+  if (bootMarker) lastBoot = { pid, marker: bootMarker };
+  else if (pid && lastBoot.pid === pid) bootMarker = lastBoot.marker;
+  else if (pid) bootMarker = `pid:${pid}`;
   // Once a resource has been removed, its old errors aren't worth reporting.
   const items = explainLogLines(boot >= 0 ? texts.slice(boot) : texts, ctx)
     .filter((item) => !item.resource || ctx.isInstalled(item.resource));

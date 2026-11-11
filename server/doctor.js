@@ -6,6 +6,7 @@ import { existsSync } from 'node:fs';
 import { open, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
+import { clean } from './console.js';
 import { controlActions } from './control.js';
 import { FXSERVER_LOG } from './paths.js';
 
@@ -14,7 +15,6 @@ const ADMIN_LOG = path.join(path.dirname(FXSERVER_LOG), 'admin.log');
 const TAIL_BYTES = 6 * 1024 * 1024;
 const DAY_MS = 24 * 3600 * 1000;
 const PAUSE_MS = 60000;
-const ANSI = /\x1b\[[0-9;?]*[A-Za-z]/g;
 
 /** The last few MB of the server log, cleaned, as lines. */
 export const serverLogTail = (bytes = TAIL_BYTES) => tail(FXSERVER_LOG, bytes);
@@ -27,7 +27,7 @@ async function tail(file, bytes = TAIL_BYTES) {
   try {
     const buf = Buffer.alloc(size - start);
     await handle.read(buf, 0, buf.length, start);
-    const lines = buf.toString('utf8').replace(ANSI, '').replace(/\r/g, '').split('\n');
+    const lines = clean(buf.toString('utf8')).split('\n');
     return start > 0 ? lines.slice(1) : lines;
   } finally {
     await handle.close();
@@ -51,20 +51,46 @@ export function bootSegments(lines) {
   return out.filter((s) => s.start);
 }
 
-/** txAdmin's "Restarting server: ..." lines, dated from the "Starting - <date>" banners above them. */
-export function adminRestarts(lines) {
-  const out = [];
-  let base = null;
+/**
+ * txAdmin's "Restarting server: ..." lines, dated. Its lines only carry a time of day, so each run of
+ * txAdmin is dated backwards from the next "Starting - <date>" banner or, for the newest run, from
+ * when the log was last written (`end`): every timestamped line gets the latest date at or before
+ * the line after it. Without an upper bound, lines are dated forwards from their banner.
+ */
+export function adminRestarts(lines, end = null) {
+  const runs = [{ base: null, items: [] }];
   for (const line of lines) {
     const banner = line.match(/Starting - (\d+\/\d+\/\d+, [\d:]+ [AP]M)/);
-    if (banner) { base = parseStamp(banner[1]); continue; }
-    const m = line.match(/^\[(\d\d):(\d\d):(\d\d)\]\[MONITOR\] Restarting server: (.+)$/);
-    if (!m || !base) continue;
-    const at = new Date(base);
-    at.setHours(Number(m[1]), Number(m[2]), Number(m[3]), 0);
-    if (at < base) at.setDate(at.getDate() + 1);
-    out.push({ at, reason: m[4].trim() });
+    if (banner) { runs.push({ base: parseStamp(banner[1]), items: [] }); continue; }
+    const t = line.match(/^\[(\d\d):(\d\d):(\d\d)\]/);
+    if (!t) continue;
+    const restart = line.match(/\[MONITOR\] Restarting server: (.+)$/);
+    runs.at(-1).items.push({ time: [Number(t[1]), Number(t[2]), Number(t[3])], reason: restart ? restart[1].trim() : null });
   }
+  const withTime = (day, [h, m, s]) => { const d = new Date(day); d.setHours(h, m, s, 0); return d; };
+  const out = [];
+  runs.forEach((run, r) => {
+    const upper = r + 1 < runs.length ? runs[r + 1].base : (end ? new Date(end) : null);
+    const dated = [];
+    if (upper) {
+      let next = upper;
+      for (let i = run.items.length - 1; i >= 0; i--) {
+        const at = withTime(next, run.items[i].time);
+        if (at > next) at.setDate(at.getDate() - 1);
+        dated[i] = at;
+        next = at;
+      }
+    } else if (run.base) {
+      let prev = run.base;
+      run.items.forEach((item, i) => {
+        const at = withTime(prev, item.time);
+        if (at < prev) at.setDate(at.getDate() + 1);
+        dated[i] = at;
+        prev = at;
+      });
+    } else return;
+    run.items.forEach((item, i) => { if (item.reason) out.push({ at: dated[i], reason: item.reason }); });
+  });
   return out;
 }
 
@@ -192,10 +218,12 @@ async function sleepWindows() {
 
 /** Every restart in the last day, newest first, plus a one-line summary. */
 export async function startupDoctor() {
-  const [serverLines, adminLines, sleeps] = await Promise.all([tail(FXSERVER_LOG), tail(ADMIN_LOG, 512 * 1024), sleepWindows()]);
+  const [serverLines, adminLines, sleeps, adminWritten] = await Promise.all([
+    tail(FXSERVER_LOG), tail(ADMIN_LOG, 512 * 1024), sleepWindows(), stat(ADMIN_LOG).then((s) => s.mtimeMs).catch(() => null),
+  ]);
   const segments = bootSegments(serverLines);
   const since = Date.now() - DAY_MS;
-  const restarts = adminRestarts(adminLines).filter((r) => r.at.getTime() >= since);
+  const restarts = adminRestarts(adminLines, adminWritten).filter((r) => r.at.getTime() >= since);
   const actions = controlActions();
   const incidents = restarts.map((r) => {
     const segment = [...segments].reverse().find((s) => s.start.getTime() <= r.at.getTime());

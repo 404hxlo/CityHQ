@@ -11,7 +11,7 @@ import {
   highlightSelectionMatches, search, searchKeymap, SearchCursor,
 } from '@codemirror/search';
 import {
-  Compartment, EditorState, Prec, RangeSetBuilder, StateEffect, StateField, type Text,
+  type ChangeSet, Compartment, EditorState, Prec, RangeSetBuilder, StateEffect, StateField, type Text,
 } from '@codemirror/state';
 import {
   Decoration, type DecorationSet, drawSelection, EditorView, highlightActiveLine, keymap, lineNumbers, ViewPlugin, type ViewUpdate,
@@ -41,12 +41,40 @@ export function findAll(doc: Text, text: string): { matches: Match[]; capped: bo
   return { matches, capped: false };
 }
 
+/**
+ * After an edit: keeps the matches away from it and searches again only the lines it touched. The
+ * find text never holds a line break, so a match never crosses lines and this equals a full search.
+ */
+export function refind(prev: Match[], changes: ChangeSet, doc: Text, text: string): { matches: Match[]; capped: boolean } {
+  const ranges: [number, number][] = [];
+  changes.iterChangedRanges((_fromA, _toA, fromB, toB) => {
+    const a = doc.lineAt(fromB).from;
+    const b = doc.lineAt(toB).to;
+    const last = ranges[ranges.length - 1];
+    if (last && a <= last[1]) last[1] = Math.max(last[1], b); else ranges.push([a, b]);
+  });
+  const touched = (from: number, to: number) => ranges.some(([a, b]) => from <= b && to >= a);
+  const kept = prev
+    .map((m) => ({ from: changes.mapPos(m.from, 1), to: changes.mapPos(m.to, -1) }))
+    .filter((m) => !touched(m.from, m.to));
+  const found: Match[] = [];
+  for (const [a, b] of ranges) {
+    const cursor = new SearchCursor(doc, text, a, b, (s) => s.toLowerCase());
+    while (!cursor.next().done) found.push({ from: cursor.value.from, to: cursor.value.to });
+  }
+  const matches = [...kept, ...found].sort((x, y) => x.from - y.from);
+  return matches.length > MAX_MATCHES ? { matches: matches.slice(0, MAX_MATCHES), capped: true } : { matches, capped: false };
+}
+
 const findField = StateField.define<FindState>({
   create: () => ({ text: '', matches: [], capped: false }),
   update(value, tr) {
     let { text } = value;
     for (const e of tr.effects) if (e.is(setFindText)) text = e.value;
     if (text === value.text && !tr.docChanged) return value;
+    // Typing with the find bar open only searches the edited lines again; a new text, or a list
+    // that hit the limit, is searched in full.
+    if (text === value.text && text && !value.capped) return { text, ...refind(value.matches, tr.changes, tr.state.doc, text) };
     return { text, ...findAll(tr.state.doc, text) };
   },
 });

@@ -43,7 +43,7 @@ export function scoreLink(url, name, { otherNames = [], file = '', siteCount = 1
   const u = norm(url);
   const full = norm(name);
   const bare = norm(stripPrefix(name));
-  const github = url.match(/github\.com\/[^/]+\/([^/#?.]+)/i);
+  const github = url.match(/github\.com\/[^/]+\/([^/#?]+?)(?:\.git)?(?:[/#?]|$)/i);
   if (github && norm(github[1]) !== full && norm(github[1]) !== bare) return -10;
   // A short leftover like "voice" (pma-voice) is too common a word to count as naming the script.
   const named = u.includes(full) || (bare.length >= 6 && u.includes(bare));
@@ -149,6 +149,14 @@ async function pageExists(url, fetcher, cache) {
  */
 export async function buildDocIndex(disk, { fetcher = fetch, cache = fileLinkCache } = {}) {
   const names = disk.map((r) => r.name);
+  // Once one check fails (offline), the rest use what's remembered instead of each waiting 6 s.
+  let offline = false;
+  const exists = async (url) => {
+    if (offline) return (await cache.get(url))?.ok ?? null;
+    const ok = await pageExists(url, fetcher, cache);
+    if (ok === null) offline = true;
+    return ok;
+  };
   const own = new Map();
   const links = new Map();
   for (const r of disk) {
@@ -178,7 +186,7 @@ export async function buildDocIndex(disk, { fetcher = fetch, cache = fileLinkCac
   const index = new Map();
   for (const r of disk) {
     const known = KNOWN_PAGES[r.name];
-    if (known && await pageExists(known, fetcher, cache)) {
+    if (known && await exists(known)) {
       index.set(r.name, { url: known, label: `${r.name} documentation`, source: 'own' });
       continue;
     }
@@ -192,7 +200,7 @@ export async function buildDocIndex(disk, { fetcher = fetch, cache = fileLinkCac
       for (const [site, count] of allSites) if (siteWord(site).startsWith(prefix)) note(prefix, site, count);
     }
     if (prefix === 'qb') {
-      const ok = await pageExists(QB_PAGE(r.name), fetcher, cache);
+      const ok = await exists(QB_PAGE(r.name));
       index.set(r.name, ok
         ? { url: QB_PAGE(r.name), label: `${r.name} documentation (QBCore)`, source: 'qbcore' }
         : { url: QB_HOME, label: 'QBCore documentation', source: 'qbcore' });

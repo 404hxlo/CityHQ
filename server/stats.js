@@ -120,9 +120,13 @@ async function poll() {
       try { players = await agentRequest('/players', { timeoutMs: 3000 }); } catch { players = null; }
     }
     const now = Date.now();
-    const state = { samples: stats.samples, bucket };
-    addReading(state, now, players ? players.length : 0);
-    bucket = state.bucket;
+    // While the server runs but the helper doesn't answer (still booting, or busy), the count is
+    // unknown: nothing is recorded, so the chart shows a gap instead of a drop to zero.
+    if (players || !game) {
+      const state = { samples: stats.samples, bucket };
+      addReading(state, now, players ? players.length : 0);
+      bucket = state.bucket;
+    }
 
     if (players) {
       const next = new Map(players.map((p) => [p.license || `id:${p.id}`, { name: p.name, character: p.character?.trim() || null }]));

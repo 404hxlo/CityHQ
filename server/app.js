@@ -529,7 +529,12 @@ function buildApp() {
     if (boot) await setBoot(name, true, { record: false });
     return `${name} is back${boot ? ' and starts with the server again' : ''}.`;
   });
-  registerUndo('restore-db', async ({ backupId }) => { await restoreServer(backupId, ['database']); return `The database is back to backup ${backupId}.`; });
+  registerUndo('restore-db', async ({ backupId }) => {
+    // Like a restore from Backups: a scheduled restart must not fire in the middle of it.
+    cancelPendingRestart();
+    await restoreServer(backupId, ['database']);
+    return `The database is back to backup ${backupId}.`;
+  });
   registerUndo('admin', async ({ identifier, role, name }) => {
     await changeAdmin(identifier, role, name);
     return role ? `${name} is ${ROLES[role]?.label || role} again.` : `${name} is no longer an admin.`;

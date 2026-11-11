@@ -40,7 +40,9 @@ export function rememberIdentifiers(list) {
 
 /** Splits mariadb --batch output, which escapes tabs and newlines inside values. */
 export function parseBatch(stdout) {
-  const unescape = (v) => (v === 'NULL' ? null : v.replace(/\\t/g, '\t').replace(/\\n/g, '\n').replace(/\\\\/g, '\\'));
+  // One pass, so an escaped backslash followed by "t" or "n" stays a backslash and a letter.
+  const ESCAPES = { t: '\t', n: '\n', '0': '\0', '\\': '\\' };
+  const unescape = (v) => (v === 'NULL' ? null : v.replace(/\\(.)/g, (_, c) => ESCAPES[c] ?? c));
   return stdout.split('\n').filter((l) => l.length).map((l) => l.split('\t').map(unescape));
 }
 

@@ -77,14 +77,16 @@ export function Tour() {
     const keys = (e: KeyboardEvent) => {
       if (e.key === 'Escape') close();
       if (e.key === 'ArrowRight') setIndex((i) => (i === null ? i : Math.min(steps.length - 1, i + 1)));
-      if (e.key === 'ArrowLeft') setIndex((i) => (i === null ? i : Math.max(0, i - 1)));
+      if (e.key === 'ArrowLeft') setIndex((i) => (i === null ? i : Math.max(0, Math.min(i, steps.length - 1) - 1)));
     };
     window.addEventListener('keydown', keys);
     return () => window.removeEventListener('keydown', keys);
   }, [index, close, steps.length]);
 
   if (index === null || !step) return null;
-  const last = index === steps.length - 1;
+  // The step list can shrink while the tour is open (a resize to phone width), leaving index past the end.
+  const pos = Math.min(index, steps.length - 1);
+  const last = pos === steps.length - 1;
   const phone = window.innerWidth <= 760;
   // The card sits beside the highlighted item: to the right of the side menu, above the phone's bottom bar.
   let cardStyle: React.CSSProperties = {};
@@ -98,13 +100,13 @@ export function Tour() {
         : <div className="tour-dim" />}
       <div className={`tour-card ${box ? '' : 'tour-card-center'}`} style={cardStyle}>
         <button type="button" className="icon-btn tour-close" aria-label="Close the tour" onClick={close}><X size={16} /></button>
-        <p className="tour-count">{index + 1} of {steps.length}</p>
+        <p className="tour-count">{pos + 1} of {steps.length}</p>
         <h3 id="tour-title">{step.title}</h3>
         <p>{step.text}</p>
         <div className="tour-actions">
-          {index > 0 && <button type="button" className="btn btn-ghost" onClick={() => setIndex(index - 1)}><ArrowLeft size={15} /><span>Back</span></button>}
+          {pos > 0 && <button type="button" className="btn btn-ghost" onClick={() => setIndex(pos - 1)}><ArrowLeft size={15} /><span>Back</span></button>}
           {!last && <button type="button" className="btn btn-ghost" onClick={close}>Skip</button>}
-          <button type="button" className="btn btn-primary" onClick={() => (last ? close() : setIndex(index + 1))}>
+          <button type="button" className="btn btn-primary" onClick={() => (last ? close() : setIndex(pos + 1))}>
             <span>{last ? 'Done' : 'Next'}</span>{!last && <ArrowRight size={15} />}
           </button>
         </div>

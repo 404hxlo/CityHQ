@@ -20,7 +20,7 @@ const FRAMEWORK_IMPORTS = [
   { re: /@ox_core\//i, name: 'ox_core' },
   { re: /@nd_core\//i, name: 'ND Core' },
 ];
-const OTHER_FRAMEWORK_VALUE = /^(esx|es_extended|vrp|qbox|qbx|qbx_core|ox|ox_core|nd|nd_core|standalone)$/i;
+const OTHER_FRAMEWORK_VALUE = /^(esx|es_extended|vrp|qbox|qbx|qbx_core|ox|ox_core|nd|nd_core)$/i;
 const QB_FRAMEWORK_VALUE = /^(qb|qbcore|qb-core|qb_core|auto|autodetect)$/i;
 const CONFIGS = ['config.lua', 'shared/config.lua', 'config/config.lua', 'configs/config.lua', 'shared/sh_config.lua', 'config/main.lua'];
 const NOTES = /^(readme|install|installation|setup|docs?|documentation)[^/]*\.(md|txt)$/i;
@@ -67,6 +67,11 @@ export function frameworkFit({ manifest, configs, folders }) {
         });
       }
       if (QB_FRAMEWORK_VALUE.test(m[1])) return item('framework', 'ok', 'It\'s set up for QBCore', `Its config says Framework = "${m[1]}".`);
+      if (/^standalone$/i.test(m[1])) {
+        return item('framework', 'info', 'It runs standalone', `Its config says Framework = "${m[1]}", so it runs without a framework, which works on QBCore. If the comment next to it lists a QBCore option, that links it to QBCore's jobs, money and items.`, {
+          openFile: { file, line: i + 1, label: `Open ${file} at line ${i + 1}` },
+        });
+      }
     }
   }
   if (imports.length && !loadsQb && !bridges.length) {

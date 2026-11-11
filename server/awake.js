@@ -8,6 +8,7 @@ import { getSettings } from './settings.js';
 const CHECK_MS = 10000;
 let timer = null;
 let current = 'off';
+let lastCheck = 0;
 
 /**
  * What to ask Windows for: 'off', 'system' (stay awake, the screen may turn off) or 'display'
@@ -28,7 +29,13 @@ function apply() {
     serverRunning: Boolean(p.monitor || p.game),
     onBattery: Boolean(hooks.onBattery?.()),
   });
-  if (mode !== current) {
+  // Windows drops power requests when the user puts the PC to sleep (lid, power button). A long gap
+  // between checks means the PC slept, so the request is made again after it wakes.
+  const now = Date.now();
+  const woke = lastCheck > 0 && now - lastCheck > CHECK_MS * 3;
+  lastCheck = now;
+  if (mode !== current || (woke && mode !== 'off')) {
+    if (mode === current) hooks.setKeepAwake('off');
     hooks.setKeepAwake(mode);
     current = mode;
   }
@@ -63,4 +70,5 @@ export function stopAwakeWatch() {
   timer = null;
   desktop()?.setKeepAwake?.('off');
   current = 'off';
+  lastCheck = 0;
 }

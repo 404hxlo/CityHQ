@@ -37,9 +37,14 @@ export function parseFirewall(text) {
 
 /** Whether the rules let TCP and UDP through to this server on the given network profile. */
 export function firewallCovers(rules, { program, port, profile }) {
+  // LocalPort is a list of single ports and ranges: "30120,30121" or "30100-30200".
+  const portListed = (list) => list.split(',').map((p) => p.trim()).some((p) => {
+    const range = p.match(/^(\d+)-(\d+)$/);
+    return range ? port >= Number(range[1]) && port <= Number(range[2]) : p === String(port);
+  });
   const forUs = (r) => r.enabled && r.allow
     && (/^any$/i.test(r.profiles) || !profile || r.profiles.toLowerCase().split(',').includes(profile.toLowerCase()))
-    && ((r.program && r.program.toLowerCase() === program.toLowerCase()) || r.localPort.split(',').includes(String(port)));
+    && ((r.program && r.program.toLowerCase() === program.toLowerCase()) || portListed(r.localPort));
   const covered = (proto) => rules.some((r) => forUs(r) && (r.protocol.toUpperCase() === proto || /^any$/i.test(r.protocol)));
   return { tcp: covered('TCP'), udp: covered('UDP') };
 }

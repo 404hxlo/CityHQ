@@ -128,15 +128,21 @@ export function startBefore(text, provider, dependent, dependentCategories = [])
   const d = lines.findIndex((l) => targets.some((t) => startLine(t).test(l)));
   if (p === -1) throw new HttpError(409, `server.cfg has no line that starts ${provider}.`);
   if (d === -1) throw new HttpError(409, `server.cfg has no line that starts ${dependent}.`);
-  if (p < d) return { text, changed: false, anchor: null };
-  const anchor = p > 0 ? lines[p - 1] : null;
+  if (p < d) return { text, changed: false, anchor: null, gap: 0 };
+  // The nearest line above that isn't blank and appears only once, so the undo finds the spot
+  // again; `gap` is how many lines sat between it and the moved line.
+  let a = p - 1;
+  while (a >= 0 && (!lines[a].trim() || lines.filter((l) => l === lines[a]).length > 1)) a--;
+  if (a < 0 && p > 0) a = p - 1;
+  const anchor = a >= 0 ? lines[a] : null;
+  const gap = a >= 0 ? p - a - 1 : 0;
   const [moved] = lines.splice(p, 1);
   lines.splice(d, 0, startBeforeNote(provider, dependent), moved.trim());
-  return { text: lines.join(eol), changed: true, anchor };
+  return { text: lines.join(eol), changed: true, anchor, gap };
 }
 
-/** Puts a line moved by startBefore back where it was, right after its old neighbour. */
-export function undoStartBefore(text, provider, dependent, anchor) {
+/** Puts a line moved by startBefore back where it was, after its old neighbour (and `gap` lines). */
+export function undoStartBefore(text, provider, dependent, anchor, gap = 0) {
   const eol = EOL(text);
   const lines = text.split(/\r?\n/);
   const note = lines.indexOf(startBeforeNote(provider, dependent));
@@ -146,7 +152,10 @@ export function undoStartBefore(text, provider, dependent, anchor) {
   const [, moved] = lines.splice(note, 2);
   const at = anchor === null ? 0 : lines.indexOf(anchor) + 1;
   if (anchor !== null && at === 0) throw new HttpError(409, 'The line it came after is gone, so it can\'t be undone automatically. Use Backups on server.cfg instead.');
-  lines.splice(at, 0, moved);
+  if (anchor !== null && lines.filter((l) => l === anchor).length > 1) {
+    throw new HttpError(409, 'The line it came after appears more than once, so it can\'t be undone automatically. Use Backups on server.cfg instead.');
+  }
+  lines.splice(Math.min(lines.length, at + (anchor === null ? 0 : gap)), 0, moved);
   return lines.join(eol);
 }
 
@@ -157,6 +166,19 @@ async function writeLog(list) {
   await mkdir(STATE_DIR, { recursive: true });
   await writeFile(LOG_FILE, JSON.stringify(list.slice(0, KEEP), null, 1));
 }
+// Every read-and-write of the log runs after the one before, so a fix saved meanwhile isn't lost.
+let logging = Promise.resolve();
+function changeLog(mutate) {
+  const run = logging.then(async () => {
+    const list = await readLog();
+    const result = mutate(list);
+    await writeLog(list);
+    return result;
+  });
+  logging = run.catch(() => {});
+  return run;
+}
+const undoingFixes = new Set();
 
 /** Fixes made so far, newest first, for the "Recently fixed" list and to hide what's been fixed. */
 export async function listFixes() {
@@ -165,6 +187,8 @@ export async function listFixes() {
 
 /** The problem ids already fixed during this boot of the server (their log lines remain until a restart). */
 export async function fixedThisBoot(bootMarker) {
+  // Without a way to tell boots apart, a fix must not hide its problem after later restarts.
+  if (!bootMarker) return new Set();
   return new Set((await readLog()).filter((f) => !f.undone && f.boot === bootMarker).map((f) => f.problemId));
 }
 
@@ -202,9 +226,10 @@ export async function runFix(fix) {
     const provider = disk.find((r) => r.name === fix.provider);
     if (!dependent || !provider) throw new HttpError(409, 'One of these resources is no longer installed.');
     let anchor = null;
+    let gap = 0;
     const versionId = await changeCfg((cfg) => {
       const moved = startBefore(cfg, fix.provider, fix.dependent, dependent.categories);
-      anchor = moved.anchor;
+      ({ anchor, gap } = moved);
       return moved.text;
     });
     let started = '';
@@ -217,7 +242,7 @@ export async function runFix(fix) {
     return {
       message: `${fix.provider} now starts before ${fix.dependent} in server.cfg.${started}`,
       versionId,
-      undo: versionId ? { type: 'start-before', provider: fix.provider, dependent: fix.dependent, anchor } : null,
+      undo: versionId ? { type: 'start-before', provider: fix.provider, dependent: fix.dependent, anchor, gap } : null,
     };
   }
   if (fix.type === 'start') {
@@ -289,33 +314,42 @@ export async function runFix(fix) {
 
 /** Saves what a fix did, so it can be listed, hidden from problems and undone. */
 export async function recordFix(entry) {
-  const list = await readLog();
-  const record = { id: String(Date.now()), at: Date.now(), undone: false, ...entry };
-  await writeLog([record, ...list]);
+  const record = { id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, at: Date.now(), undone: false, ...entry };
+  await changeLog((list) => { list.unshift(record); });
   return record;
 }
 
 export async function undoFix(id) {
-  const list = await readLog();
-  const record = list.find((f) => f.id === String(id));
-  if (!record) throw new HttpError(404, 'That fix was not found.');
-  if (record.undone) throw new HttpError(409, 'That fix was already undone.');
-  if (!record.undo) throw new HttpError(400, 'This fix can\'t be undone here.');
-  const { undo } = record;
-  if (undo.type === 'cfg-on') {
-    await changeCfg((cfg) => addBootLine(cfg, undo.name));
-  } else if (undo.type === 'start-before') {
-    await changeCfg((cfg) => undoStartBefore(cfg, undo.provider, undo.dependent, undo.anchor));
-  } else if (undo.type === 'keep-awake') {
-    updateSettings({ keepAwake: undo.previous });
-    refreshAwake();
-  } else if (undo.type === 'boot-on') {
-    await setBoot(undo.name, true, { record: false });
-  } else {
-    throw new HttpError(400, 'Unknown undo');
+  const key = String(id);
+  // A second press (or another device) while the first undo is still running must not run it again.
+  if (undoingFixes.has(key)) throw new HttpError(409, 'That fix is already being undone.');
+  undoingFixes.add(key);
+  try {
+    await logging;
+    const record = (await readLog()).find((f) => f.id === key);
+    if (!record) throw new HttpError(404, 'That fix was not found.');
+    if (record.undone) throw new HttpError(409, 'That fix was already undone.');
+    if (!record.undo) throw new HttpError(400, 'This fix can\'t be undone here.');
+    const { undo } = record;
+    if (undo.type === 'cfg-on') {
+      await changeCfg((cfg) => addBootLine(cfg, undo.name));
+    } else if (undo.type === 'start-before') {
+      await changeCfg((cfg) => undoStartBefore(cfg, undo.provider, undo.dependent, undo.anchor, undo.gap || 0));
+    } else if (undo.type === 'keep-awake') {
+      updateSettings({ keepAwake: undo.previous });
+      refreshAwake();
+    } else if (undo.type === 'boot-on') {
+      await setBoot(undo.name, true, { record: false });
+    } else {
+      throw new HttpError(400, 'Unknown undo');
+    }
+    // Marked on a fresh copy of the log, so fixes saved while this ran are kept.
+    await changeLog((list) => {
+      const again = list.find((f) => f.id === key);
+      if (again) { again.undone = true; again.undoneAt = Date.now(); }
+    });
+    return { message: `Undone: ${record.title}` };
+  } finally {
+    undoingFixes.delete(key);
   }
-  record.undone = true;
-  record.undoneAt = Date.now();
-  await writeLog(list);
-  return { message: `Undone: ${record.title}` };
 }

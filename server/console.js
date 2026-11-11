@@ -13,7 +13,8 @@ const SECRET_PATTERNS = [
   /(mysql:\/\/[^:\s]+:)[^@\s]+@/g,
 ];
 
-function clean(text) {
+/** Log text as the app shows it: no colour codes, secrets hidden. Shared with the startup doctor. */
+export function clean(text) {
   let out = text.replace(ANSI, '').replace(CARETS, '').replace(/\r/g, '');
   out = out.replace(SECRET_PATTERNS[0], 'cfxk_(hidden)').replace(SECRET_PATTERNS[1], '$1(hidden)@');
   // FXServer pads its channel names to line them up, which wraps badly on small screens.

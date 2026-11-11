@@ -115,10 +115,15 @@ function Doctor() {
       </div>
       <p className="muted-note">Why the server restarted or didn't finish starting, worked out from <Term id="txadmin">txAdmin</Term>'s log, the server's log and Windows' sleep records. A script is only blamed when the evidence points at it.</p>
       {!report.data && !report.error && <Spinner label="Reading the logs" />}
+      {report.error && <p className="muted-note">{report.error}</p>}
       {report.data && (
         <>
           <p className="doctor-summary">{report.data.summary}</p>
-          {shown.length === 0 && <Empty icon={<CheckCircle2 size={28} />} title="Nothing to explain">No restarts to look at.</Empty>}
+          {shown.length === 0 && (
+            <Empty icon={<CheckCircle2 size={28} />} title="Nothing to explain">
+              {planned > 0 ? 'Only planned restarts, which you can show below.' : 'No restarts to look at.'}
+            </Empty>
+          )}
           <ul className="doctor-list">
             {shown.map((i) => (
               <li key={i.id} className={`doctor-item doctor-${i.kind}`}>
