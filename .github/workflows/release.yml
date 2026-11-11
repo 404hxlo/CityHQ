@@ -1,0 +1,51 @@
+# Builds the ready-to-run Windows download and attaches it to a GitHub Release.
+# It runs when a version tag such as v1.1.0 is pushed. The tag must match package.json's version.
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 26
+          cache: npm
+
+      - name: Check the tag matches the version
+        shell: pwsh
+        run: |
+          $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          if ("v$version" -ne $env:GITHUB_REF_NAME) { throw "The tag $env:GITHUB_REF_NAME does not match package.json's version $version." }
+          "VERSION=$version" >> $env:GITHUB_ENV
+
+      - run: npm ci --no-audit --no-fund
+
+      - run: npm test
+
+      - run: npm run package
+
+      - name: Zip the app
+        shell: pwsh
+        run: |
+          $zip = "CityHQ-$env:VERSION-windows.zip"
+          # Windows' own tar writes a normal zip, with one CityHQ folder inside.
+          Rename-Item release\CityHQ-win32-x64 CityHQ
+          & "$env:SystemRoot\System32\tar.exe" -a -c -f $zip -C release CityHQ
+          if ($LASTEXITCODE -ne 0) { throw 'Zipping the app failed.' }
+          "ZIP=$zip" >> $env:GITHUB_ENV
+          "{0:N0} MB" -f ((Get-Item $zip).Length / 1MB)
+
+      - name: Publish the release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create $env:GITHUB_REF_NAME $env:ZIP --title "CityHQ $env:VERSION" --notes-file .github/release-notes.md

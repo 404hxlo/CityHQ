@@ -14,15 +14,15 @@ import {
   connectionStringOf, parseConnection, readCfg, writeCfg,
 } from './cfg.js';
 import {
-  DB_CLI, findServerData, HttpError, ROOT, STATE_DIR,
-} from './paths.js';
+  clientArgs, clientEnv, dbClient, dbDump,
+} from './dbtools.js';
+import { findServerData, HttpError, STATE_DIR } from './paths.js';
 import { ensureDatabase } from './processes.js';
 import { retry } from './retry.js';
 import { getSettings } from './settings.js';
 
 const exec = promisify(execFile);
 const TAR = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'tar.exe');
-const DUMP = path.join(ROOT, 'db', 'mariadb', 'bin', 'mariadb-dump.exe');
 export const BACKUP_DIR_ROOT = path.join(STATE_DIR, 'server-backups');
 const SAFE_DB = /^[\w$-]+$/;
 const SAFETY_REASONS_KEEP = 10;
@@ -44,8 +44,6 @@ async function connection(cfgPath) {
   return conn;
 }
 
-const clientArgs = (conn) => [`--host=${conn.host}`, `--port=${conn.port}`, `--user=${conn.user}`, '--skip-ssl', '--default-character-set=utf8mb4'];
-const clientEnv = (conn) => ({ ...process.env, MYSQL_PWD: conn.password });
 const lastLine = (err) => String(err.stderr || err.message || err).trim().split('\n').pop();
 
 const stamp = (d) => {
@@ -71,7 +69,8 @@ export const isRetryableDumpError = (err) => /\b(1412|1205|1213)\b|Table definit
 
 async function dumpDatabase(conn, file, { run = exec, wait } = {}) {
   try {
-    await retry(() => gently(run(DUMP, [
+    const dump = dbDump();
+    await retry(() => gently(run(dump, [
       ...clientArgs(conn), '--single-transaction', '--quick', '--routines', '--events', '--triggers',
       `--result-file=${file}`, conn.database,
     ], { env: clientEnv(conn), windowsHide: true, timeout: 600_000, maxBuffer: 16 * 1024 * 1024 })), {
@@ -95,7 +94,7 @@ async function dumpDatabase(conn, file, { run = exec, wait } = {}) {
 async function runSql(conn, sql, database) {
   const args = [...clientArgs(conn), '--batch', '--skip-column-names', `--execute=${sql}`];
   if (database) args.push(database);
-  const { stdout } = await exec(DB_CLI, args, { env: clientEnv(conn), windowsHide: true, timeout: 120_000 });
+  const { stdout } = await exec(dbClient(), args, { env: clientEnv(conn), windowsHide: true, timeout: 120_000 });
   return stdout.trim();
 }
 
@@ -103,7 +102,7 @@ const countTables = async (conn, database) => Number(await runSql(conn, `SELECT 
 
 function importFile(conn, database, file) {
   return new Promise((resolve, reject) => {
-    const child = spawn(DB_CLI, [...clientArgs(conn), database], { env: clientEnv(conn), windowsHide: true, stdio: ['pipe', 'ignore', 'pipe'] });
+    const child = spawn(dbClient(), [...clientArgs(conn), database], { env: clientEnv(conn), windowsHide: true, stdio: ['pipe', 'ignore', 'pipe'] });
     let stderr = '';
     child.stderr.on('data', (d) => { stderr += d; });
     child.on('error', reject);

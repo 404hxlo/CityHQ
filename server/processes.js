@@ -6,8 +6,9 @@ import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
+import { connectionStringOf, parseConnection, readCfg } from './cfg.js';
 import {
-  DB_EXE, DB_INI, DB_PORT, FXSERVER_DIR, FXSERVER_EXE, LOG_DIR, ROOT, TX_ENV, TXADMIN_PORT,
+  DB_EXE, DB_HOME, DB_INI, DB_PORT, findServerData, FXSERVER_DIR, FXSERVER_EXE, HttpError, LOG_DIR, MANAGED_DB, TX_ENV, TXADMIN_PORT,
 } from './paths.js';
 
 const exec = promisify(execFile);
@@ -23,12 +24,29 @@ while ($true) {
   Start-Sleep -Seconds ${SAMPLE_SECONDS}
 }`;
 
-const under = (p) => Boolean(p) && p.toLowerCase().startsWith(`${ROOT.toLowerCase()}\\`);
+/** True when a program runs from inside folder (FiveM's server folder, or CityHQ's own database). */
+export const runsFrom = (exe, folder) => Boolean(exe) && exe.toLowerCase().startsWith(`${path.resolve(folder).toLowerCase()}\\`);
+
+/**
+ * Picks this server's processes out of every FXServer and database on the PC: FXServer only from
+ * this server's FiveM folder, and a database only when CityHQ runs it. Other servers are ignored.
+ */
+export function ownProcesses(rows, { fxserverDir = FXSERVER_DIR, dbHome = DB_HOME, managedDb = MANAGED_DB } = {}) {
+  const fx = rows.filter((r) => r.Name === 'FXServer.exe' && runsFrom(r.ExecutablePath, fxserverDir));
+  const fxPids = new Set(fx.map((r) => r.ProcessId));
+  const roles = fx.filter((r) => !/-dumpserver/i.test(r.CommandLine || ''));
+  const monitor = roles.find((r) => !fxPids.has(r.ParentProcessId)) || null;
+  const game = monitor ? roles.find((r) => r.ParentProcessId === monitor.ProcessId) || null : null;
+  const db = managedDb ? rows.find((r) => r.Name === 'mariadbd.exe' && runsFrom(r.ExecutablePath, dbHome)) || null : null;
+  return { monitor, game, db };
+}
 
 const state = {
   monitor: null,
   game: null,
   db: null,
+  // For someone's own database: true or false once checked, null when it can't be told.
+  externalDbUp: null,
   updatedAt: 0,
   cpuPct: null,
   memBytes: null,
@@ -55,13 +73,8 @@ function sysCpuSample() {
 }
 
 function ingest(rows) {
-  const mine = rows.filter((r) => under(r.ExecutablePath));
-  const fx = mine.filter((r) => r.Name === 'FXServer.exe');
-  const fxPids = new Set(fx.map((r) => r.ProcessId));
-  const roles = fx.filter((r) => !/-dumpserver/i.test(r.CommandLine || ''));
-  const monitor = roles.find((r) => !fxPids.has(r.ParentProcessId)) || null;
-  const game = monitor ? roles.find((r) => r.ParentProcessId === monitor.ProcessId) || null : null;
-  const db = mine.find((r) => r.Name === 'mariadbd.exe') || null;
+  const { monitor, game, db } = ownProcesses(rows);
+  if (!MANAGED_DB) checkExternalDatabase();
 
   state.monitor = monitor ? { pid: monitor.ProcessId } : null;
   state.game = game ? { pid: game.ProcessId } : null;
@@ -159,6 +172,12 @@ function spawnDetached(exe, args, cwd, logName, env) {
 }
 
 export async function ensureDatabase() {
+  // Someone's own database (XAMPP, MySQL...) is theirs to run; CityHQ only checks it answers.
+  if (!MANAGED_DB) {
+    const conn = await externalDatabase();
+    if (!conn || await isPortOpen(Number(conn.port), conn.host)) return false;
+    throw new HttpError(503, `Your database at ${conn.host}:${conn.port} (from server.cfg) isn't answering. Start it first, for example MySQL in XAMPP's control panel, then try again.`);
+  }
   if (await isPortOpen(DB_PORT)) return false;
   spawnDetached(DB_EXE, [`--defaults-file=${DB_INI}`], path.dirname(DB_INI), 'mariadb-console');
   for (let i = 0; i < 30; i++) {
@@ -166,6 +185,27 @@ export async function ensureDatabase() {
     await new Promise((r) => setTimeout(r, 500));
   }
   throw new Error('The database did not start. See logs\\mariadb.err for details.');
+}
+
+// Someone's own database isn't one of our processes, so whether it answers is checked now and then.
+let externalCheckAt = 0;
+function checkExternalDatabase() {
+  if (Date.now() - externalCheckAt < 10000) return;
+  externalCheckAt = Date.now();
+  externalDatabase()
+    .then(async (conn) => { state.externalDbUp = conn ? await isPortOpen(Number(conn.port), conn.host) : null; })
+    .catch(() => { state.externalDbUp = null; });
+}
+
+/** The database server.cfg points at, for a server whose database CityHQ doesn't run. */
+export async function externalDatabase() {
+  const server = findServerData();
+  if (!server) return null;
+  try {
+    const conn = parseConnection(connectionStringOf(await readCfg(server.cfgPath)));
+    if (!conn) return null;
+    return { ...conn, host: conn.host === 'localhost' ? '127.0.0.1' : conn.host };
+  } catch { return null; }
 }
 
 /**

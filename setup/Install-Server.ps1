@@ -22,7 +22,9 @@ param(
   [switch]$Yes,
   # Don't start txAdmin at the end.
   [switch]$NoStart,
-  [switch]$NoShortcuts
+  [switch]$NoShortcuts,
+  # Used by CityHQ itself: set up the server only, without Node.js or building the app.
+  [switch]$NoApp
 )
 
 $ErrorActionPreference = 'Stop'
@@ -107,7 +109,7 @@ if (-not [Environment]::Is64BitOperatingSystem) { Stop-Setup 'This needs 64-bit 
 foreach ($tool in 'curl.exe', 'tar.exe', 'robocopy.exe') {
   if (-not (Get-Command $tool -ErrorAction SilentlyContinue)) { Stop-Setup "$tool is missing. It comes with Windows 10 (2018 or newer) and Windows 11." }
 }
-if (-not (Test-Path (Join-Path $Source 'package.json'))) { Stop-Setup "The app's files were not found next to this script. Extract the whole download first, then run Setup.cmd from it." }
+if (-not $NoApp -and -not (Test-Path (Join-Path $Source 'package.json'))) { Stop-Setup "The app's files were not found next to this script. Extract the whole download first, then run Setup.cmd from it." }
 
 if (-not $Root) {
   $default = 'C:\QBCore-Server'
@@ -141,7 +143,8 @@ if ($resuming -and (Test-Path (Join-Path $Root 'qbcontrol.json'))) {
   $GamePort = Find-FreePort 'game server' $GamePort @()
   $TxAdminPort = Find-FreePort 'txAdmin panel' $TxAdminPort @($GamePort)
   $DatabasePort = Find-FreePort 'database' $DatabasePort @($GamePort, $TxAdminPort)
-  $AppPort = Find-FreePort 'CityHQ app' $AppPort @($GamePort, $TxAdminPort, $DatabasePort)
+  # When CityHQ runs setup itself, it is already using its port, so that one is kept.
+  if (-not $NoApp) { $AppPort = Find-FreePort 'CityHQ app' $AppPort @($GamePort, $TxAdminPort, $DatabasePort) }
 }
 Note "Game server $GamePort, txAdmin $TxAdminPort, database $DatabasePort, app $AppPort"
 
@@ -154,7 +157,7 @@ if ($sacOn) {
 }
 
 if (-not $Yes) {
-  $go = Read-Host "`nInstall into $Root ? This downloads about 250 MB. Type Y to continue"
+  $go = Read-Host "`nInstall into $Root ? This downloads about $(if ($NoApp) { '200' } else { '250' }) MB. Type Y to continue"
   if ($go -notmatch '^(y|yes)$') { Stop-Setup 'Nothing was changed.' }
 }
 
@@ -235,10 +238,13 @@ Note "Working: $version, reachable only from this PC."
 $db.WaitForExit(30000) | Out-Null
 
 # ---------------------------------------------------------------- Node.js (only used to build the app)
-Say 'Node.js'
 $nodeHome = Join-Path $Root 'tools\node'
-if (Test-Path (Join-Path $nodeHome 'node.exe')) { Note 'Already there.' }
+$appHome = Join-Path $Root 'control-app'
+$appExe = Join-Path $appHome 'release\CityHQ-win32-x64\CityHQ.exe'
+if ($NoApp) { Note 'CityHQ is already installed, so it is not built here.' }
+elseif (Test-Path (Join-Path $nodeHome 'node.exe')) { Say 'Node.js'; Note 'Already there.' }
 else {
+  Say 'Node.js'
   $zip = Join-Path $Downloads $NodeZip
   $sums = Join-Path $Downloads 'node-SHASUMS256.txt'
   if (-not (Test-Zip $zip)) { Note "Downloading Node.js $NodeVersion..."; Get-File "$NodeBase/$NodeZip" $zip }
@@ -253,11 +259,10 @@ else {
 }
 
 # ---------------------------------------------------------------- the app
-Say 'CityHQ'
-$appHome = Join-Path $Root 'control-app'
-$appExe = Join-Path $appHome 'release\CityHQ-win32-x64\CityHQ.exe'
-if (Test-Path $appExe) { Note 'Already built.' }
+if ($NoApp) { }
+elseif (Test-Path $appExe) { Say 'CityHQ'; Note 'Already built.' }
 else {
+  Say 'CityHQ'
   Note 'Copying the app...'
   & robocopy.exe $Source $appHome /E /XD node_modules release dist .git /NFL /NDL /NJH /NJS /NP | Out-Null
   if ($LASTEXITCODE -ge 8) { Stop-Setup 'Could not copy the app into the server folder.' }
@@ -302,7 +307,7 @@ pause
 "@ | Set-Content -LiteralPath (Join-Path $Root 'Start-Server.bat') -Encoding ascii
 Copy-Item (Join-Path $PSScriptRoot 'SERVER-FOLDER.md') (Join-Path $Root 'README.md') -Force
 
-if (-not $NoShortcuts) {
+if (-not $NoShortcuts -and -not $NoApp) {
   $shell = New-Object -ComObject WScript.Shell
   foreach ($place in @($Root, [Environment]::GetFolderPath('Desktop'))) {
     $link = $shell.CreateShortcut((Join-Path $place 'CityHQ.lnk'))
@@ -316,6 +321,11 @@ if (-not $NoShortcuts) {
 Remove-Item -LiteralPath (Join-Path $Root $Marker) -Force
 
 Write-Host "`nDone. Your server folder is $Root" -ForegroundColor Green
+if ($NoApp) {
+  # CityHQ shows the next steps itself (starting txAdmin, its PIN and the QBCore recipe).
+  Write-Host "Database for txAdmin's setup: host 127.0.0.1, port $DatabasePort, user root, no password."
+  exit 0
+}
 Write-Host @"
 
 What happens next:

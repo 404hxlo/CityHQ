@@ -6,7 +6,7 @@ import { agentRequest, installAgent, installedAgentVersion } from './agent.js';
 import { applyBackupParts, createBackup, readBackup } from './backups.js';
 import { ensureCfgBlock } from './resources.js';
 import {
-  FXSERVER_LOG, GAME_PORT, HttpError, findServerData, STATE_DIR, TX_PROFILE, TXADMIN_PORT,
+  DB_PORT, FXSERVER_LOG, GAME_PORT, HttpError, findServerData, MANAGED_DB, STATE_DIR, TX_PROFILE, TXADMIN_PORT,
 } from './paths.js';
 import {
   getHistory, getProcessState, isPortOpen, killTree, startTxAdmin, waitFor,
@@ -95,8 +95,11 @@ export function getOverview() {
     processes: {
       txAdmin: Boolean(p.monitor),
       game: Boolean(p.game),
-      database: Boolean(p.db),
+      database: MANAGED_DB ? Boolean(p.db) : p.externalDbUp !== false,
     },
+    // False when the database is the owner's own (XAMPP, MySQL...), which CityHQ doesn't start.
+    databaseManaged: MANAGED_DB,
+    databasePort: MANAGED_DB ? DB_PORT : null,
     status: liveStatus,
     statusAgeMs: liveAt ? Date.now() - liveAt : null,
     stats: {

@@ -15,8 +15,9 @@ import {
   addBootLine, connectionStringOf, convarOn, ensureManagedBlock, forgetBootLines, parseBoot, parseConnection, readCfg,
   readConvar, removeBootLine, setConvar, writeCfg,
 } from './cfg.js';
+import { clientArgs, clientEnv, dbClient } from './dbtools.js';
 import {
-  DB_CLI, findServerData, FXSERVER_DIR, HttpError, resolveInside, STATE_DIR, TMP_DIR, TRASH_DIR,
+  findServerData, FXSERVER_DIR, HttpError, resolveInside, STATE_DIR, TMP_DIR, TRASH_DIR,
 } from './paths.js';
 import { recordChange } from './history.js';
 import { moveFolderSafely } from './retry.js';
@@ -607,12 +608,9 @@ export async function runSql(name, file) {
   if (!conn?.database) throw new HttpError(400, 'Could not read the database settings from server.cfg');
   // SQL files can change or delete data, so keep a way back.
   const before = await createBackup('before-sql', { parts: ['database'] });
-  const args = [
-    `--host=${conn.host}`, `--port=${conn.port}`, `--user=${conn.user}`, '--skip-ssl', '--default-character-set=utf8mb4',
-    conn.database, '--batch', '--execute', `source ${sqlPath.replaceAll('\\', '/')}`,
-  ];
+  const args = [...clientArgs(conn), conn.database, '--batch', '--execute', `source ${sqlPath.replaceAll('\\', '/')}`];
   try {
-    await exec(DB_CLI, args, { env: { ...process.env, MYSQL_PWD: conn.password }, windowsHide: true, timeout: 120_000 });
+    await exec(dbClient(), args, { env: clientEnv(conn), windowsHide: true, timeout: 120_000 });
   } catch (err) {
     throw new HttpError(400, `The SQL file failed: ${String(err.stderr || err.message).trim().split('\n').slice(-2).join(' ')}`);
   }

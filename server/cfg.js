@@ -204,6 +204,18 @@ export function restoreSecrets(edited, original) {
   }).join(EOL(edited));
 }
 
+/** The game port server.cfg listens on (endpoint_add_tcp "0.0.0.0:30120"), or null. */
+export function gamePortOf(text) {
+  for (const line of String(text || '').split(/\r?\n/)) {
+    const m = splitComment(line)[0].match(/^\s*endpoint_add_tcp\s+["']?[^"'\s]*:(\d+)["']?\s*$/i);
+    if (m) {
+      const port = Number(m[1]);
+      if (port > 0 && port < 65536) return port;
+    }
+  }
+  return null;
+}
+
 export function connectionStringOf(text) {
   for (const line of text.split(/\r?\n/)) {
     const [code] = splitComment(line);

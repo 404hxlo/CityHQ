@@ -7,7 +7,8 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 import { VALID_IDENTIFIER } from './admins.js';
 import { connectionStringOf, parseConnection, readCfg } from './cfg.js';
-import { DB_CLI, findServerData, STATE_DIR } from './paths.js';
+import { clientArgs, clientEnv, dbClient } from './dbtools.js';
+import { findServerData, STATE_DIR } from './paths.js';
 import { replaceFileSync } from './retry.js';
 
 const exec = promisify(execFile);
@@ -51,10 +52,9 @@ async function query(sql) {
   if (!server) return [];
   const conn = parseConnection(connectionStringOf(await readCfg(server.cfgPath)));
   if (!conn?.database || !SAFE_DB.test(conn.database)) return [];
-  const { stdout } = await exec(DB_CLI, [
-    `--host=${conn.host}`, `--port=${conn.port}`, `--user=${conn.user}`, '--skip-ssl', '--default-character-set=utf8mb4',
-    '--batch', '--skip-column-names', `--execute=${sql}`, conn.database,
-  ], { env: { ...process.env, MYSQL_PWD: conn.password }, windowsHide: true, timeout: 15000, maxBuffer: 32 * 1024 * 1024 });
+  const { stdout } = await exec(dbClient(), [
+    ...clientArgs(conn), '--batch', '--skip-column-names', `--execute=${sql}`, conn.database,
+  ], { env: clientEnv(conn), windowsHide: true, timeout: 15000, maxBuffer: 32 * 1024 * 1024 });
   return parseBatch(stdout);
 }
 

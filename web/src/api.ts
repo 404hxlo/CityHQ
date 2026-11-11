@@ -89,6 +89,14 @@ export interface Overview {
   gamePort: number;
   txAdminPort: number;
   processes: { txAdmin: boolean; game: boolean; database: boolean };
+  /** False when the database is the owner's own (XAMPP, MySQL...), which CityHQ doesn't start. */
+  databaseManaged?: boolean;
+  /** The private database's port, for txAdmin's setup; null for someone's own database. */
+  databasePort?: number | null;
+  /** How the server folder was found; 'saved' means it was chosen on the Welcome screen. */
+  rootSource?: 'folder' | 'saved' | 'env' | null;
+  /** CityHQ's database tools, for someone's own database: null when the server's own are used. */
+  dbTools?: { ready: boolean; progress: { step: string; mb: number | null } | null } | null;
   status: null | {
     uptimeSec: number; players: number; maxClients: number; gameBuild: string; version: string;
     onesync: string; qbcore: boolean; resourcesStarted: number; resourcesTotal: number;
@@ -199,7 +207,21 @@ export interface Settings {
   local: boolean; lanEnabled: boolean; lanListening: boolean; appPort: number; gamePort: number; txAdminPort: number;
   paths: { root: string; fxserver: string; serverData: string | null } | null;
   urls: string[]; passcode: string | null; desktop: boolean;
+  rootSource?: 'folder' | 'saved' | 'env' | null; databaseManaged?: boolean;
 }
+
+/** One server found on this PC, or the folder someone picked, as the Welcome screen reads it. */
+export interface ServerCandidate {
+  folder: string; found: boolean; root: string; fxserverDir: string | null; txDataDir: string | null; profile: string;
+  dataPath: string | null; cfgPath: string | null; gamePort: number; txAdminPort: number; qbcore: boolean; cityhqMade: boolean;
+  database: { host: string; port: number; user: string; name: string; hasPassword: boolean; managed: boolean } | null;
+  problems: { level: 'bad' | 'warn' | 'info'; text: string }[];
+  txAdminRunning?: boolean; databaseUp?: boolean;
+}
+export interface WelcomeInfo { folderFound: boolean; rootSource: string | null; root: string | null; desktop: boolean; suggestedNewFolder: string }
+export interface NewServerJob { running: boolean; root: string; lines: string[]; ok: boolean | null; error: string | null; startedAt: number }
+export interface DbToolsState { ready: boolean; running: boolean; progress: { step: string; mb: number | null } | null; error: string | null }
+export interface WelcomeProgress { tools: DbToolsState; newServer: NewServerJob | null }
 
 /** An error from the app that may carry details, like where a mistake in a file is. */
 export class ApiError extends Error {
@@ -259,6 +281,18 @@ export const api = {
   logout: () => request('POST', '/api/logout'),
 
   overview: () => request<Overview>('GET', '/api/overview'),
+  welcome: () => request<WelcomeInfo>('GET', '/api/welcome'),
+  welcomeScan: () => request<ServerCandidate[]>('GET', '/api/welcome/scan'),
+  welcomeCheck: (folder: string) => request<ServerCandidate>('POST', '/api/welcome/check', { folder }),
+  welcomePick: () => request<{ folder?: string; cancelled?: boolean }>('POST', '/api/welcome/pick'),
+  welcomeUse: (folder: string, txAdminPort?: number) => request<{ root: string; external: boolean; needsTools: boolean }>('POST', '/api/welcome/use', { folder, txAdminPort }),
+  welcomeTools: () => request<DbToolsState>('POST', '/api/welcome/tools'),
+  welcomeProgress: () => request<WelcomeProgress>('GET', '/api/welcome/progress'),
+  welcomeNew: (folder: string) => request<NewServerJob>('POST', '/api/welcome/new', { folder }),
+  welcomeRelaunch: () => request<{ relaunching: boolean }>('POST', '/api/welcome/relaunch'),
+  welcomeForget: () => request<{ relaunching: boolean }>('POST', '/api/welcome/forget'),
+  startPanel: () => request<{ started?: boolean; alreadyRunning?: boolean }>('POST', '/api/server/start-panel'),
+  txAdminPin: () => request<{ pin: string | null; panelUp: boolean }>('GET', '/api/server/pin'),
   start: () => request('POST', '/api/server/start', {}),
   stop: (reason?: string) => request('POST', '/api/server/stop', { reason }),
   restart: (reason?: string) => request('POST', '/api/server/restart', { reason }),

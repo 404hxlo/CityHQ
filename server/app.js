@@ -55,10 +55,18 @@ import {
   listFiles, listVersions, readEditable, restoreVersion, saveContent, saveFields,
 } from './files.js';
 import {
-  APP_DIR, APP_PORT, FXSERVER_DIR, GAME_PORT, findServerData, HttpError, ROOT, ROOT_FOUND, TXADMIN_PORT,
+  APP_DIR, APP_PORT, FXSERVER_DIR, GAME_PORT, findServerData, HttpError, LOG_DIR, MANAGED_DB, ROOT, ROOT_FOUND, ROOT_SOURCE, TXADMIN_PORT,
 } from './paths.js';
 import { repairMovedFolder } from './relocate.js';
-import { startProbe, stopProbe } from './processes.js';
+import {
+  ensureDatabase, getProcessState, isPortOpen, startProbe, startTxAdmin, stopProbe,
+} from './processes.js';
+import {
+  dbToolsProgress, dbToolsReady, dbToolsState, installDbTools,
+} from './dbtools.js';
+import {
+  checkServerFolder, forgetServer, newServerJob, readTxAdminPin, scanForServers, startNewServer, suggestNewFolder, useServer,
+} from './welcome.js';
 import {
   activateInstalled, ensureCfgBlock, getInstallStatus, installFromGithub, installFromLocalPath, installFromUpload, isValidName, listResources, listSqlFiles, listTrash,
   refreshResources, removeResource, resourceAction, restoreFromTrash, runSql, setBoot,
@@ -141,9 +149,12 @@ function buildApp() {
       const counts = await resourceCounts().catch(() => null);
       if (counts) Object.assign(overview.status, counts);
     }
+    if (!ROOT_FOUND) return { folderFound: false, rootSource: null };
     return {
       ...overview,
       folderFound: ROOT_FOUND,
+      rootSource: ROOT_SOURCE,
+      dbTools: MANAGED_DB ? null : { ready: dbToolsReady(), progress: dbToolsProgress() },
       problems: await currentProblems().catch(() => []),
       alerts: unseenAlerts().slice(0, 5),
       schedule: {
@@ -195,6 +206,51 @@ function buildApp() {
     markSeen(typeof req.body?.id === 'string' ? req.body.id : undefined);
     return { ok: true };
   }));
+  // Welcome screen: connect CityHQ to a server, or build a new one. Only on the PC itself.
+  const relaunchSoon = () => {
+    const hooks = desktop();
+    if (!hooks?.relaunch) return false;
+    setTimeout(() => hooks.relaunch(), 400);
+    return true;
+  };
+  api.get('/welcome', localOnly, handler(() => ({
+    folderFound: ROOT_FOUND, rootSource: ROOT_SOURCE, root: ROOT_FOUND ? ROOT : null, desktop: Boolean(desktop()), suggestedNewFolder: suggestNewFolder(),
+  })));
+  api.get('/welcome/scan', localOnly, handler(() => scanForServers()));
+  api.post('/welcome/check', localOnly, json, handler((req) => checkServerFolder(req.body?.folder)));
+  api.post('/welcome/pick', localOnly, handler(async () => {
+    if (!desktop()?.pickInstallSource) throw new HttpError(400, 'Type the folder\'s path instead.');
+    const folder = await desktop().pickInstallSource('server');
+    return folder ? { folder } : { cancelled: true };
+  }));
+  api.post('/welcome/use', localOnly, json, handler(async (req) => {
+    const saved = await useServer(req.body?.folder, { txAdminPort: req.body?.txAdminPort });
+    return { ...saved, needsTools: saved.external };
+  }));
+  // Database tools for someone's own MySQL: downloaded here, before CityHQ restarts on that server.
+  // Before a server is chosen there is no managed database, so this fetches the shared tools. It
+  // runs in the background (a 100 MB download takes a while); the screen polls /welcome/progress.
+  api.post('/welcome/tools', localOnly, handler(() => {
+    installDbTools().catch(() => { /* kept in dbToolsState().error */ });
+    return dbToolsState();
+  }));
+  api.get('/welcome/progress', localOnly, handler(() => ({ tools: dbToolsState(), newServer: newServerJob() })));
+  api.post('/welcome/new', localOnly, json, handler((req) => startNewServer(req.body?.folder)));
+  api.post('/welcome/relaunch', localOnly, handler(() => ({ relaunching: relaunchSoon() })));
+  api.post('/welcome/forget', localOnly, handler(async () => {
+    if (ROOT_SOURCE !== 'saved') throw new HttpError(409, 'This copy of CityHQ is installed inside its server folder, so it always manages that one.');
+    await forgetServer();
+    return { relaunching: relaunchSoon() };
+  }));
+  // A new server's first start: txAdmin only, so its setup page and PIN can be used.
+  api.post('/server/start-panel', localOnly, handler(async () => {
+    if (getProcessState().monitor || await isPortOpen(TXADMIN_PORT)) return { alreadyRunning: true, pin: readTxAdminPin(LOG_DIR) };
+    await ensureDatabase();
+    await startTxAdmin();
+    return { started: true };
+  }));
+  api.get('/server/pin', localOnly, handler(async () => ({ pin: readTxAdminPin(LOG_DIR), panelUp: await isPortOpen(TXADMIN_PORT) })));
+
   api.post('/server/start', handler(() => startServer()));
   api.post('/server/stop', json, handler((req) => {
     cancelPendingRestart();
@@ -552,6 +608,9 @@ function buildApp() {
       lanListening: lanServers.length > 0,
       appPort: APP_PORT,
       paths: local ? { root: ROOT, fxserver: FXSERVER_DIR, serverData: server?.dataPath || null } : null,
+      // 'saved' means the server was chosen on the Welcome screen, so Settings can change it.
+      rootSource: ROOT_SOURCE,
+      databaseManaged: MANAGED_DB,
       desktop: local && Boolean(desktop()),
       gamePort: GAME_PORT,
       txAdminPort: TXADMIN_PORT,
@@ -636,6 +695,11 @@ export async function applyLanSetting() {
 
 export async function startApp() {
   appInstance = buildApp();
+  // No server chosen yet: only the Welcome screen runs. Nothing to watch, back up or restart.
+  if (!ROOT_FOUND) {
+    mainServer = await listen(appInstance, '127.0.0.1');
+    return { port: APP_PORT, url: `http://127.0.0.1:${APP_PORT}` };
+  }
   // If the whole folder was copied to another drive or PC, point its settings at the new place.
   const moved = await repairMovedFolder();
   if (moved.length) recordEvent({ title: 'The server folder has moved', detail: `Updated the ${moved.join(' and ')} to match its new location.` });
@@ -650,6 +714,10 @@ export async function startApp() {
   startScheduler();
   startStats();
   startAwakeWatch();
+  // Someone's own database needs CityHQ's database tools; fetch them if a first try didn't finish.
+  if (!MANAGED_DB && !dbToolsReady()) {
+    installDbTools().catch((err) => recordEvent({ level: 'alert', title: 'CityHQ could not get its database tools', detail: `${err.message} Backups and SQL files need them. CityHQ tries again the next time it starts.` }));
+  }
   return { port: APP_PORT, url: `http://127.0.0.1:${APP_PORT}` };
 }
 

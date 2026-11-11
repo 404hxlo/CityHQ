@@ -2,7 +2,8 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { connectionStringOf, parseConnection, readCfg } from './cfg.js';
-import { DB_CLI, findServerData, HttpError } from './paths.js';
+import { clientArgs, clientEnv, dbClient } from './dbtools.js';
+import { findServerData, HttpError } from './paths.js';
 
 const exec = promisify(execFile);
 export const VALID_TABLE = /^\w{1,64}$/;
@@ -13,10 +14,9 @@ export async function dbRun(sql, { timeoutMs = 30000 } = {}) {
   if (!server) throw new HttpError(409, 'The server has not been deployed yet.');
   const conn = parseConnection(connectionStringOf(await readCfg(server.cfgPath)));
   if (!conn?.database) throw new HttpError(400, 'Could not read the database settings from server.cfg');
-  const { stdout } = await exec(DB_CLI, [
-    `--host=${conn.host}`, `--port=${conn.port}`, `--user=${conn.user}`, '--skip-ssl', '--default-character-set=utf8mb4',
-    conn.database, '--batch', '--skip-column-names', '--execute', sql,
-  ], { env: { ...process.env, MYSQL_PWD: conn.password }, windowsHide: true, timeout: timeoutMs, maxBuffer: 8 * 1024 * 1024 });
+  const { stdout } = await exec(dbClient(), [
+    ...clientArgs(conn), conn.database, '--batch', '--skip-column-names', '--execute', sql,
+  ], { env: clientEnv(conn), windowsHide: true, timeout: timeoutMs, maxBuffer: 8 * 1024 * 1024 });
   return stdout.split(/\r?\n/).filter(Boolean).map((line) => line.split('\t'));
 }
 

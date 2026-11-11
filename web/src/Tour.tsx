@@ -37,8 +37,10 @@ function targetOf(step: Step): Element | null {
 }
 
 /** The first-run tour: a spotlight on each part of the app with a short explanation. */
-export function Tour() {
-  const [index, setIndex] = useState<number | null>(() => (done() ? null : 0));
+export function Tour({ autoStart = true }: { autoStart?: boolean }) {
+  const [index, setIndex] = useState<number | null>(null);
+  // The first-run tour waits until there's a dashboard to show (not txAdmin's setup steps).
+  useEffect(() => { if (autoStart && !done()) setIndex((i) => (i === null ? 0 : i)); }, [autoStart]);
   const [box, setBox] = useState<DOMRect | null>(null);
 
   useEffect(() => {

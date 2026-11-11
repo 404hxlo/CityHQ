@@ -15,6 +15,7 @@ import { Overview } from './pages/Overview';
 import { Players } from './pages/Players';
 import { Resources } from './pages/Resources';
 import { SettingsPage } from './pages/SettingsPage';
+import { Welcome } from './pages/Welcome';
 import {
   Button, ConfirmProvider, Notice, ServerBadge, Spinner, ToastProvider, usePoll,
 } from './ui';
@@ -94,6 +95,9 @@ function Shell({ local, onSignOut }: { local: boolean; onSignOut: () => void }) 
   const state = overview.data?.state;
   const online = state === 'online';
 
+  // A downloaded copy that hasn't been connected to a server yet starts on the Welcome screen.
+  if (overview.data && overview.data.folderFound === false) return <Welcome local={local} />;
+
   return (
     <div className="shell">
       <nav className="rail" aria-label="Main">
@@ -166,7 +170,7 @@ function Shell({ local, onSignOut }: { local: boolean; onSignOut: () => void }) 
         {page === 'settings' && <SettingsPage online={online} onSignOut={onSignOut} />}
         {page === 'learn' && <Learn />}
       </main>
-      <Tour />
+      <Tour autoStart={Boolean(overview.data?.deployed)} />
     </div>
   );
 }

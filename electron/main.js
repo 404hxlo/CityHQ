@@ -161,10 +161,22 @@ function installDesktopHooks() {
       app.setLoginItemSettings({ ...loginOptions, openAtLogin: enabled });
     },
     openFolder: (folder) => shell.openPath(folder),
+    // Picking a server on the Welcome screen: every path is read once at start, so start again.
+    relaunch() {
+      quitting = true;
+      app.relaunch();
+      // Stop the process watcher, timers and web server first; a running PowerShell watcher can
+      // keep the old copy from exiting, and then the new one never takes its place.
+      const exit = () => { app.exit(0); setTimeout(() => process.exit(0), 1500); };
+      setTimeout(exit, 5000);
+      stopApp().catch(() => {}).finally(exit);
+    },
     async pickInstallSource(type) {
-      const options = type === 'folder'
-        ? { title: 'Choose a resource folder', properties: ['openDirectory'] }
-        : { title: 'Choose a resource file', properties: ['openFile'], filters: [{ name: 'Archives', extensions: ['zip', 'rar', '7z'] }] };
+      const options = type === 'server'
+        ? { title: 'Choose your server folder (the one with FXServer.exe, or the folder above it)', properties: ['openDirectory'] }
+        : type === 'folder'
+          ? { title: 'Choose a resource folder', properties: ['openDirectory'] }
+          : { title: 'Choose a resource file', properties: ['openFile'], filters: [{ name: 'Archives', extensions: ['zip', 'rar', '7z'] }] };
       const parent = win && !win.isDestroyed() ? win : undefined;
       const result = parent ? await dialog.showOpenDialog(parent, options) : await dialog.showOpenDialog(options);
       return result.canceled ? null : result.filePaths[0];

@@ -1,5 +1,5 @@
 import {
-  BookOpen, Compass, ExternalLink, FolderOpen, KeyRound, LogOut, Plus, QrCode, RefreshCw, Server, Smartphone, Timer, X,
+  BookOpen, Compass, ExternalLink, FolderOpen, KeyRound, LogOut, Plus, QrCode, RefreshCw, Repeat, Server, Smartphone, Timer, X,
 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import {
@@ -226,6 +226,15 @@ export function SettingsPage({ online, onSignOut }: { online: boolean; onSignOut
     if (ok) await api.restart();
   };
 
+  const changeServer = async () => {
+    const ok = await confirm({
+      title: 'Choose a different server?',
+      body: <p>CityHQ starts again on its Welcome screen, where you pick another server or make a new one. This server keeps running, and nothing in its folder is removed.</p>,
+      confirm: 'Choose another server',
+    });
+    if (ok) await run('forget', () => api.welcomeForget(), (r) => (r.relaunching ? 'CityHQ is starting again...' : 'Close CityHQ from its tray icon and open it again.'));
+  };
+
   if (!data) return error ? <Notice kind="error">{error}</Notice> : <Spinner />;
 
   return (
@@ -274,7 +283,11 @@ export function SettingsPage({ online, onSignOut }: { online: boolean; onSignOut
             <dt>Your server files</dt><dd><code>{data.paths.serverData}</code></dd>
             <dt>Game port</dt><dd><code>{data.gamePort}</code></dd>
           </dl>
-          <a className="btn btn-default" href={`http://localhost:${data.txAdminPort}`} target="_blank" rel="noreferrer"><ExternalLink size={16} /><span>Open txAdmin</span></a>
+          <div className="button-row">
+            <a className="btn btn-default" href={`http://localhost:${data.txAdminPort}`} target="_blank" rel="noreferrer"><ExternalLink size={16} /><span>Open txAdmin</span></a>
+            {data.rootSource === 'saved' && data.desktop && <Button icon={<Repeat size={15} />} onClick={changeServer}>Change server</Button>}
+          </div>
+          {data.rootSource === 'folder' && <p className="muted-note">This copy of CityHQ is installed inside the server folder, so it always manages this server.</p>}
         </section>
       )}
     </div>

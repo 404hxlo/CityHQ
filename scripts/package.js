@@ -4,11 +4,13 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const KEEP = [/^\/package\.json$/, /^\/electron(\/|$)/, /^\/server(\/|$)/, /^\/dist(\/|$)/, /^\/agent-resource(\/|$)/, /^\/build(\/|$)/, /^\/node_modules(\/|$)/];
+// setup\ goes along so the Welcome screen can build a new server from a downloaded copy.
+const KEEP = [/^\/package\.json$/, /^\/electron(\/|$)/, /^\/server(\/|$)/, /^\/dist(\/|$)/, /^\/agent-resource(\/|$)/, /^\/build(\/|$)/, /^\/setup(\/|$)/, /^\/node_modules(\/|$)/];
 
 const paths = await packager({
   dir: root,
-  out: path.join(root, 'release'),
+  // QBC_PACKAGE_OUT builds a test copy elsewhere, leaving the installed app (and its open files) alone.
+  out: process.env.QBC_PACKAGE_OUT ? path.resolve(process.env.QBC_PACKAGE_OUT) : path.join(root, 'release'),
   name: 'CityHQ',
   executableName: 'CityHQ',
   platform: 'win32',

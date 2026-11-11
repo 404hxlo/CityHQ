@@ -11,7 +11,7 @@ import { parseBoot, readCfg } from './cfg.js';
 import { serverLogTail } from './doctor.js';
 import { dbRun, VALID_TABLE } from './db.js';
 import { columnsOf, createStatementFor, stripSqlComments } from './fixes.js';
-import { findServerData, ROOT } from './paths.js';
+import { findServerData, MANAGED_DB, ROOT } from './paths.js';
 import { liveStates, listSqlFiles, scanDisk } from './resources.js';
 import { listingStatus } from './reach.js';
 import { getSettings } from './settings.js';
@@ -104,7 +104,10 @@ async function checkDatabase() {
     await dbRun('SELECT 1', { timeoutMs: 8000 });
     return finding('database', 'ok', 'The database is running', 'Scripts can save and load data.');
   } catch {
-    return finding('database', 'bad', 'The database isn\'t answering', 'Scripts can\'t save or load anything, and players may not be able to load in.', { steps: ['Start the server from the Overview page; CityHQ starts the database with it.', 'If it stays down, check the Console page for database errors.'] });
+    const steps = MANAGED_DB
+      ? ['Start the server from the Overview page; CityHQ starts the database with it.', 'If it stays down, check the Console page for database errors.']
+      : ['Start your database first, for example MySQL in XAMPP\'s control panel, or the MySQL or MariaDB service in Windows.', 'Check that the mysql_connection_string line in server.cfg has the right address, user and password.'];
+    return finding('database', 'bad', 'The database isn\'t answering', 'Scripts can\'t save or load anything, and players may not be able to load in.', { steps });
   }
 }
 

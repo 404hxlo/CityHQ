@@ -47,6 +47,49 @@ function CopyRow({ text }: { text: string }) {
   );
 }
 
+/**
+ * A server whose txAdmin hasn't deployed QBCore yet (a new one, or one never finished): start
+ * txAdmin, show the PIN it asks for, and say exactly what to choose in its setup.
+ */
+function FinishTxAdmin({ data, local }: { data: OverviewData; local: boolean }) {
+  const pin = usePoll(() => (local ? api.txAdminPin() : Promise.resolve({ pin: null, panelUp: false })), 3000, [local]);
+  const { busy, run } = useAction();
+  const up = Boolean(pin.data?.panelUp) || data.processes.txAdmin;
+  const url = `http://localhost:${data.txAdminPort}`;
+  const start = async () => {
+    if (await run('panel', () => api.startPanel(), 'txAdmin is starting. Its page opens in a moment.')) {
+      pin.refresh();
+      setTimeout(() => window.open(url, '_blank'), 8000);
+    }
+  };
+  if (!local) {
+    return <Empty icon={<Boxes size={32} />} title="Your server is not set up yet">Finish txAdmin's setup on the PC that runs the server, then come back here.</Empty>;
+  }
+  return (
+    <section className="card finish-tx">
+      <h2>Finish setting up your server in txAdmin</h2>
+      <p className="muted-note">txAdmin is FiveM's own server panel. It downloads QBCore and sets up the database the first time. This takes about 10 minutes, once.</p>
+      <ol className="finish-steps">
+        <li>
+          <strong>{up ? 'txAdmin is running.' : 'Start txAdmin.'}</strong>
+          {!up && <div><Button variant="primary" icon={<Play size={15} />} busy={busy === 'panel'} onClick={start}>Start txAdmin</Button></div>}
+          {up && <div><a className="btn btn-primary" href={url} target="_blank" rel="noreferrer"><ExternalLink size={16} /><span>Open txAdmin</span></a></div>}
+        </li>
+        <li>
+          <strong>Sign in with the PIN</strong>{pin.data?.pin ? ':' : ' txAdmin shows (it appears here once txAdmin has started).'}
+          {pin.data?.pin && <div className="pin-box">{pin.data.pin}</div>}
+          <span className="muted-note">Then link your Cfx.re account and create a txAdmin password.</span>
+        </li>
+        <li><strong>Choose Popular Recipes, then QBCore Framework.</strong> Paste your license key from <a href="https://portal.cfx.re" target="_blank" rel="noreferrer">portal.cfx.re</a> when it asks.</li>
+        {data.databasePort
+          ? <li><strong>For the database, enter:</strong> host <code>127.0.0.1</code>, port <code>{data.databasePort}</code>, user <code>root</code>, and leave the password empty.</li>
+          : <li><strong>For the database,</strong> enter your own database's host, port, user and password (for XAMPP: <code>localhost</code>, <code>3306</code>, <code>root</code>, no password).</li>}
+        <li><strong>When txAdmin says the server is running,</strong> come back here. This page turns into your dashboard by itself.</li>
+      </ol>
+    </section>
+  );
+}
+
 function useNow(everyMs: number, active = true) {
   const [now, setNow] = useState(Date.now());
   useEffect(() => {
@@ -193,24 +236,7 @@ export function Overview({ data, error, refresh, local, goTo }: Props) {
     return error ? <Notice kind="error">{error}</Notice> : <Spinner />;
   }
 
-  if (!data.folderFound) {
-    return (
-      <Empty icon={<Boxes size={32} />} title="No server folder found">
-        CityHQ manages the server folder it is installed in, and it isn't inside one.
-        Run Setup.cmd from the download to create a server folder with the app in it, then open the app from there.
-      </Empty>
-    );
-  }
-
-  if (!data.deployed) {
-    return (
-      <Empty icon={<Boxes size={32} />} title="Your server is not set up yet">
-        Finish the setup in txAdmin, then come back here. If txAdmin won't open, double-click
-        Start-Server.bat in your server folder first. Its window shows the PIN txAdmin asks for.
-        {local && <div className="empty-actions"><a className="btn btn-primary" href={`http://localhost:${data.txAdminPort}`} target="_blank" rel="noreferrer"><ExternalLink size={16} /><span>Open txAdmin</span></a></div>}
-      </Empty>
-    );
-  }
+  if (!data.deployed) return <FinishTxAdmin data={data} local={local} />;
 
   const { state, status, stats, history } = data;
   const isBusy = Boolean(busy) || ['starting', 'stopping', 'restarting', 'restoring'].includes(state);
@@ -298,7 +324,12 @@ export function Overview({ data, error, refresh, local, goTo }: Props) {
       </section>
 
       {error && <Notice kind="error">{error}</Notice>}
-      {!data.processes.database && !canStart && <Notice kind="error">The database is not running, so QBCore cannot save anything. Restart the server to bring it back.</Notice>}
+      {!data.processes.database && !canStart && (
+        <Notice kind="error">
+          The database is not running, so QBCore cannot save anything.
+          {data.databaseManaged === false ? ' Start your database (for example MySQL in XAMPP\'s control panel).' : ' Restart the server to bring it back.'}
+        </Notice>
+      )}
       {data.helperOutdated && online && <Notice kind="info">CityHQ was updated. Restart the server once when it's convenient to turn on the new in-city controls.</Notice>}
 
       {data.alerts.map((alert) => (

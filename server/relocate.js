@@ -4,7 +4,7 @@ import { existsSync } from 'node:fs';
 import { copyFile, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import {
-  DB_INI, DB_PORT, ROOT, ROOT_FOUND, TX_PROFILE, TXADMIN_PORT, TXDATA,
+  DB_INI, DB_PORT, MANAGED_DB, ROOT, ROOT_FOUND, TX_PROFILE, TXADMIN_PORT, TXDATA,
 } from './paths.js';
 import { isPortOpen } from './processes.js';
 import { replaceFile } from './retry.js';
@@ -46,7 +46,8 @@ async function updateFile(file, text) {
 
 /** Runs at startup. Each file is only touched while the program that reads it is not running. */
 export async function repairMovedFolder() {
-  if (!ROOT_FOUND) return [];
+  // Only setup's own layout keeps the folder's full path in these files.
+  if (!ROOT_FOUND || !MANAGED_DB) return [];
   const fixed = [];
   try {
     if (existsSync(DB_INI) && existsSync(path.join(ROOT, 'db', 'data')) && !(await isPortOpen(DB_PORT))) {

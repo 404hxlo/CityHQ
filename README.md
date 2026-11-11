@@ -3,75 +3,77 @@
 **Headquarters for your QBCore roleplay city.** Start it, watch it, fix it and back it up from one place.
 
 CityHQ is a Windows app for running a QBCore FiveM server without touching config files or the
-command line. It sits on top of txAdmin and works from the desktop, or from a phone on the same Wi-Fi.
+command line. It works with the server you already have, or builds you a new one. It sits on top
+of txAdmin and works from the desktop, or from a phone on the same Wi-Fi.
 
-The setup script creates a complete server in one folder: FiveM's server, a private database
-and this app. Nothing is installed into Windows, and other servers on the PC are left alone.
+## Download
 
-## What it does
+1. Open the **[Releases](../../releases/latest)** page and download **CityHQ-…-windows.zip** (under **Assets**).
+   Don't use the green **Code** button: that's the source code, not the app.
+2. Right-click the zip, choose **Properties**, tick **Unblock** and press OK. Then choose **Extract All**.
+3. Open the **CityHQ** folder and double-click **CityHQ.exe**. If Windows says it protected your PC,
+   choose **More info**, then **Run anyway**. The app isn't code-signed, so Windows doesn't know it yet.
 
-- **Overview:** start, stop and restart the server, with live CPU, memory and player counts.
-- **Problems in plain English:** what broke, which resource caused it, how to fix it, and a
-  button that opens the exact line.
-- **Resources:** start, stop, add (from a file, a folder or GitHub, including files over 1 GB)
-  and remove resources. Missing dependencies can be installed with one click when the source is known.
-- **Files:** browse and edit any server file. Lua is checked before saving, and every save can be undone.
-- **Players:** money, jobs, gangs, items, messages, revive, kick and ban.
-- **Backups:** one-click backup and restore of players, settings and scripts, plus a nightly backup.
-- **Safety net:** if a resource fails after an edit, the app offers to undo it. If the server
-  crashes, the app restarts it and tells you. Scheduled restarts warn players first.
+The first time, CityHQ asks: **Do you already have a FiveM server?**
+
+- **Yes, I have one.** CityHQ looks for FiveM servers on your PC and shows what it found: where
+  FXServer and txAdmin are, the ports, and the database from your `server.cfg` (XAMPP, MySQL or
+  MariaDB). It points out anything missing, in plain English. When you connect, it adds its small
+  helper script (`qb-control`) and a few marked lines to `server.cfg`, and downloads the official
+  MariaDB tools once (for backups). Nothing else in your server changes.
+- **No, make me one.** CityHQ builds a new QBCore server in one folder: FiveM's server and a
+  private database that only your PC can reach. Then it starts txAdmin, shows its PIN, and tells you
+  exactly what to choose (Popular Recipes, then QBCore Framework).
+
+You can switch to a different server later under **Settings**, then **Change server**.
 
 ## What you need
 
 - Windows 10 or 11, 64-bit
-- About 4 GB of free disk space
-- A free FiveM license key from <https://portal.cfx.re> (txAdmin asks for it)
+- A QBCore server run with txAdmin, or about 4 GB of free space for a new one
+- For a new server, a free FiveM license key from <https://portal.cfx.re> (txAdmin asks for it)
 - **Smart App Control turned off.** It blocks an unsigned file inside FiveM's own server, so no
   FiveM server can start while it is on. Check it under Windows Security, then App & browser
   control, then Smart App Control settings.
 
-## Install on a new PC
+## What it does
 
-1. On this page choose **Code**, then **Download ZIP**.
-2. Right-click the ZIP, choose **Properties**, tick **Unblock**, and press OK. Then extract it.
-3. Double-click **Setup.cmd** and answer its two questions. Choose a folder with no spaces in
-   its path, such as `C:\QBCore-Server`.
-4. txAdmin opens in your browser, and a black window shows the PIN it asks for. Create your
-   account, then choose **Popular Recipes**, then **QBCore Framework**.
-5. For the database, enter host `127.0.0.1`, the port setup printed (normally `3308`), user
-   `root`, and leave the password empty.
-6. When txAdmin says the server is running, close the black window. Open **CityHQ** from
-   your desktop and press **Start**. Use the app from then on.
+- **Overview:** start, stop and restart the server, with live CPU, memory and player counts.
+- **Health:** checks for common setup problems (sleep, missing tables, start-order traps), explains
+  every restart, and helps friends outside your home join.
+- **Problems in plain English:** what broke, which resource caused it, how to fix it, a link to that
+  script's own documentation, and a one-click fix when one is safe.
+- **Resources:** start, stop, add (from a file, a folder or GitHub, including files over 1 GB) and
+  remove resources, each with an install check of what it needs.
+- **Files:** browse and edit any server file. Lua is checked before saving, and every save can be undone.
+- **City and Players:** weather, announcements, the whitelist, money, jobs, items, revive, kick and ban.
+- **Backups:** one-click backup and restore of players, settings and scripts, plus a nightly backup,
+  and a list of every change made through CityHQ with Undo.
+- **Safety net:** if the server crashes, CityHQ restarts it and tells you. Scheduled restarts warn
+  players first, and the PC is kept awake while the server runs.
 
-Setup downloads FiveM's server from fivem.net, MariaDB from mariadb.org and Node.js from
-nodejs.org, and checks the last two against their published checksums. If it stops part way,
-run it again and it continues.
+## Moving a server to another PC
 
-If Windows says the app is from an unknown publisher, choose **More info**, then **Run anyway**.
-The app is not code-signed. Windows Firewall may also ask about FiveM's server the first time
-it starts. Allow it on private networks if friends on your Wi-Fi should be able to join.
-
-## Moving an existing server to another PC
-
-GitHub is for the app, not for your server. To move a server, stop it, quit CityHQ from
-the tray, and copy the whole server folder to the other PC, for example on a USB drive. Open the
-app from the copy and it corrects the settings that held the old location.
+GitHub is for the app, not for your server. To move a server, stop it, quit CityHQ from the tray,
+and copy the whole server folder to the other PC, for example on a USB drive. Then open CityHQ there
+and choose that folder.
 
 ## Keep these out of GitHub
 
 A server folder holds things that must stay private. None of them are in this repository, and
 `.gitignore` blocks the obvious ones in case they are ever copied in:
 
-- `server.cfg`: your FiveM license key
+- `server.cfg`: your FiveM license key and database password
 - `.qbcontrol\`: the app's passcode and access key
 - `db\`: your players' data
 - paid resources: sharing them usually breaks their license
 
-## If txAdmin's QBCore recipe fails to download
+## Other ways to set up
 
-Some networks get errors from GitHub while txAdmin downloads the recipe. `setup\qbcore-bundle.mjs`
-downloads the same official recipe with retries and serves it to txAdmin from your own PC. The
-steps are at the top of that file.
+`Setup.cmd` (in the source download) builds a new server folder with the app inside it, the way
+CityHQ's "make me one" does, but from a command window. If txAdmin's QBCore recipe fails to
+download on your network, `setup\qbcore-bundle.mjs` downloads the same official recipe with retries
+and serves it to txAdmin from your own PC; the steps are at the top of that file.
 
 ## Working on the app
 
@@ -81,9 +83,13 @@ npm test
 npm run package
 ```
 
-`npm run package` builds the app into `release\`. The app manages the server folder it sits in:
-it looks upward from where it is installed for a folder containing `qbcontrol.json` or
-`server\FXServer.exe`. Set the `QBC_ROOT` environment variable to point it somewhere else.
+`npm run package` builds the app into `release\`. Pushing a tag such as `v1.1.0` (matching
+`package.json`'s version) makes GitHub build the zip and publish it on the Releases page.
+
+CityHQ finds its server folder in this order: the `QBC_ROOT` environment variable, a server folder
+it is installed inside (one holding `qbcontrol.json` or `server\FXServer.exe`), then the one chosen
+on the Welcome screen (saved in `%LOCALAPPDATA%\CityHQ\cityhq.json`). A server it didn't build says
+where its parts are in its `qbcontrol.json` (`fxserverDir`, `txDataDir`, `profile`, `database`).
 
 | Folder | Contents |
 | --- | --- |

@@ -40,7 +40,13 @@ import {
   createProcessWatch, isValidTime, lastOccurrence, nextOccurrence, warningDue,
 } from './scheduler.js';
 import { BLOCK_END, BLOCK_START, ensureManagedBlock } from './cfg.js';
-import { findRoot, portOr } from './paths.js';
+import { findRoot, layoutOf, portOr } from './paths.js';
+import { gamePortOf } from './cfg.js';
+import { ownProcesses } from './processes.js';
+import {
+  findServerFolders, inspectServerFolder, suggestNewFolder, txAdminPinIn, txAdminPortIn,
+} from './welcome.js';
+import { checksumFor } from './dbtools.js';
 import {
   parseAdmins, removeAdmin, setAdmin, VALID_IDENTIFIER,
 } from './admins.js';
@@ -263,7 +269,202 @@ test('the server folder is found from wherever the app is installed', () => {
   // Wherever this copy of the app sits, an explicit choice wins.
   assert.equal(findRoot('C:\\anywhere', 'E:\\Servers\\Mine'), 'E:\\Servers\\Mine');
   // A place with no server above it finds nothing, instead of guessing.
-  assert.equal(findRoot('C:\\Windows\\System32', ''), null);
+  assert.equal(findRoot('C:\\Windows\\System32', '', null), null);
+  // A downloaded copy, outside any server folder, uses the one chosen on the Welcome screen.
+  assert.equal(findRoot('C:\\Windows\\System32', '', 'E:\\FXServer'), 'E:\\FXServer');
+});
+
+// ---- other people's servers: layouts, the Welcome screen, processes ----
+/** A made-up disk for the Welcome screen's folder reading: { 'C:\\a\\b.txt': 'text' }. */
+function fakeDisk(files) {
+  const norm = (p) => path.resolve(p).toLowerCase();
+  const fileMap = new Map(Object.entries(files).map(([p, t]) => [norm(p), t]));
+  const dirMap = new Map();
+  for (const p of Object.keys(files)) {
+    let dir = path.dirname(path.resolve(p));
+    let child = path.basename(path.resolve(p));
+    let isFile = true;
+    while (true) {
+      const entry = dirMap.get(norm(dir)) || { dirs: new Set(), files: new Set() };
+      (isFile ? entry.files : entry.dirs).add(child);
+      dirMap.set(norm(dir), entry);
+      const up = path.dirname(dir);
+      if (up === dir) break;
+      child = path.basename(dir);
+      dir = up;
+      isFile = false;
+    }
+  }
+  return {
+    exists: (p) => fileMap.has(norm(p)) || dirMap.has(norm(p)),
+    read: (p) => { if (!fileMap.has(norm(p))) throw new Error('ENOENT'); return fileMap.get(norm(p)); },
+    dirs: (p) => { const e = dirMap.get(norm(p)); if (!e) throw new Error('ENOENT'); return [...e.dirs]; },
+    files: (p) => { const e = dirMap.get(norm(p)); if (!e) throw new Error('ENOENT'); return [...e.files]; },
+  };
+}
+
+const QB_CFG = [
+  'endpoint_add_tcp "0.0.0.0:30120"',
+  'endpoint_add_udp "0.0.0.0:30120"',
+  'set mysql_connection_string "mysql://root@localhost/qbcore?charset=utf8mb4"',
+  'ensure qb-core',
+  '',
+].join('\n');
+
+test('layouts: setup\'s own folder needs no settings, and anyone else\'s says where its parts are', () => {
+  const none = () => false;
+  const own = layoutOf('D:\\QBCore-Server', {}, (p) => p.endsWith('mariadbd.exe'));
+  assert.equal(own.fxserverDir, 'D:\\QBCore-Server\\server');
+  assert.equal(own.txDataDir, 'D:\\QBCore-Server\\txData');
+  assert.equal(own.profile, 'default');
+  assert.equal(own.managedDb, true, 'setup\'s private database is CityHQ\'s to run');
+  assert.equal(own.txDataIsDefault, true);
+  const theirs = layoutOf('C:\\FXServer', { fxserverDir: 'artifacts', txDataDir: 'E:\\data\\txData', profile: 'main', database: 'external' }, none);
+  assert.equal(theirs.fxserverDir, 'C:\\FXServer\\artifacts', 'relative folders are inside the server folder');
+  assert.equal(theirs.txDataDir, 'E:\\data\\txData');
+  assert.equal(theirs.profile, 'main');
+  assert.equal(theirs.managedDb, false);
+  assert.equal(theirs.txDataIsDefault, false, 'txAdmin has to be told where this txData is');
+  assert.equal(layoutOf('C:\\X', { profile: '..\\evil' }, none).profile, 'default', 'a profile name is never a path');
+  assert.equal(layoutOf('C:\\X', {}, none).managedDb, false, 'no private database folder means it is the owner\'s own');
+});
+
+test('the game port comes from server.cfg\'s endpoint line', () => {
+  assert.equal(gamePortOf(QB_CFG), 30120);
+  assert.equal(gamePortOf('endpoint_add_tcp 0.0.0.0:30125 # mine'), 30125);
+  assert.equal(gamePortOf('# endpoint_add_tcp "0.0.0.0:30125"\nsv_maxclients 48'), null, 'a line switched off with # doesn\'t count');
+  assert.equal(gamePortOf(''), null);
+});
+
+test('processes: only FXServer from this server\'s folder counts, and only CityHQ\'s own database', () => {
+  const rows = [
+    { Name: 'FXServer.exe', ProcessId: 10, ParentProcessId: 1, ExecutablePath: 'C:\\FXServer\\server\\FXServer.exe', CommandLine: 'FXServer.exe' },
+    { Name: 'FXServer.exe', ProcessId: 11, ParentProcessId: 10, ExecutablePath: 'C:\\FXServer\\server\\FXServer.exe', CommandLine: 'FXServer.exe +exec server.cfg' },
+    { Name: 'FXServer.exe', ProcessId: 20, ParentProcessId: 1, ExecutablePath: 'C:\\Other\\server\\FXServer.exe', CommandLine: 'FXServer.exe' },
+    { Name: 'mariadbd.exe', ProcessId: 30, ParentProcessId: 1, ExecutablePath: 'C:\\xampp\\mysql\\bin\\mysqld.exe' },
+    { Name: 'mariadbd.exe', ProcessId: 31, ParentProcessId: 1, ExecutablePath: 'C:\\FXServer\\db\\mariadb\\bin\\mariadbd.exe' },
+  ];
+  const theirs = ownProcesses(rows, { fxserverDir: 'C:\\FXServer\\server', dbHome: 'C:\\FXServer\\db\\mariadb', managedDb: false });
+  assert.equal(theirs.monitor.ProcessId, 10);
+  assert.equal(theirs.game.ProcessId, 11);
+  assert.equal(theirs.db, null, 'someone\'s own database is never treated as CityHQ\'s');
+  const managed = ownProcesses(rows, { fxserverDir: 'C:\\FXServer\\server', dbHome: 'C:\\FXServer\\db\\mariadb', managedDb: true });
+  assert.equal(managed.db.ProcessId, 31);
+  assert.equal(ownProcesses(rows, { fxserverDir: 'C:\\FXServer\\serv', dbHome: 'X:\\none', managedDb: false }).monitor, null, 'a folder name that only starts the same doesn\'t count');
+});
+
+test('welcome: a usual existing server (FXServer and txData side by side, XAMPP database)', () => {
+  const disk = fakeDisk({
+    'C:\\FXServer\\server\\FXServer.exe': '',
+    'C:\\FXServer\\txData\\default\\config.json': JSON.stringify({ server: { dataPath: 'C:/FXServer/txData/QBCore_ABC123.base/', cfgPath: 'server.cfg' } }),
+    'C:\\FXServer\\txData\\QBCore_ABC123.base\\server.cfg': QB_CFG,
+    'C:\\FXServer\\start.bat': 'cd server\r\nset TXHOST_TXA_PORT=40121\r\nFXServer.exe',
+  });
+  for (const picked of ['C:\\FXServer', 'C:\\FXServer\\server', 'C:\\FXServer\\txData']) {
+    const r = inspectServerFolder(picked, disk);
+    assert.equal(r.found, true, picked);
+    assert.equal(r.root, 'C:\\FXServer', `${picked}: the main folder holds both parts`);
+    assert.equal(r.fxserverDir, 'C:\\FXServer\\server');
+    assert.equal(r.txDataDir, 'C:\\FXServer\\txData');
+    assert.equal(r.dataPath, 'C:\\FXServer\\txData\\QBCore_ABC123.base');
+    assert.equal(r.gamePort, 30120);
+    assert.equal(r.txAdminPort, 40121, 'read from the start script');
+    assert.deepEqual(r.database, { host: 'localhost', port: 3306, user: 'root', name: 'qbcore', hasPassword: false, managed: false });
+    assert.equal(r.qbcore, true);
+    assert.equal(r.cityhqMade, false);
+    assert.deepEqual(r.problems, []);
+  }
+});
+
+test('welcome: parts apart, txAdmin 7 settings, and plain-English problems', () => {
+  const v7 = fakeDisk({
+    'D:\\Artifacts\\FXServer.exe': '',
+    'D:\\Artifacts\\txData\\default\\admins.json': '[]',
+    'D:\\Artifacts\\txData\\default\\config.json': JSON.stringify({ fxRunner: { serverDataPath: 'E:\\city', cfgPath: 'E:\\city\\server.cfg' } }),
+    'E:\\city\\server.cfg': 'sv_hostname "x"\nset mysql_connection_string "server=127.0.0.1;uid=fivem;password=secret;database=city"\n',
+  });
+  const r = inspectServerFolder('D:\\Artifacts', v7);
+  assert.equal(r.fxserverDir, 'D:\\Artifacts');
+  assert.equal(r.txDataDir, 'D:\\Artifacts\\txData', 'older txAdmin kept txData inside the FiveM folder');
+  assert.equal(r.cfgPath, 'E:\\city\\server.cfg');
+  assert.equal(r.database.user, 'fivem');
+  assert.equal(r.database.hasPassword, true);
+  assert.equal(JSON.stringify(r).includes('secret'), false, 'the database password never leaves the PC\'s server side');
+  assert.ok(r.problems.some((p) => /no endpoint_add_tcp line/.test(p.text)));
+  assert.ok(r.problems.some((p) => /doesn't look like a QBCore server/.test(p.text)));
+
+  const fresh = inspectServerFolder('C:\\New', fakeDisk({ 'C:\\New\\server\\FXServer.exe': '' }));
+  assert.equal(fresh.found, true);
+  assert.equal(fresh.dataPath, null);
+  assert.ok(fresh.problems.some((p) => /txAdmin hasn't been set up/.test(p.text)));
+  assert.equal(fresh.txDataDir, 'C:\\New\\txData', 'txAdmin will make its data folder next to FiveM\'s');
+
+  const nothing = inspectServerFolder('C:\\Games', fakeDisk({ 'C:\\Games\\readme.txt': '' }));
+  assert.equal(nothing.found, false);
+  assert.match(nothing.problems[0].text, /no FXServer\.exe/);
+
+  const noDb = inspectServerFolder('C:\\FX', fakeDisk({
+    'C:\\FX\\server\\FXServer.exe': '',
+    'C:\\FX\\txData\\default\\config.json': JSON.stringify({ server: { dataPath: 'C:\\FX\\txData\\a.base' } }),
+    'C:\\FX\\txData\\a.base\\server.cfg': 'endpoint_add_tcp "0.0.0.0:30120"\nensure qb-core\n',
+  }));
+  assert.ok(noDb.problems.some((p) => p.level === 'bad' && /no mysql_connection_string/.test(p.text)));
+});
+
+test('welcome: txData one folder down, or wherever the start script says', () => {
+  const nested = inspectServerFolder('C:\\City', fakeDisk({
+    'C:\\City\\artifacts\\FXServer.exe': '',
+    'C:\\City\\data\\txData\\default\\config.json': JSON.stringify({ server: { dataPath: 'C:\\City\\data\\txData\\c.base' } }),
+    'C:\\City\\data\\txData\\c.base\\server.cfg': QB_CFG,
+  }));
+  assert.equal(nested.txDataDir, 'C:\\City\\data\\txData');
+  assert.equal(nested.root, 'C:\\City');
+  const scripted = inspectServerFolder('C:\\Srv', fakeDisk({
+    'C:\\Srv\\FXServer.exe': '',
+    'C:\\Srv\\run.bat': 'set TXHOST_DATA_PATH=E:\\keep\\txData\r\nFXServer.exe',
+    'E:\\keep\\txData\\default\\config.json': JSON.stringify({ server: { dataPath: 'E:\\keep\\txData\\s.base' } }),
+    'E:\\keep\\txData\\s.base\\server.cfg': QB_CFG,
+  }));
+  assert.equal(scripted.txDataDir, 'E:\\keep\\txData');
+  assert.equal(scripted.cfgPath, 'E:\\keep\\txData\\s.base\\server.cfg');
+});
+
+test('welcome: a server CityHQ\'s setup made is recognised as its own', () => {
+  const r = inspectServerFolder('D:\\QBCore-Server', fakeDisk({
+    'D:\\QBCore-Server\\qbcontrol.json': JSON.stringify({ gamePort: 30121, txAdminPort: 40120, databasePort: 3308 }),
+    'D:\\QBCore-Server\\server\\FXServer.exe': '',
+    'D:\\QBCore-Server\\db\\mariadb\\bin\\mariadbd.exe': '',
+    'D:\\QBCore-Server\\txData\\default\\config.json': JSON.stringify({ server: { dataPath: 'D:/QBCore-Server/txData/Q.base/' } }),
+    'D:\\QBCore-Server\\txData\\Q.base\\server.cfg': 'set mysql_connection_string "mysql://root@127.0.0.1:3308/q"\nensure qb-core\n',
+  }));
+  assert.equal(r.cityhqMade, true);
+  assert.equal(r.gamePort, 30121, 'CityHQ forces its own game port, so server.cfg\'s line isn\'t needed');
+  assert.equal(r.database.managed, true);
+  assert.deepEqual(r.problems, []);
+});
+
+test('welcome: servers are found in the usual places, and start scripts and PINs are read', () => {
+  const disk = fakeDisk({
+    'C:\\FXServer\\server\\FXServer.exe': '',
+    'C:\\Users\\me\\Desktop\\city\\artifacts\\FXServer.exe': '',
+    'C:\\Windows\\fivem\\FXServer.exe': '',
+    'C:\\FXServer\\txData\\default\\data\\resources\\deep\\FXServer.exe': '',
+  });
+  const found = findServerFolders({ starts: ['C:\\', 'C:\\Users\\me\\Desktop'], io: disk }).map((f) => f.toLowerCase()).sort();
+  assert.deepEqual(found, ['c:\\fxserver\\server', 'c:\\users\\me\\desktop\\city\\artifacts'], 'Windows\' own folders and txData are skipped');
+  assert.equal(txAdminPortIn('set TXHOST_TXA_PORT=40150'), 40150);
+  assert.equal(txAdminPortIn('FXServer.exe +set txAdminPort 40160'), 40160);
+  assert.equal(txAdminPortIn('FXServer.exe'), null);
+  assert.equal(txAdminPinIn('[txAdmin] Use the PIN below to register:\n[txAdmin]  ┃ 4821 ┃\nmore'), '4821');
+  assert.equal(txAdminPinIn('no pin here'), null);
+  assert.equal(suggestNewFolder((p) => p === 'D:\\' || p === 'D:\\QBCore-Server'), 'D:\\QBCore-Server-2');
+  assert.equal(suggestNewFolder(() => false), 'C:\\QBCore-Server');
+});
+
+test('database tools: the download is checked against MariaDB\'s published list', () => {
+  const list = 'aaa111  mariadb-12.3.3-winx64.msi\nBBB222 *mariadb-12.3.3-winx64.zip\n';
+  assert.equal(checksumFor(list, 'mariadb-12.3.3-winx64.zip'), 'bbb222');
+  assert.equal(checksumFor(list, 'mariadb-12.3.3-winx64.zip.asc'), null);
 });
 
 test('ports fall back to the defaults unless a sensible one is saved', () => {
