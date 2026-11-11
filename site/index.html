@@ -3,405 +3,367 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>CityHQ: run your QBCore server from one place</title>
-<meta name="description" content="CityHQ is a free Windows app that starts, watches, fixes and backs up your QBCore FiveM roleplay server, explains problems in plain English, and can undo every change it makes.">
-<meta property="og:title" content="CityHQ: run your QBCore server from one place">
-<meta property="og:description" content="A free Windows app for QBCore FiveM servers: problems explained, one-click fixes with undo, backups, health checks and phone access.">
+<title>CityHQ: a Windows app for running a QBCore server</title>
+<meta name="description" content="CityHQ is a free Windows app that runs a QBCore FiveM server: it starts txAdmin, explains errors in plain words, fixes what it safely can, backs everything up, and can undo every change it makes.">
+<meta property="og:title" content="CityHQ: a Windows app for running a QBCore server">
+<meta property="og:description" content="Free. Explains what broke and how to fix it, checks the setup, backs up every night, and undoes every change it makes.">
 <meta property="og:type" content="website">
 <meta property="og:image" content="img/overview.jpg">
-<meta name="theme-color" content="#0a0b11">
+<meta name="theme-color" content="#f4f0e6">
 <link rel="icon" href="img/logo.svg" type="image/svg+xml">
 <style>
 @font-face { font-family: 'Archivo'; src: url('fonts/archivo.woff2') format('woff2'); font-weight: 100 900; font-display: swap; }
 @font-face { font-family: 'JetBrains Mono'; src: url('fonts/jetbrains-mono.woff2') format('woff2'); font-weight: 100 800; font-display: swap; }
 :root {
-  --bg: #0a0b11; --panel: #11131b; --raised: #171a24; --line: #232736; --line-strong: #30354a;
-  --ink: #eef0f6; --ink-soft: #a8aec1; --ink-faint: #777e95;
-  --accent: #8066A8; --accent-hover: #8f76b8; --accent-text: #b5a3d8; --glow: rgba(128, 102, 168, 0.22);
-  --good: #3ddc97; --warn: #f2c94c; --bad: #ff6b6f;
-  --font: 'Archivo', 'Segoe UI', system-ui, sans-serif; --mono: 'JetBrains Mono', Consolas, monospace;
-  --radius: 16px; --wrap: 1180px;
+  --paper: #f4f0e6; --paper-deep: #ebe5d6; --ink: #1f1b16; --ink-soft: #4e473d; --ink-faint: #81786a; --rule: #d8cfbc;
+  --purple: #5b3f86; --pencil: #c2410c; --marker: rgba(250, 204, 21, 0.45); --tape: rgba(222, 210, 170, 0.75);
+  --serif: Georgia, 'Iowan Old Style', 'Palatino Linotype', 'Book Antiqua', serif;
+  --sans: 'Archivo', 'Segoe UI', system-ui, sans-serif; --mono: 'JetBrains Mono', Consolas, monospace;
 }
 * { box-sizing: border-box; }
 html { scroll-behavior: smooth; }
-body { margin: 0; background: var(--bg); color: var(--ink); font-family: var(--font); font-size: 17px; line-height: 1.6; -webkit-font-smoothing: antialiased; }
-img { max-width: 100%; height: auto; display: block; }
-a { color: var(--accent-text); }
+body {
+  margin: 0; color: var(--ink); font-family: var(--sans); font-size: 18px; line-height: 1.65; -webkit-font-smoothing: antialiased;
+  background-color: var(--paper);
+  background-image: radial-gradient(rgba(31, 27, 22, 0.09) 1px, transparent 1.2px);
+  background-size: 22px 22px;
+}
+img { display: block; max-width: 100%; height: auto; }
+a { color: var(--purple); text-underline-offset: 3px; text-decoration-thickness: 1px; }
 a:hover { color: var(--ink); }
-:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 6px; }
-.wrap { width: min(var(--wrap), 100% - 32px); margin-inline: auto; }
-.skip { position: absolute; left: -999px; top: 8px; background: var(--accent); color: #fff; padding: 8px 12px; border-radius: 8px; z-index: 10; }
+:focus-visible { outline: 2px solid var(--pencil); outline-offset: 3px; }
+.skip { position: absolute; left: -999px; top: 8px; background: var(--ink); color: var(--paper); padding: 8px 12px; z-index: 10; }
 .skip:focus { left: 8px; }
+.col { width: min(720px, 100% - 32px); margin-inline: auto; }
+.wide { width: min(1080px, 100% - 32px); margin-inline: auto; }
+mark { background: linear-gradient(100deg, transparent 2%, var(--marker) 4%, var(--marker) 96%, transparent 98%) no-repeat 0 62% / 100% 62%; color: inherit; padding: 0 2px; }
+code { font-family: var(--mono); font-size: 0.86em; background: var(--paper-deep); padding: 1px 5px; border-radius: 4px; }
 
-/* Header */
-.top { position: sticky; top: 0; z-index: 5; background: rgba(10, 11, 17, 0.82); backdrop-filter: blur(12px); border-bottom: 1px solid var(--line); }
-.top .wrap { display: flex; align-items: center; gap: 20px; height: 64px; }
-.brand { display: flex; align-items: center; gap: 10px; color: var(--ink); text-decoration: none; font-weight: 700; font-size: 19px; letter-spacing: -0.01em; }
-.top nav { margin-left: auto; display: flex; align-items: center; gap: 22px; }
-.top nav a { color: var(--ink-soft); text-decoration: none; font-size: 15px; font-weight: 520; }
-.top nav a:hover { color: var(--ink); }
-.top nav a.btn-primary, .top nav a.btn-primary:hover { color: #fff; }
-.btn { display: inline-flex; align-items: center; justify-content: center; gap: 9px; padding: 13px 22px; border-radius: 11px; font-weight: 650; font-size: 16px; text-decoration: none; border: 1px solid var(--line-strong); color: var(--ink); background: var(--raised); transition: background 0.15s, border-color 0.15s, transform 0.15s; }
-.btn:hover { background: #1f2230; color: var(--ink); }
-.btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; box-shadow: 0 8px 30px var(--glow); }
-.btn-primary:hover { background: var(--accent-hover); border-color: var(--accent-hover); color: #fff; transform: translateY(-1px); }
-.btn-small { padding: 8px 14px; font-size: 14.5px; border-radius: 9px; }
-.btn svg { width: 18px; height: 18px; flex: none; }
+/* Top line */
+.top { padding: 22px 0; }
+.top .wide { display: flex; align-items: center; justify-content: space-between; gap: 16px; border-bottom: 1.5px solid var(--ink); padding-bottom: 14px; }
+.brand { display: flex; align-items: center; gap: 10px; font-family: var(--serif); font-size: 22px; font-weight: 700; color: var(--ink); text-decoration: none; }
+.brand img { border-radius: 8px; }
+.top nav { display: flex; gap: 22px; font-size: 15.5px; }
+.top nav a { color: var(--ink-soft); text-decoration: none; }
+.top nav a:hover { color: var(--ink); text-decoration: underline; }
 
-/* Hero */
-.hero { position: relative; overflow: hidden; padding: 72px 0 40px; }
-.hero::before { content: ''; position: absolute; inset: -30% -10% auto; height: 760px; background: radial-gradient(closest-side, rgba(128, 102, 168, 0.30), transparent 70%); pointer-events: none; }
-.hero .wrap { position: relative; display: grid; grid-template-columns: minmax(0, 0.95fr) minmax(0, 1.25fr); gap: 48px; align-items: center; }
-.eyebrow { display: inline-flex; align-items: center; gap: 8px; padding: 5px 12px; border: 1px solid var(--line-strong); border-radius: 999px; color: var(--accent-text); font-size: 13.5px; font-weight: 600; background: rgba(23, 26, 36, 0.7); }
-.eyebrow::before { content: ''; width: 7px; height: 7px; border-radius: 50%; background: var(--good); box-shadow: 0 0 10px var(--good); }
-h1 { font-size: clamp(38px, 5.4vw, 62px); line-height: 1.04; letter-spacing: -0.035em; margin: 18px 0 18px; font-weight: 750; }
-h1 em { font-style: normal; color: var(--accent-text); }
-.lead { font-size: clamp(17px, 1.6vw, 19.5px); color: var(--ink-soft); margin: 0 0 28px; max-width: 34em; }
-.cta { display: flex; flex-wrap: wrap; gap: 12px; }
-.fine { margin-top: 16px; color: var(--ink-faint); font-size: 14px; }
-.shots { position: relative; padding-bottom: 40px; }
-.window { border-radius: 14px; border: 1px solid var(--line-strong); background: var(--panel); box-shadow: 0 30px 80px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(255, 255, 255, 0.02); overflow: hidden; }
-.window-bar { display: flex; gap: 7px; padding: 10px 14px; border-bottom: 1px solid var(--line); background: var(--raised); }
-.window-bar span { width: 10px; height: 10px; border-radius: 50%; background: var(--line-strong); }
-.phone { position: absolute; right: -14px; bottom: 0; width: 26%; min-width: 120px; border-radius: 22px; border: 5px solid #1d2030; box-shadow: 0 24px 60px rgba(0, 0, 0, 0.6); overflow: hidden; background: var(--bg); }
+/* Opening */
+.opening { padding: 56px 0 28px; }
+h1 { font-family: var(--serif); font-weight: 700; font-size: clamp(36px, 5.6vw, 58px); line-height: 1.08; letter-spacing: -0.015em; margin: 0 0 22px; }
+.opening p { font-size: 20px; color: var(--ink-soft); margin: 0 0 30px; max-width: 34em; }
+.get { display: flex; flex-wrap: wrap; align-items: center; gap: 14px 22px; }
+.button { display: inline-flex; align-items: center; gap: 10px; background: var(--ink); color: var(--paper); text-decoration: none; font-weight: 650; padding: 14px 22px; border-radius: 6px; box-shadow: 3px 3px 0 var(--purple); transition: transform 0.1s, box-shadow 0.1s; }
+.button:hover { color: var(--paper); transform: translate(-1px, -1px); box-shadow: 4px 4px 0 var(--purple); }
+.button:active { transform: translate(2px, 2px); box-shadow: 1px 1px 0 var(--purple); }
+.button svg { width: 18px; height: 18px; }
+.release { font-size: 15px; color: var(--ink-faint); }
 
-/* Trust strip */
-.strip { border-block: 1px solid var(--line); background: var(--panel); }
-.strip .wrap { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px 34px; padding: 18px 0; color: var(--ink-soft); font-size: 15px; }
-.strip strong { color: var(--ink); font-weight: 650; }
+/* Figures: a taped-in screenshot with numbered pencil marks, and notes beside it */
+.figure { display: grid; grid-template-columns: minmax(0, 1fr) 260px; gap: 36px; align-items: start; margin: 40px auto 56px; }
+.figure.solo { grid-template-columns: minmax(0, 1fr); }
+.photo { position: relative; transform: rotate(-0.5deg); background: #fff; padding: 8px; box-shadow: 0 1px 2px rgba(31, 27, 22, 0.15), 0 10px 26px rgba(31, 27, 22, 0.16); }
+.photo.right { transform: rotate(0.6deg); }
+.photo::before, .photo::after { content: ''; position: absolute; width: 92px; height: 26px; background: var(--tape); box-shadow: 0 1px 1px rgba(0, 0, 0, 0.05); z-index: 2; }
+.photo::before { top: -12px; left: 18%; transform: rotate(-4deg); }
+.photo::after { top: -11px; right: 14%; transform: rotate(5deg); }
+.photo.narrow { max-width: 560px; justify-self: center; }
+.photo.tall img { max-height: 620px; width: 100%; object-fit: cover; object-position: top; }
+.pin { position: absolute; width: 34px; height: 34px; margin: -17px 0 0 -17px; display: grid; place-items: center; font-family: var(--serif); font-weight: 700; font-size: 17px; color: var(--pencil); z-index: 3; }
+.pin::before { content: ''; position: absolute; inset: 0; border: 2.5px solid var(--pencil); border-radius: 48% 52% 45% 55% / 55% 45% 55% 45%; background: rgba(255, 250, 240, 0.92); transform: rotate(-8deg); }
+.pin span { position: relative; }
+.notes { font-family: var(--serif); font-style: italic; color: var(--ink-soft); font-size: 16.5px; line-height: 1.5; margin: 0; padding: 0; list-style: none; display: grid; gap: 14px; border-left: 1.5px solid var(--rule); padding-left: 18px; }
+.notes li { display: grid; grid-template-columns: 26px 1fr; gap: 6px; }
+.notes b { color: var(--pencil); font-style: normal; }
+.caption { grid-column: 1 / -1; margin: -14px 0 0; font-size: 14.5px; color: var(--ink-faint); }
+.caption strong { color: var(--ink-soft); font-weight: 650; }
 
-/* Sections */
-section { padding: 88px 0; }
-.kicker { color: var(--accent-text); font-weight: 650; font-size: 14px; letter-spacing: 0.06em; text-transform: uppercase; margin: 0 0 10px; }
-h2 { font-size: clamp(30px, 3.6vw, 42px); line-height: 1.12; letter-spacing: -0.025em; margin: 0 0 14px; font-weight: 720; }
-.intro { color: var(--ink-soft); max-width: 40em; margin: 0 0 44px; font-size: 18px; }
-.center { text-align: center; }
-.center .intro { margin-inline: auto; }
+/* The list of what it does */
+h2 { font-family: var(--serif); font-size: clamp(28px, 3.4vw, 36px); line-height: 1.15; margin: 0 0 14px; font-weight: 700; }
+.section { padding: 34px 0; }
+.section > .col > p { color: var(--ink-soft); margin: 0 0 18px; }
+.rule { border: 0; border-top: 1.5px solid var(--ink); width: min(1080px, 100% - 32px); margin: 30px auto; }
+.does { counter-reset: does; list-style: none; margin: 26px 0 0; padding: 0; }
+.does > li { position: relative; padding: 0 0 0 64px; margin: 0 0 30px; }
+.does > li::before { counter-increment: does; content: counter(does); position: absolute; left: 0; top: -6px; font-family: var(--serif); font-size: 40px; line-height: 1; color: var(--purple); font-weight: 700; }
+.does h3 { font-family: var(--serif); font-size: 23px; margin: 0 0 4px; }
+.does p { margin: 0; color: var(--ink-soft); }
 
-.grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
-.card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 24px; transition: border-color 0.15s, transform 0.15s; }
-.card:hover { border-color: var(--line-strong); transform: translateY(-2px); }
-.card h3 { font-size: 18.5px; margin: 14px 0 6px; letter-spacing: -0.01em; }
-.card p { margin: 0; color: var(--ink-soft); font-size: 15.5px; }
-.icon { width: 42px; height: 42px; border-radius: 11px; display: grid; place-items: center; background: rgba(128, 102, 168, 0.16); color: var(--accent-text); }
-.icon svg { width: 22px; height: 22px; }
+.phone-row { display: grid; grid-template-columns: 210px 1fr; gap: 34px; align-items: center; margin: 10px 0 0; }
+.phone-row .photo { padding: 6px; transform: rotate(1.5deg); }
+.phone-row p { font-family: var(--serif); font-style: italic; color: var(--ink-soft); margin: 0; }
 
-.feature { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.35fr); gap: 56px; align-items: center; padding: 34px 0; }
-.feature.flip > :first-child { order: 2; }
-.feature h3 { font-size: clamp(24px, 2.6vw, 32px); letter-spacing: -0.02em; line-height: 1.15; margin: 0 0 12px; }
-.feature p { color: var(--ink-soft); margin: 0 0 14px; }
-.ticks { list-style: none; padding: 0; margin: 0; display: grid; gap: 8px; }
-.ticks li { position: relative; padding-left: 28px; color: var(--ink-soft); font-size: 16px; }
-.ticks li::before { content: ''; position: absolute; left: 2px; top: 6px; width: 15px; height: 15px; border-radius: 50%; background: rgba(61, 220, 151, 0.15) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%233ddc97' stroke-width='3.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 6 9 17l-5-5'/%3E%3C/svg%3E") center / 10px no-repeat; }
-.shot { border-radius: 14px; border: 1px solid var(--line-strong); overflow: hidden; box-shadow: 0 24px 60px rgba(0, 0, 0, 0.45); background: var(--panel); }
-.shot.tall { max-height: 560px; }
-.shot.tall img { object-fit: cover; object-position: top; width: 100%; height: 100%; max-height: 560px; }
+.not { list-style: none; padding: 0; margin: 0; border-top: 1px dashed var(--rule); }
+.not li { padding: 14px 0; border-bottom: 1px dashed var(--rule); color: var(--ink-soft); }
+.not strong { color: var(--ink); }
 
-.steps { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; counter-reset: step; }
-.step { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 26px; position: relative; }
-.step::before { counter-increment: step; content: counter(step); display: grid; place-items: center; width: 38px; height: 38px; border-radius: 50%; background: var(--accent); color: #fff; font-weight: 750; margin-bottom: 14px; }
-.step h3 { margin: 0 0 6px; font-size: 19px; }
-.step p { margin: 0; color: var(--ink-soft); font-size: 15.5px; }
-.step code, .faq code { font-family: var(--mono); font-size: 0.88em; background: var(--raised); border: 1px solid var(--line); padding: 1px 6px; border-radius: 6px; color: var(--ink); }
-.note { margin-top: 18px; padding: 14px 18px; border-radius: 12px; border: 1px solid rgba(242, 201, 76, 0.28); background: rgba(242, 201, 76, 0.07); color: var(--ink-soft); font-size: 15px; }
-.note strong { color: var(--ink); }
+.steps { margin: 16px 0 0; padding-left: 26px; }
+.steps li { margin: 0 0 12px; padding-left: 6px; color: var(--ink-soft); }
+.steps li::marker { font-family: var(--serif); font-weight: 700; color: var(--purple); }
+.aside { margin: 24px 0 0; padding: 16px 20px; background: #fffbea; border: 1px solid #e9dca6; transform: rotate(-0.4deg); box-shadow: 0 6px 16px rgba(31, 27, 22, 0.08); font-size: 16.5px; color: var(--ink-soft); }
+.aside strong { color: var(--ink); }
 
-.safety { background: linear-gradient(180deg, var(--panel), var(--bg)); border-top: 1px solid var(--line); }
-.pillars { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; }
-.pillar { padding: 22px; border-radius: var(--radius); border: 1px solid var(--line); background: rgba(17, 19, 27, 0.7); }
-.pillar h3 { font-size: 17px; margin: 12px 0 6px; }
-.pillar p { margin: 0; font-size: 15px; color: var(--ink-soft); }
+.qa dt { font-family: var(--serif); font-weight: 700; font-size: 19.5px; margin: 22px 0 4px; }
+.qa dd { margin: 0; color: var(--ink-soft); }
 
-.faq { max-width: 820px; margin-inline: auto; display: grid; gap: 10px; }
-.faq details { background: var(--panel); border: 1px solid var(--line); border-radius: 13px; padding: 4px 20px; }
-.faq details[open] { border-color: var(--line-strong); }
-.faq summary { cursor: pointer; list-style: none; display: flex; justify-content: space-between; gap: 16px; padding: 14px 0; font-weight: 620; font-size: 17px; }
-.faq summary::-webkit-details-marker { display: none; }
-.faq summary::after { content: '+'; color: var(--accent-text); font-size: 22px; line-height: 1; transition: transform 0.2s; }
-.faq details[open] summary::after { transform: rotate(45deg); }
-.faq p { margin: 0 0 16px; color: var(--ink-soft); font-size: 16px; }
-
-.final { text-align: center; padding: 96px 0; position: relative; overflow: hidden; }
-.final::before { content: ''; position: absolute; left: 50%; top: 50%; width: 900px; height: 500px; transform: translate(-50%, -50%); background: radial-gradient(closest-side, rgba(128, 102, 168, 0.25), transparent 70%); pointer-events: none; }
-.final .wrap { position: relative; }
-.final .cta { justify-content: center; }
-
-footer { border-top: 1px solid var(--line); padding: 34px 0 44px; color: var(--ink-faint); font-size: 14px; }
-footer .wrap { display: flex; flex-wrap: wrap; gap: 14px 28px; justify-content: space-between; }
+.end { padding: 30px 0 70px; }
+.end .col { border-top: 1.5px solid var(--ink); padding-top: 34px; text-align: center; }
+.end p { color: var(--ink-soft); margin: 0 0 22px; }
+footer { padding: 26px 0 44px; font-size: 14.5px; color: var(--ink-faint); }
+footer .wide { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 12px 28px; border-top: 1px solid var(--rule); padding-top: 20px; }
 footer nav { display: flex; flex-wrap: wrap; gap: 18px; }
-footer a { color: var(--ink-soft); text-decoration: none; }
-footer a:hover { color: var(--ink); }
-footer p { margin: 0; max-width: 40em; }
+footer a { color: var(--ink-soft); }
+footer p { margin: 0; max-width: 38em; }
 
-@media (max-width: 980px) {
-  .hero .wrap, .feature { grid-template-columns: 1fr; gap: 36px; }
-  .feature.flip > :first-child { order: 0; }
-  .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .pillars { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .steps { grid-template-columns: 1fr; }
-  .phone { right: 0; }
+@media (max-width: 860px) {
+  .figure { grid-template-columns: minmax(0, 1fr); gap: 22px; }
+  .caption { margin: 0; }
+  .notes { border-left: 0; padding-left: 0; }
+  .top nav a:not(:last-child) { display: none; }
 }
-@media (max-width: 640px) {
-  body { font-size: 16px; }
-  .top nav a:not(.btn) { display: none; }
-  .hero { padding-top: 44px; }
-  section { padding: 64px 0; }
-  .grid, .pillars { grid-template-columns: 1fr; }
-  .cta .btn { flex: 1 1 100%; }
-  .phone { width: 30%; border-width: 3px; border-radius: 14px; }
+@media (max-width: 560px) {
+  body { font-size: 17px; }
+  .opening { padding-top: 34px; }
+  .opening p { font-size: 18px; }
+  .pin { width: 26px; height: 26px; margin: -13px 0 0 -13px; font-size: 14px; }
+  .does > li { padding-left: 46px; }
+  .does > li::before { font-size: 32px; }
+  .phone-row { grid-template-columns: 1fr; }
+  .phone-row .photo { width: 190px; }
+  .photo::before, .photo::after { width: 64px; height: 20px; }
 }
-@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } .btn, .card { transition: none; } }
+@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } .button { transition: none; } }
 </style>
 </head>
 <body>
 <a class="skip" href="#main">Skip to the content</a>
 
 <header class="top">
-  <div class="wrap">
-    <a class="brand" href="#"><img src="img/logo.svg" alt="" width="30" height="30">CityHQ</a>
+  <div class="wide">
+    <a class="brand" href="#"><img src="img/logo.svg" alt="" width="34" height="34">CityHQ</a>
     <nav aria-label="Main">
-      <a href="#features">Features</a>
-      <a href="#start">Get started</a>
-      <a href="#faq">FAQ</a>
+      <a href="#does">What it does</a>
+      <a href="#install">Install</a>
+      <a href="#questions">Questions</a>
       <a href="https://github.com/404hxlo/CityHQ">GitHub</a>
-      <a class="btn btn-primary btn-small" href="https://github.com/404hxlo/CityHQ/releases/latest/download/CityHQ-windows.zip">Download</a>
     </nav>
   </div>
 </header>
 
 <main id="main">
-  <div class="hero">
-    <div class="wrap">
-      <div>
-        <span class="eyebrow">Free for Windows 10 and 11</span>
-        <h1>Run your QBCore city from <em>one place.</em></h1>
-        <p class="lead">CityHQ starts, watches, fixes and backs up your FiveM roleplay server. It explains problems in plain English, and it can undo every change it makes. No config files, no command line.</p>
-        <div class="cta">
-          <a class="btn btn-primary" href="https://github.com/404hxlo/CityHQ/releases/latest/download/CityHQ-windows.zip">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg>
-            Download for Windows
-          </a>
-          <a class="btn" href="#features">See what it does</a>
-        </div>
-        <p class="fine">Works with the server you already have, or builds a new one for you.</p>
-      </div>
-      <div class="shots">
-        <div class="window">
-          <div class="window-bar" aria-hidden="true"><span></span><span></span><span></span></div>
-          <img src="img/overview.jpg" width="2000" height="1250" alt="CityHQ's Overview page: the city is live, with buttons to restart, stop or announce, and cards for players online, players today, scripts running and uptime.">
-        </div>
-        <div class="phone"><img src="img/phone.jpg" width="780" height="1688" alt="The same Overview on a phone." loading="lazy"></div>
-      </div>
+  <div class="opening col">
+    <h1>CityHQ runs your QBCore server, and tells you what's wrong with it in plain words.</h1>
+    <p>It's a free Windows app. It starts txAdmin, watches the console, fixes what it safely can and backs everything up. <mark>Every change it makes can be undone.</mark></p>
+    <div class="get">
+      <a class="button" href="https://github.com/404hxlo/CityHQ/releases/latest/download/CityHQ-windows.zip">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg>
+        Download for Windows
+      </a>
+      <span class="release" id="release">Windows 10 or 11 · free</span>
     </div>
   </div>
 
-  <div class="strip">
-    <div class="wrap">
-      <span>Built for <strong>QBCore</strong></span>
-      <span>Works alongside <strong>txAdmin</strong></span>
-      <span>Any database: <strong>XAMPP, MySQL or MariaDB</strong></span>
-      <span>No account, <strong>no cloud</strong></span>
+  <div class="figure wide">
+    <div class="photo">
+      <img src="img/overview.jpg" width="2000" height="1250" alt="CityHQ's Overview page for a made-up server called Sunset Bay RP: online, with Restart, Stop and Announce buttons, cards for players and scripts, a player activity chart and a calendar.">
+      <span class="pin" style="left: 18.6%; top: 29%"><span>1</span></span>
+      <span class="pin" style="left: 66%; top: 48.8%"><span>2</span></span>
+      <span class="pin" style="left: 43%; top: 70%"><span>3</span></span>
+      <span class="pin" style="left: 78.5%; top: 15.5%"><span>4</span></span>
     </div>
+    <ol class="notes">
+      <li><b>1</b><span>Restart warns everyone in game first, and saves them.</span></li>
+      <li><b>2</b><span>Things CityHQ noticed. Each one says what it is and what to do.</span></li>
+      <li><b>3</b><span>Who was on, over the last day or week.</span></li>
+      <li><b>4</b><span>What your friends type in FiveM to join.</span></li>
+    </ol>
+    <p class="caption"><strong>Fig. 1</strong> The Overview. The city and names are made up.</p>
   </div>
 
-  <section id="features">
-    <div class="wrap">
-      <p class="kicker">What it does</p>
-      <h2>Everything around the game, handled.</h2>
-      <p class="intro">txAdmin runs the game. CityHQ sits beside it and takes care of everything else: the health checks, scripts, files, backups, players and the city itself.</p>
-      <div class="grid">
-        <article class="card">
-          <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 14c.2-1 .7-1.7 1.5-2.5 1-.9 1.5-2.2 1.5-3.5A6 6 0 0 0 6 8c0 1 .2 2.2 1.5 3.5.7.7 1.3 1.5 1.5 2.5"/><path d="M9 18h6"/><path d="M10 22h4"/></svg></div>
-          <h3>Problems, explained</h3>
-          <p>Instead of red console text: what broke, which script caused it, and the steps to fix it, with links to that script's own docs.</p>
-        </article>
-        <article class="card">
-          <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7v6h6"/><path d="M21 17a9 9 0 0 0-15-6.7L3 13"/></svg></div>
-          <h3>One-click fixes, with undo</h3>
-          <p>When a fix is safe, there's a Fix button. It says what it will do, asks first, and every change can be undone.</p>
-        </article>
-        <article class="card">
-          <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 14c1.5-1.5 3-3.2 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.8 0-3 .5-4.5 2-1.5-1.5-2.7-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4 3 5.5l7 7Z"/><path d="M3.2 12H9l.5-1 2 4.5 2-7 1.5 3.5h5.8"/></svg></div>
-          <h3>Health checks</h3>
-          <p>Finds what stops new servers: a PC that falls asleep, missing database tables, scripts started in the wrong order, and more.</p>
-        </article>
-        <article class="card">
-          <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 8 12 3 3 8v8l9 5 9-5Z"/><path d="M3 8l9 5 9-5"/><path d="M12 13v8"/></svg></div>
-          <h3>Scripts, checked before they break</h3>
-          <p>Add a script from a file, a folder or a GitHub link. An install check says if it fits QBCore, what it needs and which tables it creates.</p>
-        </article>
-        <article class="card">
-          <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 22V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v18Z"/><path d="M6 12H4a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h2"/><path d="M18 9h2a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-2"/><path d="M10 6h4"/><path d="M10 10h4"/><path d="M10 14h4"/><path d="M10 18h4"/></svg></div>
-          <h3>Run the city</h3>
-          <p>Change the weather and time, put an announcement across everyone's screen, revive everyone, clear empty cars and choose who can join.</p>
-        </article>
-        <article class="card">
-          <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></div>
-          <h3>Players</h3>
-          <p>Heal, revive, teleport, give items or money, set jobs and gangs, message, kick and ban, without typing commands.</p>
-        </article>
-        <article class="card">
-          <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 8v13H3V8"/><path d="M1 3h22v5H1z"/><path d="M10 12h4"/></svg></div>
-          <h3>Backups that just happen</h3>
-          <p>A full backup every night, and a database backup before any SQL file runs. Restore one from a list of dates.</p>
-        </article>
-        <article class="card">
-          <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="2" width="14" height="20" rx="2"/><path d="M12 18h.01"/></svg></div>
-          <h3>On your phone</h3>
-          <p>Scan a QR code and the same dashboard works from your phone on your home Wi-Fi. It isn't reachable from the internet.</p>
-        </article>
-        <article class="card">
-          <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/><path d="M12 8v4l3 2"/></svg></div>
-          <h3>Stays up, stays current</h3>
-          <p>If the server crashes, CityHQ starts it again and tells you why. It keeps the PC awake while the server runs, and updates itself with one click.</p>
-        </article>
-      </div>
+  <hr class="rule">
+
+  <section class="section" id="does">
+    <div class="col">
+      <h2>What it does, in order</h2>
+      <p>txAdmin still runs the game. CityHQ sits next to it and takes care of the rest.</p>
+      <ol class="does">
+        <li>
+          <h3>Finds your server</h3>
+          <p>Point it at the server you already have, and it reads txAdmin's settings, the ports and the database, including XAMPP's MySQL. No server yet? It downloads FiveM's server and a database into one folder and walks you through txAdmin.</p>
+        </li>
+        <li>
+          <h3>Tells you what broke</h3>
+          <p>Errors in the console become a short list, most serious first: which script, what happened, and the steps to fix it. A button opens that script's files, and there's a link to its own documentation.</p>
+        </li>
+      </ol>
     </div>
   </section>
 
-  <section style="padding-top: 0">
-    <div class="wrap">
-      <div class="feature">
-        <div>
-          <p class="kicker">Problems</p>
-          <h3>Know what broke, and how to fix it.</h3>
-          <p>CityHQ reads the server's console for you and turns errors into a short list, most serious first.</p>
-          <ul class="ticks">
-            <li>Which script caused it, in plain words</li>
-            <li>Numbered steps to fix it</li>
-            <li>Opens the exact file, and links to the script's docs</li>
-          </ul>
-        </div>
-        <div class="shot tall"><img src="img/problems.jpg" width="1515" height="1770" alt="A list of problems: a script that hit an error and a script that needs another one, each with how to fix it and a button to open it." loading="lazy"></div>
-      </div>
+  <div class="figure wide">
+    <div class="photo right narrow">
+      <img src="img/problems.jpg" width="1515" height="1770" alt="A list of problems: one script hit an error, another needs a script that isn't installed. Each has numbered steps to fix it and a button to open the script." loading="lazy">
+      <span class="pin" style="left: 52%; top: 9.8%"><span>1</span></span>
+      <span class="pin" style="left: 20.5%; top: 17.2%"><span>2</span></span>
+      <span class="pin" style="left: 33.5%; top: 25.6%"><span>3</span></span>
+    </div>
+    <ol class="notes">
+      <li><b>1</b><span>The script, by name, and what went wrong.</span></li>
+      <li><b>2</b><span>What to do about it, step by step.</span></li>
+      <li><b>3</b><span>Opens the script's files in CityHQ.</span></li>
+    </ol>
+    <p class="caption"><strong>Fig. 2</strong> The problems list on the Overview.</p>
+  </div>
 
-      <div class="feature flip">
-        <div>
-          <p class="kicker">Health</p>
-          <h3>The setup problems nobody warns you about.</h3>
-          <p>New servers stall for the same reasons. Health checks for them, and where a fix is safe there's a button for it.</p>
-          <ul class="ticks">
-            <li>A PC that sleeps and freezes the server</li>
-            <li>Missing database tables and wrong start order</li>
-            <li>Why friends outside your home can't join, step by step</li>
-            <li>Every restart in the last day, explained</li>
-          </ul>
-        </div>
-        <div class="shot"><img src="img/health.jpg" width="2000" height="1250" alt="The Health page: two things to look at, each with a fix, and a list of recent fixes that can be undone." loading="lazy"></div>
-      </div>
-
-      <div class="feature">
-        <div>
-          <p class="kicker">Scripts</p>
-          <h3>Install scripts without breaking the city.</h3>
-          <p>Every script gets a switch to start with the server and an install check. Settings files open as simple forms, so you don't hunt through code.</p>
-          <ul class="ticks">
-            <li>Add from a file, a folder or a GitHub link</li>
-            <li>Checks it works with QBCore and what it needs</li>
-            <li>A backup of each file before you save it</li>
-          </ul>
-        </div>
-        <div class="shot"><img src="img/install-check.jpg" width="2000" height="1250" alt="A script opened in CityHQ: its install check says it works with QBCore, and its config file is shown as simple settings." loading="lazy"></div>
-      </div>
-
-      <div class="feature flip">
-        <div>
-          <p class="kicker">City</p>
-          <h3>Run events without typing commands.</h3>
-          <p>Set the weather and time for everyone, put a big announcement on every screen with a countdown, and run server events with one button.</p>
-          <ul class="ticks">
-            <li>Weather, time, blackout and frozen clock</li>
-            <li>Revive everyone, clear empty cars</li>
-            <li>A whitelist for who can join</li>
-          </ul>
-        </div>
-        <div class="shot"><img src="img/city.jpg" width="2000" height="1250" alt="The City page with weather buttons, the in-game time, a big announcement preview and server events." loading="lazy"></div>
-      </div>
+  <section class="section">
+    <div class="col">
+      <ol class="does" style="counter-reset: does 2">
+        <li>
+          <h3>Checks the setup</h3>
+          <p>The usual reasons a new server keeps falling over: the PC going to sleep, missing database tables, scripts starting in the wrong order, and friends outside your home who can't join. It also explains every restart in the last day.</p>
+        </li>
+        <li>
+          <h3>Fixes what's safe to fix</h3>
+          <p>Where a fix is safe, there's a button. It says what it will do and asks first. Afterwards it's listed with an Undo button, and so is every other change CityHQ makes.</p>
+        </li>
+      </ol>
     </div>
   </section>
 
-  <section id="start" style="background: var(--panel); border-block: 1px solid var(--line)">
-    <div class="wrap">
-      <p class="kicker">Get started</p>
-      <h2>Up and running in a few minutes.</h2>
-      <p class="intro">No installer and no account. CityHQ finds your server by itself, or builds a new one in a folder you choose.</p>
-      <div class="steps">
-        <div class="step">
-          <h3>Download</h3>
-          <p>Get <code>CityHQ-windows.zip</code>. Right-click it, choose Properties, tick Unblock, then Extract All.</p>
-        </div>
-        <div class="step">
-          <h3>Open CityHQ</h3>
-          <p>Open the <code>CityHQ</code> folder and double-click CityHQ. The Welcome screen asks one question: do you already have a server?</p>
-        </div>
-        <div class="step">
-          <h3>Connect</h3>
-          <p>Yes: it finds your server, ports and database and shows what's missing. No: it sets up FiveM's server and a database, then walks you through txAdmin.</p>
-        </div>
-      </div>
-      <p class="note"><strong>Windows may say it protected your PC.</strong> CityHQ isn't code-signed yet, so choose <strong>More info</strong>, then <strong>Run anyway</strong>. Smart App Control must be off, because it also blocks one of FiveM's own files.</p>
+  <div class="figure wide">
+    <div class="photo">
+      <img src="img/health.jpg" width="2000" height="1250" alt="The Health page: two things to look at, one with a fix button, and a list of recent fixes, each with an Undo button." loading="lazy">
+      <span class="pin" style="left: 44.5%; top: 42.5%"><span>1</span></span>
+      <span class="pin" style="left: 92.5%; top: 67.6%"><span>2</span></span>
+    </div>
+    <ol class="notes">
+      <li><b>1</b><span>A fix button. It asks before it changes anything.</span></li>
+      <li><b>2</b><span>Changed your mind? Undo.</span></li>
+    </ol>
+    <p class="caption"><strong>Fig. 3</strong> The Health page.</p>
+  </div>
+
+  <section class="section">
+    <div class="col">
+      <ol class="does" style="counter-reset: does 4">
+        <li>
+          <h3>Looks after your scripts</h3>
+          <p>Add one from a zip, a folder or a GitHub link. Before it goes live, an install check says whether it works with QBCore, what it needs and which database tables it creates. Settings files open as simple forms, and every save keeps a copy of the file as it was.</p>
+        </li>
+      </ol>
     </div>
   </section>
 
-  <section class="safety">
-    <div class="wrap">
-      <p class="kicker">Safe by design</p>
-      <h2>Made so you can't break your city.</h2>
-      <p class="intro">Owners trust CityHQ because nothing happens behind their back, and almost everything can be put back.</p>
-      <div class="pillars">
-        <div class="pillar"><div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7v6h6"/><path d="M21 17a9 9 0 0 0-15-6.7L3 13"/></svg></div><h3>Undo</h3><p>Every change CityHQ makes is listed under What changed, with an Undo button.</p></div>
-        <div class="pillar"><div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/></svg></div><h3>Asks first</h3><p>Fixes, restarts and installs say what they'll do before they do it.</p></div>
-        <div class="pillar"><div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg></div><h3>Private</h3><p>No account and no cloud. License keys and passwords are hidden everywhere in the app.</p></div>
-        <div class="pillar"><div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m16 18 6-6-6-6"/><path d="m8 6-6 6 6 6"/></svg></div><h3>Code you can read</h3><p>The code is public on GitHub, and downloads are checked against their published checksums.</p></div>
-      </div>
+  <div class="figure wide">
+    <div class="photo right">
+      <img src="img/install-check.jpg" width="2000" height="1250" alt="A script opened in CityHQ: the install check says it works with QBCore, and its config.lua is shown as settings with switches and text boxes." loading="lazy">
+      <span class="pin" style="left: 69%; top: 24%"><span>1</span></span>
+      <span class="pin" style="left: 70%; top: 56%"><span>2</span></span>
+    </div>
+    <ol class="notes">
+      <li><b>1</b><span>The install check: does it fit QBCore, and what does it need?</span></li>
+      <li><b>2</b><span><code>config.lua</code> as plain settings, no code.</span></li>
+    </ol>
+    <p class="caption"><strong>Fig. 4</strong> One script, opened from the Resources page.</p>
+  </div>
+
+  <section class="section">
+    <div class="col">
+      <ol class="does" style="counter-reset: does 5">
+        <li>
+          <h3>Runs the city</h3>
+          <p>Weather and time for everyone, a big announcement across every screen, revive everyone, clear empty cars, and a whitelist. For players: heal, teleport, items, money, jobs, kicks and bans, with no commands to type.</p>
+        </li>
+        <li>
+          <h3>Backs everything up</h3>
+          <p>A full backup every night, and a database backup before any SQL file runs. If the server crashes, CityHQ starts it again and tells you what it found. While the server runs, it keeps the PC from going to sleep.</p>
+        </li>
+        <li>
+          <h3>Works from your phone</h3>
+          <div class="phone-row">
+            <div class="photo"><img src="img/phone.jpg" width="780" height="1688" alt="CityHQ's Overview on a phone." loading="lazy"></div>
+            <p>Turn on phone access and scan the QR code. The same dashboard works on any phone on your home Wi-Fi. It isn't reachable from the internet.</p>
+          </div>
+        </li>
+      </ol>
     </div>
   </section>
 
-  <section id="faq">
-    <div class="wrap">
-      <div class="center">
-        <p class="kicker">FAQ</p>
-        <h2>Questions people ask</h2>
-      </div>
-      <div class="faq">
-        <details><summary>Is CityHQ free?</summary><p>Yes, free to use, including on servers that take donations. The code is source-available under the PolyForm Shield license: you can read and change it, but not use it to make a competing product.</p></details>
-        <details><summary>Does it replace txAdmin?</summary><p>No. txAdmin still runs the game, and CityHQ works alongside it: it starts txAdmin, reads the server's files and console, and adds a small helper script so it can talk to the game. If you close CityHQ, the server keeps running.</p></details>
-        <details><summary>Will it work with the server I already have?</summary><p>Most likely. Choose "I already have a server" on the Welcome screen and CityHQ finds FXServer, txAdmin's data, the ports and your database, including XAMPP's MySQL. It lists anything missing before you connect. It adds its settings file and small helper script to your server folder, and moves nothing.</p></details>
-        <details><summary>Does it work with ESX or Qbox?</summary><p>CityHQ is built and tested for QBCore. Other frameworks aren't supported yet; support for more is planned.</p></details>
-        <details><summary>Can I use it on a rented server?</summary><p>CityHQ runs on the Windows PC or Windows server where FXServer runs, so a rented Windows VPS you can log in to works. Game hosts that only give you a web panel, and Linux servers, aren't supported yet.</p></details>
-        <details><summary>Why does Windows warn me when I open it?</summary><p>CityHQ isn't code-signed yet, so Windows doesn't recognize the publisher. Choose More info, then Run anyway. The download is built on GitHub from the public code, and its checksum is published with every release.</p></details>
-        <details><summary>Does CityHQ send my data anywhere?</summary><p>No. Everything stays on your PC. The only thing it contacts is GitHub, to check for a newer version, and you can turn that off in Settings. Phone access stays on your home network and needs a QR code or passcode.</p></details>
-        <details><summary>How do I get updates?</summary><p>From version 1.2.0 on, CityHQ checks for new versions every few hours and shows what's new. Press Update now and it installs the update and opens again in under a minute, while your server keeps running. If an update won't open, the old version is put back.</p></details>
-        <details><summary>Something's wrong. How do I report it?</summary><p>Use Report a problem under Settings, or on the Welcome screen. It writes the report for you, takes out keys, passwords, player IDs and IP addresses, and lets you check it before opening it on <a href="https://github.com/404hxlo/CityHQ/issues">GitHub</a>.</p></details>
-      </div>
+  <hr class="rule">
+
+  <section class="section">
+    <div class="col">
+      <h2>What it doesn't do (yet)</h2>
+      <ul class="not">
+        <li><strong>Other frameworks.</strong> It's made for QBCore. ESX and Qbox aren't supported yet.</li>
+        <li><strong>Linux, or game hosts with only a web panel.</strong> CityHQ runs on the Windows PC or Windows server where FXServer runs. A rented Windows VPS you can log in to is fine.</li>
+        <li><strong>Replace txAdmin.</strong> txAdmin still runs the game. If you close CityHQ, the server keeps going.</li>
+        <li><strong>Come signed.</strong> It isn't code-signed yet, so Windows warns you the first time you open it.</li>
+      </ul>
     </div>
   </section>
 
-  <div class="final">
-    <div class="wrap">
-      <h2>Give your city a headquarters.</h2>
-      <p class="intro">Free for Windows 10 and 11. Works with the server you already have.</p>
-      <div class="cta">
-        <a class="btn btn-primary" href="https://github.com/404hxlo/CityHQ/releases/latest/download/CityHQ-windows.zip">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg>
-          Download for Windows
-        </a>
-        <a class="btn" href="https://github.com/404hxlo/CityHQ">View on GitHub</a>
-      </div>
+  <section class="section" id="install">
+    <div class="col">
+      <h2>Install</h2>
+      <ol class="steps">
+        <li>Download <code>CityHQ-windows.zip</code>. Right-click it, choose <strong>Properties</strong>, tick <strong>Unblock</strong>, then choose <strong>Extract All</strong>.</li>
+        <li>Open the <code>CityHQ</code> folder and double-click <strong>CityHQ</strong>.</li>
+        <li>It asks whether you already have a server. Yes: it finds it and lists anything missing. No: it builds one in a folder you pick.</li>
+      </ol>
+      <div class="aside"><strong>If Windows says it protected your PC,</strong> choose More info, then Run anyway. Windows Smart App Control also has to be off, because it blocks one of FiveM's own files.</div>
+      <p style="margin-top: 22px">After that, CityHQ updates itself. When there's a new version, it shows what changed and installs it when you press Update. Your server keeps running while it does.</p>
+    </div>
+  </section>
+
+  <section class="section" id="questions">
+    <div class="col">
+      <h2>Questions</h2>
+      <dl class="qa">
+        <dt>Is it free?</dt>
+        <dd>Yes, including on servers that take donations. The code is on GitHub under the PolyForm Shield license: you can read it and change it, but not use it to make a competing product.</dd>
+        <dt>Does it send my data anywhere?</dt>
+        <dd>No. Everything stays on your PC. The only thing it contacts is GitHub, to check for a new version, and you can turn that off. License keys and passwords are hidden everywhere in the app.</dd>
+        <dt>What does it change on my server?</dt>
+        <dd>When you connect it, it adds its own settings file and a small helper script to your server folder. Anything else it changes goes on the "What changed" list, with an Undo button.</dd>
+        <dt>Something's not working. Where do I say?</dt>
+        <dd>Use Report a problem in Settings, or on the first screen. It writes the report, takes out keys, passwords, player IDs and IP addresses, and shows it to you before you post it on <a href="https://github.com/404hxlo/CityHQ/issues">GitHub</a>.</dd>
+      </dl>
+    </div>
+  </section>
+
+  <div class="end">
+    <div class="col">
+      <p>Free, for Windows 10 and 11.</p>
+      <a class="button" href="https://github.com/404hxlo/CityHQ/releases/latest/download/CityHQ-windows.zip">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg>
+        Download CityHQ
+      </a>
     </div>
   </div>
 </main>
 
 <footer>
-  <div class="wrap">
-    <p>CityHQ is an independent project, not made or endorsed by Cfx.re, Rockstar Games, txAdmin or the QBCore Framework. The city and names in the screenshots are made up.</p>
+  <div class="wide">
+    <p>CityHQ is an independent project, not made or endorsed by Cfx.re, Rockstar Games, txAdmin or the QBCore Framework.</p>
     <nav aria-label="Footer">
-      <a href="https://github.com/404hxlo/CityHQ/releases">All versions</a>
       <a href="https://github.com/404hxlo/CityHQ/blob/main/CHANGELOG.md">What's new</a>
-      <a href="https://github.com/404hxlo/CityHQ/issues">Report a problem</a>
+      <a href="https://github.com/404hxlo/CityHQ/releases">All versions</a>
       <a href="https://github.com/404hxlo/CityHQ/blob/main/LICENSE.md">License</a>
+      <a href="https://github.com/404hxlo/CityHQ">Source</a>
     </nav>
   </div>
 </footer>
+
+<script>
+  // The newest version's number and size next to the download button. Without it, the text stays as is.
+  fetch('https://api.github.com/repos/404hxlo/CityHQ/releases/latest')
+    .then((r) => (r.ok ? r.json() : null))
+    .then((r) => {
+      const zip = r && Array.isArray(r.assets) && r.assets.find((a) => a.name === 'CityHQ-windows.zip');
+      if (!r || !zip || !/^v\d+\.\d+\.\d+$/.test(r.tag_name)) return;
+      document.getElementById('release').textContent = `Version ${r.tag_name.slice(1)} · ${Math.round(zip.size / 1048576)} MB · Windows 10 or 11 · free`;
+    })
+    .catch(() => {});
+</script>
 </body>
 </html>
