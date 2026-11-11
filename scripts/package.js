@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 // setup\ goes along so the Welcome screen can build a new server from a downloaded copy.
-const KEEP = [/^\/package\.json$/, /^\/electron(\/|$)/, /^\/server(\/|$)/, /^\/dist(\/|$)/, /^\/agent-resource(\/|$)/, /^\/build(\/|$)/, /^\/setup(\/|$)/, /^\/node_modules(\/|$)/];
+const KEEP = [/^\/package\.json$/, /^\/LICENSE\.md$/, /^\/electron(\/|$)/, /^\/server(\/|$)/, /^\/dist(\/|$)/, /^\/agent-resource(\/|$)/, /^\/build(\/|$)/, /^\/setup(\/|$)/, /^\/node_modules(\/|$)/];
 
 const paths = await packager({
   dir: root,
@@ -19,7 +19,7 @@ const paths = await packager({
   asar: false,
   prune: true,
   icon: path.join(root, 'build', 'icon.ico'),
-  appCopyright: 'Personal use',
+  appCopyright: 'Copyright (c) 2026 404hxlo. PolyForm Shield License 1.0.0',
   win32metadata: { FileDescription: 'CityHQ', ProductName: 'CityHQ' },
   ignore: (file) => file !== '' && !KEEP.some((re) => re.test(file.replaceAll('\\', '/'))),
 });

@@ -6,6 +6,8 @@ CityHQ is a Windows app for running a QBCore FiveM server without touching confi
 command line. It works with the server you already have, or builds you a new one. It sits on top
 of txAdmin and works from the desktop, or from a phone on the same Wi-Fi.
 
+Website: <https://404hxlo.github.io/CityHQ/>
+
 ## Download
 
 ### [⬇ Download CityHQ for Windows](https://github.com/404hxlo/CityHQ/releases/latest/download/CityHQ-windows.zip)
@@ -104,6 +106,14 @@ where its parts are in its `qbcontrol.json` (`fxserverDir`, `txDataDir`, `profil
 | `web\` | The screens (React) |
 | `agent-resource\qb-control\` | A small resource the app adds to the server so it can talk to the game |
 | `setup\` | The setup script and the guide it copies into each server folder |
+| `site\` | The website, published to GitHub Pages by `.github/workflows/pages.yml` |
+
+## License
+
+CityHQ is free to use, including on servers that take donations, under the
+[PolyForm Shield License 1.0.0](LICENSE.md). You may read, change and share the code, but not use
+it to make a product that competes with CityHQ. It is source-available rather than "open source"
+in the formal sense.
 
 ## Not affiliated
 
