@@ -101,6 +101,14 @@ export function layoutOf(root, config = {}, exists = existsSync) {
 
 const config = readConfig();
 const LAYOUT = layoutOf(ROOT, config);
+
+/**
+ * A server rented from a host, reached through the host's panel API or SFTP instead of this PC's
+ * disk. Its local folder (HOME_DIR\remote\<name>) only keeps CityHQ's own state for it. Paths in
+ * here are the host's, with / separators. Secrets are kept apart, encrypted (see remote/secret.js).
+ */
+export const REMOTE = config.remote && (config.remote.type === 'panel' || config.remote.type === 'sftp') ? config.remote : null;
+export const REMOTE_HOME = path.join(HOME_DIR, 'remote');
 export const FXSERVER_DIR = LAYOUT.fxserverDir;
 export const FXSERVER_EXE = path.join(FXSERVER_DIR, 'FXServer.exe');
 export const TXDATA = LAYOUT.txDataDir;
@@ -119,6 +127,8 @@ export const DB_INI = path.join(ROOT, 'db', 'my.ini');
 
 /** Finds the deployed server folder: txAdmin's setting first, then the newest good deploy. */
 export function findServerData(txProfile = TX_PROFILE, txData = TXDATA) {
+  // A hosted server's place was found when it was connected; its paths are the host's.
+  if (REMOTE) return REMOTE.cfgPath ? { dataPath: REMOTE.dataPath, cfgPath: REMOTE.cfgPath, remote: true } : null;
   try {
     const tx = JSON.parse(readFileSync(path.join(txProfile, 'config.json'), 'utf8'));
     // txAdmin 8 keeps it under server, txAdmin 7 under fxRunner.
@@ -143,6 +153,7 @@ export function findServerData(txProfile = TX_PROFILE, txData = TXDATA) {
 
 /** The game port: forced by CityHQ for a server setup made, otherwise whatever server.cfg says. */
 function gamePort() {
+  if (REMOTE) return portOr(REMOTE.gamePort, 30120);
   if (MANAGED_DB) return portOr(config.gamePort, 30121);
   try {
     const server = findServerData();

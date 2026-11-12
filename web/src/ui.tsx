@@ -258,6 +258,8 @@ const SERVER_STATES: Record<ServerState, { label: string; tone: string; icon: Re
   stopping: { label: 'Stopping', tone: 'warn', icon: <Loader2 size={15} className="spin" /> },
   stopped: { label: 'Stopped', tone: 'muted', icon: <Power size={15} /> },
   'panel-only': { label: 'Game server off', tone: 'muted', icon: <Power size={15} /> },
+  // A hosted server CityHQ can't see right now (only its files are reachable, and it isn't answering).
+  unreachable: { label: 'Not answering', tone: 'muted', icon: <Power size={15} /> },
 };
 
 export function ServerBadge({ state }: { state: ServerState }) {

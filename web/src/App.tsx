@@ -34,6 +34,8 @@ const NAV: { id: Page; label: string; icon: ReactNode }[] = [
   { id: 'settings', label: 'Settings', icon: <SettingsIcon size={20} /> },
 ];
 
+const HOSTED_LATER = new Set<Page>(['health', 'backups']);
+
 // Learn isn't in the menu (which is full on phones); it's reached from the ? button, Settings and search.
 const SEARCHABLE = [...NAV, { id: 'learn' as Page, label: 'Learn the basics', icon: <BookOpen size={20} /> }];
 const isPage = (value: string): value is Page => SEARCHABLE.some((n) => n.id === value);
@@ -95,6 +97,10 @@ function Shell({ local, onSignOut }: { local: boolean; onSignOut: () => void }) 
   const goTo = useCallback((next: string) => { window.location.hash = next; }, []);
   const state = overview.data?.state;
   const online = state === 'online';
+  const hosted = overview.data?.hosted || null;
+  // Health checks and backups look at this PC's own copy of the server; hosted servers get them later.
+  const nav = hosted ? NAV.filter((n) => !HOSTED_LATER.has(n.id)) : NAV;
+  const later = hosted && HOSTED_LATER.has(page);
 
   // A downloaded copy that hasn't been connected to a server yet starts on the Welcome screen.
   if (overview.data && overview.data.folderFound === false) return <Welcome local={local} />;
@@ -107,7 +113,7 @@ function Shell({ local, onSignOut }: { local: boolean; onSignOut: () => void }) 
           <span>CityHQ</span>
         </div>
         <ul>
-          {NAV.map((n) => (
+          {nav.map((n) => (
             <li key={n.id}>
               <a href={`#${n.id}`} className={page === n.id ? 'active' : ''} aria-current={page === n.id ? 'page' : undefined}>
                 {n.icon}<span>{n.label}</span>
@@ -125,8 +131,11 @@ function Shell({ local, onSignOut }: { local: boolean; onSignOut: () => void }) 
             <span className="muted-note">
               {online && overview.data?.status ? `${overview.data.status.players} of ${overview.data.status.maxClients} players` : 'Not running'}
             </span>
-            {local && overview.data && (
+            {local && overview.data && !hosted && (
               <a className="btn btn-default server-card-btn" href={`http://localhost:${overview.data.txAdminPort}`} target="_blank" rel="noreferrer"><ExternalLink size={15} /><span>Open txAdmin</span></a>
+            )}
+            {hosted?.panelUrl && (
+              <a className="btn btn-default server-card-btn" href={hosted.panelUrl} target="_blank" rel="noreferrer"><ExternalLink size={15} /><span>Open your host's panel</span></a>
             )}
           </div>
         </div>
@@ -162,12 +171,13 @@ function Shell({ local, onSignOut }: { local: boolean; onSignOut: () => void }) 
         )}
         {local && overview.data?.update && page !== 'console' && page !== 'files' && <UpdateNotice version={overview.data.update.version} />}
         {page === 'overview' && <Overview data={overview.data} error={overview.error} refresh={overview.refresh} local={local} goTo={goTo} />}
-        {page === 'health' && <Health />}
+        {later && <Notice kind="info">This page isn't available for hosted servers yet. It's coming in a later version of CityHQ.</Notice>}
+        {page === 'health' && !later && <Health />}
         {page === 'city' && <City online={online} helperOutdated={Boolean(overview.data?.helperOutdated)} />}
         {page === 'resources' && <Resources />}
         {page === 'players' && <Players gamePort={overview.data?.gamePort ?? 30121} />}
         {page === 'files' && <Files online={online} />}
-        {page === 'backups' && <Backups />}
+        {page === 'backups' && !later && <Backups />}
         {page === 'console' && <Console online={online} />}
         {page === 'settings' && <SettingsPage online={online} onSignOut={onSignOut} />}
         {page === 'learn' && <Learn />}

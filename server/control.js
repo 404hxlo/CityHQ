@@ -41,7 +41,93 @@ let action = null;
 let controlledAt = 0;
 let pollTimer = null;
 
+// ---------------------------------------------------------------- hosted servers
+// A rented server isn't a process on this PC: its state, power and CPU/memory come from the host
+// (remote/runtime.js sets this up), and its in-game state from the helper over HTTPS.
+let hosted = null;
+let hostedStats = null;
+const hostedHistory = [];
+export const setHostedControl = (value) => { hosted = value; };
+
+async function pollHosted() {
+  if (hosted.capabilities.stats) {
+    try {
+      hostedStats = await hosted.stats();
+      hostedHistory.push({
+        t: Date.now(),
+        cpu: hostedStats.cpuPct === null ? null : Math.round(hostedStats.cpuPct * 10) / 10,
+        mem: hostedStats.memBytes,
+        running: hostedStats.state === 'running',
+      });
+      if (hostedHistory.length > 150) hostedHistory.shift();
+    } catch { hostedStats = null; }
+  }
+  // Only ask the helper when the host says the server runs (or can't say).
+  if (hostedStats && hostedStats.state !== 'running') { liveStatus = null; return; }
+  try {
+    liveStatus = await agentRequest('/status', { timeoutMs: 8000 });
+    liveAt = Date.now();
+  } catch {
+    liveStatus = null;
+  }
+}
+
+function hostedState() {
+  if (action) return action.state;
+  if (!hosted.capabilities.stats) return liveStatus ? 'online' : 'unreachable';
+  const s = hostedStats?.state;
+  if (!s) return 'unreachable';
+  if (s === 'offline') return 'stopped';
+  if (s === 'starting') return 'starting';
+  if (s === 'stopping') return 'stopping';
+  // Running: online once the helper answers, or once it has had time to (an old or missing
+  // helper shouldn't make a working server look stuck).
+  return liveStatus || (hostedStats.uptimeMs ?? 0) > 180000 ? 'online' : 'starting';
+}
+
+function hostedOverview() {
+  const state = hostedState();
+  return {
+    state,
+    message: action?.message || null,
+    deployed: true,
+    serverName: hosted.label,
+    gamePort: GAME_PORT,
+    txAdminPort: null,
+    helperOutdated: Boolean(liveStatus && liveStatus.agentVersion !== installedAgentVersion()),
+    processes: { txAdmin: state !== 'stopped', game: state === 'online' || state === 'starting', database: true },
+    databaseManaged: false,
+    databasePort: null,
+    status: liveStatus,
+    statusAgeMs: liveAt ? Date.now() - liveAt : null,
+    stats: { cpuPct: hostedStats?.cpuPct ?? null, memBytes: hostedStats?.memBytes ?? null, sysCpuPct: null, sysMemUsed: 0, sysMemTotal: 0 },
+    history: hostedHistory,
+    logPath: null,
+    hosted: hosted.describe(),
+  };
+}
+
+async function hostedPower(state, message, signal, reason) {
+  return exclusive(state, message, async () => {
+    if (!hosted.capabilities.power) {
+      // Without the panel's API, a restart can still be asked of the server itself (txAdmin
+      // brings it back); starting and stopping can't.
+      if (signal !== 'restart') hosted.power(signal);
+      await prepareShutdown(reason || 'The server is restarting. Please reconnect in a minute.');
+      await agentRequest('/quit', { method: 'POST', timeoutMs: 8000 });
+      return { restarted: true };
+    }
+    if (signal !== 'start') await prepareShutdown(reason || (signal === 'stop' ? 'The server is shutting down.' : 'The server is restarting. Please reconnect in a minute.'));
+    await hosted.power(signal);
+    // The host does the rest; wait until it says so, so the screens don't jump around.
+    const want = signal === 'stop' ? 'offline' : 'running';
+    await waitFor(async () => { await pollHosted(); return hostedStats?.state === want; }, 120000);
+    return signal === 'stop' ? { stopped: true } : signal === 'start' ? { started: true } : { restarted: true };
+  });
+}
+
 async function pollStatus() {
+  if (hosted) return pollHosted();
   if (!getProcessState().game) {
     liveStatus = null;
     return;
@@ -56,7 +142,8 @@ async function pollStatus() {
 
 export function startStatusPolling() {
   if (pollTimer) return;
-  pollTimer = setInterval(pollStatus, STATUS_MS);
+  // Asking a host every 2 seconds is too much; every 5 is plenty for a remote server.
+  pollTimer = setInterval(pollStatus, hosted ? 5000 : STATUS_MS);
   pollStatus();
 }
 
@@ -82,6 +169,7 @@ function serverName() {
 }
 
 export function getOverview() {
+  if (hosted) return hostedOverview();
   const p = getProcessState();
   const server = findServerData();
   return {
@@ -209,6 +297,7 @@ async function prepareBoot() {
 }
 
 export function startServer() {
+  if (hosted) return hostedPower('starting', 'Starting the server...', 'start');
   return exclusive('starting', 'Starting the server...', async () => {
     if (!findServerData()) throw new HttpError(409, 'Finish the txAdmin setup first.');
     await prepareBoot();
@@ -230,6 +319,8 @@ export function startServer() {
 
 /** Crash recovery: starts the server again, and only reports success once it is really online. */
 export function startAfterCrash() {
+  // Hosts bring a crashed server back themselves.
+  if (hosted) return Promise.resolve({ ok: true, alreadyRunning: true });
   return exclusive('starting', 'Starting the server again after it went down...', async () => {
     await prepareBoot();
     const startedAt = Date.now();
@@ -246,6 +337,7 @@ export const isControlBusy = () => Boolean(action);
  * then starts it again if it was running. Any failure still tries to bring the server back.
  */
 export function restoreServer(id, parts) {
+  if (hosted) throw new HttpError(409, 'Backups of hosted servers aren\'t in CityHQ yet. Use your host\'s backups for now.');
   return exclusive('restoring', 'Restoring from a backup...', async () => {
     if (!findServerData()) throw new HttpError(409, 'Finish the txAdmin setup first.');
     await readBackup(id);
@@ -279,6 +371,7 @@ export function restoreServer(id, parts) {
 }
 
 export function stopServer(reason) {
+  if (hosted) return hostedPower('stopping', 'Stopping the server...', 'stop', reason);
   return exclusive('stopping', 'Stopping the server...', async () => {
     const p = getProcessState();
     if (!p.monitor) return { alreadyStopped: true };
@@ -290,6 +383,7 @@ export function stopServer(reason) {
 }
 
 export function restartServer(reason) {
+  if (hosted) return hostedPower('restarting', 'Restarting the server...', 'restart', reason);
   return exclusive('restarting', 'Restarting the server...', async () => {
     if (!findServerData()) throw new HttpError(409, 'Finish the txAdmin setup first.');
     await prepareBoot();

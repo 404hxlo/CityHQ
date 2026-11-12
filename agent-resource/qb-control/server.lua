@@ -41,6 +41,38 @@ local function loadToken()
 end
 local TOKEN = loadToken()
 
+-- ---------------------------------------------------------------- hosted servers
+-- On a rented server CityHQ runs on someone's own PC, so the helper has to answer over the
+-- internet. Only when CityHQ installed it that way (remote.txt, which only someone with the
+-- server's files can add), and the token is only ever sent to the HTTPS address Cfx.re gives
+-- the server, which the helper writes to address.txt for CityHQ to read through the host.
+local REMOTE = LoadResourceFile(RES, 'remote.txt') ~= nil
+
+if REMOTE then
+    CreateThread(function()
+        for _ = 1, 120 do
+            local address = GetConvar('web_baseUrl', '')
+            if address ~= '' then
+                SaveResourceFile(RES, 'address.txt', address, -1)
+                return
+            end
+            Wait(5000)
+        end
+    end)
+end
+
+-- Wrong tokens from outside: after 10 in a minute, outside requests are refused for 5 minutes.
+local failures, failWindow, lockedUntil = 0, 0, 0
+local function remoteLocked()
+    return os.time() < lockedUntil
+end
+local function remoteFailed()
+    local now = os.time()
+    if now - failWindow > 60 then failures, failWindow = 0, now end
+    failures = failures + 1
+    if failures >= 10 then lockedUntil = now + 300 end
+end
+
 -- ---------------------------------------------------------------- the framework
 -- QBCore, or Qbox (qbx_core). Qbox runs QBCore scripts through a bridge that can be turned off, so
 -- on Qbox everything here uses Qbox's own exports and the scripts its txAdmin recipe installs.
@@ -241,6 +273,8 @@ routes['GET /resources'] = function()
                 version = GetResourceMetadata(name, 'version', 0),
                 description = GetResourceMetadata(name, 'description', 0),
                 author = GetResourceMetadata(name, 'author', 0),
+                -- Where it is on disk; a hosted server's list is built from this.
+                path = REMOTE and GetResourcePath(name) or nil,
             }
         end
     end
@@ -827,6 +861,22 @@ routes['GET /identifiers'] = function()
     return list
 end
 
+-- Everyone who has played, for picking admins and whitelist entries by name. On a hosted server
+-- CityHQ often can't reach the database itself. A fixed query: nothing from the request goes in.
+routes['GET /known-players'] = function()
+    if GetResourceState('oxmysql') ~= 'started' then error('oxmysql is not running') end
+    local rows = exports.oxmysql:query_async(
+        "SELECT license, name, citizenid, JSON_UNQUOTE(JSON_EXTRACT(charinfo, '$.firstname')) AS firstname, "
+        .. "JSON_UNQUOTE(JSON_EXTRACT(charinfo, '$.lastname')) AS lastname, UNIX_TIMESTAMP(last_updated) AS updated "
+        .. 'FROM players ORDER BY last_updated DESC LIMIT 3000', {}
+    ) or {}
+    local list = {}
+    for i, r in ipairs(rows) do
+        list[i] = { r.license, r.name, r.citizenid, r.firstname, r.lastname, r.updated }
+    end
+    return list
+end
+
 routes['GET /bans'] = function()
     if GetResourceState('oxmysql') ~= 'started' then error('oxmysql is not running') end
     local rows = exports.oxmysql:query_async(
@@ -867,8 +917,10 @@ local function dispatch(handler, body, res)
 end
 
 SetHttpHandler(function(req, res)
-    if not isLoopback(req.address) then return send(res, 403, { ok = false, error = 'Forbidden' }) end
+    local outside = not isLoopback(req.address)
+    if outside and (not REMOTE or remoteLocked()) then return send(res, 403, { ok = false, error = 'Forbidden' }) end
     if TOKEN == '' or req.headers['x-qbc-token'] ~= TOKEN then
+        if outside then remoteFailed() end
         return send(res, 401, { ok = false, error = 'Bad token' })
     end
     local path = (req.path or '/'):gsub('%?.*$', '')
@@ -885,4 +937,7 @@ SetHttpHandler(function(req, res)
     end
 end)
 
-print(('^2[qb-control]^7 ready%s'):format(TOKEN == '' and ' ^1(no token.txt, all requests will be refused)^7' or ''))
+print(('^2[qb-control]^7 ready%s%s'):format(
+    REMOTE and ' (hosted: CityHQ connects over the internet)' or '',
+    TOKEN == '' and ' ^1(no token.txt, all requests will be refused)^7' or ''
+))

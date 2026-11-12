@@ -1,6 +1,6 @@
 // The desktop window. The server runs on its own, so closing this never stops the game.
 import {
-  app, BrowserWindow, dialog, Menu, nativeImage, powerMonitor, powerSaveBlocker, screen, session, shell, Tray,
+  app, BrowserWindow, dialog, Menu, nativeImage, powerMonitor, powerSaveBlocker, safeStorage, screen, session, shell, Tray,
 } from 'electron';
 import { appendFileSync, mkdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
@@ -173,6 +173,11 @@ function installDesktopHooks() {
       app.setLoginItemSettings({ ...loginOptions, openAtLogin: enabled });
     },
     openFolder: (folder) => shell.openPath(folder),
+    // A hosted server's panel key or SFTP password, locked with Windows' own protection for this
+    // Windows account, so the file on disk is useless anywhere else.
+    canProtect: () => safeStorage.isEncryptionAvailable(),
+    protect: (text) => safeStorage.encryptString(String(text)).toString('base64'),
+    unprotect: (sealed) => safeStorage.decryptString(Buffer.from(String(sealed), 'base64')),
     // Picking a server on the Welcome screen: every path is read once at start, so start again.
     relaunch: () => leave(true),
     // Installing an update: the updater opens the new version once this one has closed.

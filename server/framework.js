@@ -3,7 +3,7 @@
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { parseBoot, readConvar } from './cfg.js';
-import { findServerData, readConfig } from './paths.js';
+import { findServerData, readConfig, REMOTE } from './paths.js';
 
 export const FRAMEWORK_NAMES = { qbcore: 'QBCore', qbox: 'Qbox' };
 
@@ -22,9 +22,13 @@ export function frameworkOf(cfgText, dataPath, exists = existsSync) {
 export const qbxBridgeOff = (cfgText) => /^(false|0|off|no)$/i.test((readConvar(String(cfgText || ''), 'qbx:enablebridge') ?? '').trim());
 
 let cache = { key: null, value: null };
+// A hosted server's server.cfg can't be read here synchronously; it is noted each time it is read.
+let hosted = null;
+export const noteHostedCfg = (text) => { hosted = { framework: frameworkOf(text, null), bridgeOff: qbxBridgeOff(text) }; };
 
 /** The current server's framework and bridge setting, re-read only when server.cfg changes. */
 export function serverFramework() {
+  if (REMOTE) return hosted || { framework: null, bridgeOff: false };
   try {
     const server = findServerData();
     if (!server) return { framework: null, bridgeOff: false };

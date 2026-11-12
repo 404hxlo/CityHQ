@@ -33,9 +33,9 @@ const NEVER_REMOVE = new Set(['qb-core', 'qbx_core', 'oxmysql', 'qb-control', 'm
 const QBOX_CORE = new Set(['ox_lib', 'ox_inventory']);
 const isQboxCore = (name) => QBOX_CORE.has(name) && serverFramework().framework === 'qbox';
 const neverRemove = (name) => NEVER_REMOVE.has(name) || isQboxCore(name);
-const warnOnStop = (name) => WARN_ON_STOP.has(name) || isQboxCore(name);
-const NEVER_STOP = new Set(['qb-control', 'monitor']);
-const LOCKED_REASON = {
+export const warnOnStop = (name) => WARN_ON_STOP.has(name) || isQboxCore(name);
+export const NEVER_STOP = new Set(['qb-control', 'monitor']);
+export const LOCKED_REASON = {
   'qb-control': 'CityHQ uses qb-control to talk to the server, so it has to stay on.',
   monitor: 'monitor is txAdmin, which runs the server, so it has to stay on.',
 };
@@ -227,7 +227,7 @@ const liveMap = async () => {
 /** The groups people change most come first; FiveM's samples and turned-off ones come last. */
 const CATEGORY_ORDER = ['[qb]', '[added]', '[standalone]', '[voice]', '[defaultmaps]'];
 const CATEGORY_LAST = new Set(['[examples]', '[test]', '[disabled]']);
-function categoryRank(category) {
+export function categoryRank(category) {
   const i = CATEGORY_ORDER.indexOf(category);
   if (i !== -1) return i;
   if (category === BUILT_IN_CATEGORY) return 90;

@@ -36,6 +36,8 @@ export function redact(text, { home = os.homedir(), user = safeUser(), root = RO
   for (const [form, label] of folders) out = out.replace(new RegExp(escapeRe(form), 'gi'), label);
   out = out
     .replace(/cfxk_[A-Za-z0-9_]+/g, 'cfxk_(hidden)')
+    // Game panel API keys (Pterodactyl client and application keys).
+    .replace(/\bptl[ac]_[A-Za-z0-9]+/g, 'ptlc_(hidden)')
     .replace(/(mysql:\/\/[^:\s"'/]+:)[^@\s"']+@/gi, '$1(hidden)@')
     .replace(/\b(password|pwd|token|secret|apikey|api_key)(\s*[=:]\s*)("[^"]*"|'[^']*'|[^\s;,&"']+)/gi, '$1$2(hidden)')
     .replace(/https:\/\/(?:\w+\.)?discord(?:app)?\.com\/api\/webhooks\/\S+/gi, '(Discord webhook hidden)')

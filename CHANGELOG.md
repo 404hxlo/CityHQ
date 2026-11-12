@@ -2,6 +2,15 @@
 
 Each version's section is shown in the app before it updates, and on its GitHub release page.
 
+## 1.4.0
+
+- CityHQ can now run a server you rent from a host, such as RocketNode. On the Welcome screen (or Settings, Change server) choose "It's hosted", then connect with your panel's API key or with SFTP.
+- With a panel API key (RocketNode and other Pterodactyl-style panels): start, stop and restart, the live console, CPU and memory, and editing files.
+- With SFTP, which works with almost any host: editing files and the console from txAdmin's log. Start and stop the server from your host's panel.
+- Players, City, Admins, the whitelist and turning resources on and off work through CityHQ's helper, which is added when you connect and starts at the server's next restart.
+- Your API key or password stays on your PC, locked with Windows' own protection, and is taken out of problem reports.
+- Not for hosted servers yet: Health, Backups, finding problems and installing scripts.
+
 ## 1.3.0
 
 - CityHQ now works with Qbox servers as well as QBCore. It recognises a Qbox server when you connect it, and "Make me a new server" lets you choose QBCore or Qbox.

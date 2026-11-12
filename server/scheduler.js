@@ -8,7 +8,9 @@ import {
 } from './control.js';
 import { isSecondary } from './desktop.js';
 import { recordEvent } from './events.js';
-import { FXSERVER_DIR, FXSERVER_LOG, findServerData } from './paths.js';
+import {
+  FXSERVER_DIR, FXSERVER_LOG, findServerData, REMOTE,
+} from './paths.js';
 import {
   ensureDatabase, getProcessState,
 } from './processes.js';
@@ -317,8 +319,12 @@ async function tick() {
     if (!isSecondary()) {
       const now = new Date();
       scheduleTick(now);
-      watchTick();
-      await backupTick(now);
+      // A hosted server is watched and backed up by its host (CityHQ's own backups of hosted
+      // servers come later).
+      if (!REMOTE) {
+        watchTick();
+        await backupTick(now);
+      }
     }
   } catch (err) {
     console.error('[cityhq] scheduler:', err);
@@ -330,7 +336,7 @@ async function tick() {
 export function startScheduler() {
   if (timer) return;
   timer = setInterval(tick, TICK_MS);
-  if (!isSecondary() && getSettings().autoStartServer && findServerData()) {
+  if (!isSecondary() && !REMOTE && getSettings().autoStartServer && findServerData()) {
     startServer().catch((err) => recordEvent({ level: 'alert', title: 'The server could not be started automatically', detail: err.message }));
   }
 }

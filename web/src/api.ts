@@ -1,4 +1,30 @@
-export type ServerState = 'online' | 'starting' | 'stopping' | 'restarting' | 'restoring' | 'stopped' | 'panel-only';
+export type ServerState = 'online' | 'starting' | 'stopping' | 'restarting' | 'restoring' | 'stopped' | 'panel-only' | 'unreachable';
+
+/** A server rented from a host, reached through its panel's API or SFTP instead of this PC. */
+export interface HostedInfo {
+  type: 'panel' | 'sftp';
+  label: string;
+  panelUrl: string | null;
+  host: string | null;
+  address: { ip: string; port: number } | null;
+  capabilities: { power: boolean; stats: boolean; liveConsole: boolean };
+  /** Why it can't be reached at all, such as a key that can't be unlocked on this Windows account. */
+  problem: string | null;
+}
+export interface HostedServerChoice {
+  id: string; name: string; description: string; node: string | null;
+  address: { ip: string; port: number } | null; sftp: { host: string; port: number } | null; suspended: boolean; installing: boolean;
+}
+export interface HostedCheck {
+  found: boolean; type: 'panel' | 'sftp'; serverName: string | null; canKeepSecrets: boolean;
+  dataPath?: string; cfgPath?: string; framework?: Framework | null; gamePort?: number;
+  address?: { ip: string; port: number } | null;
+  database?: { host: string; port: number; user: string; name: string; hasPassword: boolean } | null;
+  problems: { level: 'bad' | 'warn' | 'info'; text: string }[];
+}
+export type HostedLogin =
+  | { type: 'panel'; url: string; key: string; serverId?: string }
+  | { type: 'sftp'; host: string; port: number; username: string; password: string };
 
 export interface ProblemLink { kind: 'doc' | 'video' | 'forum'; label: string; url: string }
 export type ProblemAction =
@@ -99,6 +125,8 @@ export interface Overview {
   root?: string | null;
   /** The server's framework, or the one chosen for a new server; null when it isn't known. */
   framework?: Framework | null;
+  /** Set for a hosted server (RocketNode and other hosts); missing for one on this PC. */
+  hosted?: HostedInfo | null;
   /** CityHQ's database tools, for someone's own database: null when the server's own are used. */
   dbTools?: { ready: boolean; progress: { step: string; mb: number | null } | null } | null;
   /** A newer CityHQ that can be installed (only sent to the PC itself). */
@@ -309,6 +337,9 @@ export const api = {
   welcomeUse: (folder: string, txAdminPort?: number) => request<{ root: string; external: boolean; needsTools: boolean }>('POST', '/api/welcome/use', { folder, txAdminPort }),
   welcomeTools: () => request<DbToolsState>('POST', '/api/welcome/tools'),
   welcomeProgress: () => request<WelcomeProgress>('GET', '/api/welcome/progress'),
+  hostedServers: (url: string, key: string) => request<{ url: string; servers: HostedServerChoice[] }>('POST', '/api/welcome/hosted/servers', { url, key }),
+  hostedCheck: (login: HostedLogin) => request<HostedCheck>('POST', '/api/welcome/hosted/check', login),
+  hostedUse: (login: HostedLogin) => request<{ root: string; relaunching: boolean }>('POST', '/api/welcome/hosted/use', login),
   welcomeNew: (folder: string, framework: Framework) => request<NewServerJob>('POST', '/api/welcome/new', { folder, framework }),
   welcomeRelaunch: () => request<{ relaunching: boolean }>('POST', '/api/welcome/relaunch'),
   welcomeForget: () => request<{ relaunching: boolean }>('POST', '/api/welcome/forget'),

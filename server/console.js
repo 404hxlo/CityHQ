@@ -31,8 +31,13 @@ export function classify(line) {
   return 'info';
 }
 
+// A hosted server's console comes from its panel or its log over SFTP (remote/runtime.js).
+let hostedConsole = null;
+export const setConsoleSource = (fn) => { hostedConsole = fn; };
+
 /** Returns new log text after byte offset since. Pass nothing for the recent tail. */
 export async function readConsole(since) {
+  if (hostedConsole) return hostedConsole(since);
   if (!existsSync(FXSERVER_LOG)) return { offset: 0, lines: [], reset: false };
   const { size } = await stat(FXSERVER_LOG);
   let start = Number.isFinite(since) && since >= 0 ? since : Math.max(0, size - INITIAL_BYTES);

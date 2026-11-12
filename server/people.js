@@ -8,7 +8,8 @@ import { promisify } from 'node:util';
 import { VALID_IDENTIFIER } from './admins.js';
 import { connectionStringOf, parseConnection, readCfg } from './cfg.js';
 import { clientArgs, clientEnv, dbClient } from './dbtools.js';
-import { findServerData, STATE_DIR } from './paths.js';
+import { agentRequest } from './agent.js';
+import { findServerData, REMOTE, STATE_DIR } from './paths.js';
 import { replaceFileSync } from './retry.js';
 
 const exec = promisify(execFile);
@@ -48,6 +49,9 @@ export function parseBatch(stdout) {
 }
 
 async function query(sql) {
+  // A hosted server's database usually only answers the host's own machines, so its helper
+  // reads the same list (a fixed query on its side).
+  if (REMOTE) return agentRequest('/known-players', { timeoutMs: 15000 });
   const server = findServerData();
   if (!server) return [];
   const conn = parseConnection(connectionStringOf(await readCfg(server.cfgPath)));

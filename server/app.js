@@ -56,8 +56,11 @@ import {
   listFiles, listVersions, readEditable, restoreVersion, saveContent, saveFields,
 } from './files.js';
 import {
-  APP_DIR, APP_PORT, FXSERVER_DIR, GAME_PORT, findServerData, HttpError, LOG_DIR, MANAGED_DB, ROOT, ROOT_FOUND, ROOT_SOURCE, TXADMIN_PORT,
+  APP_DIR, APP_PORT, FXSERVER_DIR, GAME_PORT, findServerData, HttpError, LOG_DIR, MANAGED_DB, REMOTE, ROOT, ROOT_FOUND, ROOT_SOURCE, TXADMIN_PORT,
 } from './paths.js';
+import { setHostedBoot } from './remote/resources.js';
+import { registerHostedRoutes } from './remote/routes.js';
+import { startRemote, stopRemote } from './remote/runtime.js';
 import { repairMovedFolder } from './relocate.js';
 import {
   ensureDatabase, getProcessState, isPortOpen, startProbe, startTxAdmin, stopProbe,
@@ -145,12 +148,15 @@ function buildApp() {
   }));
 
   api.use(requireSession);
+  // A hosted server answers some routes its own way, and some not yet (remote/routes.js).
+  registerHostedRoutes(api, { json, handler, localOnly, relaunchSoon: () => relaunchSoon() });
 
   // Overview and server power
   api.get('/overview', handler(async (req) => {
     const overview = getOverview();
-    // Count the same resources the Resources page lists, not FXServer's internal ones.
-    if (overview.status) {
+    // Count the same resources the Resources page lists, not FXServer's internal ones. (A hosted
+    // server's count comes from its helper's own status.)
+    if (overview.status && !REMOTE) {
       const counts = await resourceCounts().catch(() => null);
       if (counts) Object.assign(overview.status, counts);
     }
@@ -162,10 +168,11 @@ function buildApp() {
       // Shown on "Finish setting up", so someone can tell it's the server they meant.
       root: isLocalRequest(req) ? ROOT : null,
       framework: currentFramework(),
-      dbTools: MANAGED_DB ? null : { ready: dbToolsReady(), progress: dbToolsProgress() },
+      dbTools: MANAGED_DB || REMOTE ? null : { ready: dbToolsReady(), progress: dbToolsProgress() },
       // A newer CityHQ, shown at the top of every page. Only on the PC, where it can be installed.
       update: isLocalRequest(req) ? updateNotice() : null,
-      problems: await currentProblems().catch(() => []),
+      // Finding problems in a hosted server's files comes in a later version.
+      problems: REMOTE ? [] : await currentProblems().catch(() => []),
       alerts: unseenAlerts().slice(0, 5),
       schedule: {
         pendingRestart: getPendingRestart(),
@@ -730,6 +737,22 @@ export async function startApp() {
     startUpdateChecks();
     return { port: APP_PORT, url: `http://127.0.0.1:${APP_PORT}` };
   }
+  // A hosted server: nothing runs on this PC to watch, keep awake or start after a crash; the
+  // host does that. Its state, console, files and helper are reached through the host.
+  if (REMOTE) {
+    await startRemote();
+    registerUndo('boot', async ({ name, enabled }) => {
+      await setHostedBoot(name, enabled, { record: false });
+      return enabled ? `${name} starts with the server again.` : `${name} no longer starts with the server.`;
+    });
+    startStatusPolling();
+    mainServer = await listen(appInstance, '127.0.0.1');
+    await applyLanSetting();
+    startScheduler();
+    startStats();
+    startUpdateChecks();
+    return { port: APP_PORT, url: `http://127.0.0.1:${APP_PORT}` };
+  }
   // If the whole folder was copied to another drive or PC, point its settings at the new place.
   const moved = await repairMovedFolder();
   if (moved.length) recordEvent({ title: 'The server folder has moved', detail: `Updated the ${moved.join(' and ')} to match its new location.` });
@@ -759,6 +782,7 @@ export async function stopApp() {
   stopStatusPolling();
   stopProbe();
   stopUpdateChecks();
+  if (REMOTE) stopRemote();
   await Promise.all([mainServer, ...lanServers].filter(Boolean).map((s) => new Promise((r) => {
     s.close(() => r());
     s.closeAllConnections?.();

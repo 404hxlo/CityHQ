@@ -8,10 +8,17 @@ import { getSettings } from './settings.js';
 const AGENT_SOURCE = process.env.QBC_AGENT_SOURCE || path.join(APP_DIR, 'agent-resource', 'qb-control');
 const BASE = `http://127.0.0.1:${GAME_PORT}/qb-control`;
 
+// A hosted server's helper is reached at its HTTPS address (remote/runtime.js sets this).
+let hostedBase = null;
+export const setAgentBase = (fn) => { hostedBase = fn; };
+
 export async function agentRequest(route, { method = 'GET', body, timeoutMs = 4000 } = {}) {
+  const base = hostedBase ? `${await hostedBase()}/qb-control` : BASE;
+  // Over the internet things take longer than on this PC.
+  if (hostedBase) timeoutMs = Math.max(timeoutMs, 10000);
   let res;
   try {
-    res = await fetch(`${BASE}${route}`, {
+    res = await fetch(`${base}${route}`, {
       method,
       headers: { 'x-qbc-token': getSettings().agentToken, 'Content-Type': 'application/json' },
       // FXServer only signals a POST body once data arrives, so always send one.
@@ -46,6 +53,8 @@ const versionOf = (dir) => {
 
 /** Copies the resource into the server if it is missing or outdated. True when it changed. */
 export async function installAgent() {
+  // A hosted server's helper is put in place through the host (remote/helper.js).
+  if (hostedBase) return { installed: true, changed: false };
   const server = findServerData();
   if (!server) return { installed: false, reason: 'Server is not deployed yet' };
   const target = path.join(server.dataPath, 'resources', '[local]', 'qb-control');

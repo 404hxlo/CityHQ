@@ -18,7 +18,7 @@ import { replaceFile } from './retry.js';
 
 const shownPath = (scope, rel) => (scope === SERVER_SCOPE || scope === DATA_SCOPE ? rel : `${scope}/${rel}`);
 const FILE_UNDO_HINT = 'This puts the file back to how it was just before this change. Later changes to the same file are undone too.';
-const recordFileChange = (scope, rel, versionId, title) => recordChange({
+export const recordFileChange = (scope, rel, versionId, title) => recordChange({
   kind: 'file', title: title || `Changed ${shownPath(scope, rel)}`, undo: versionId ? { type: 'file-version', scope, rel, versionId } : null, undoHint: FILE_UNDO_HINT,
 });
 
@@ -33,7 +33,7 @@ export const MAX_EDIT_BYTES = 2 * 1024 * 1024;
 const MAX_TREE_ENTRIES = 1500;
 const MAX_VERSIONS = 25;
 
-const etagOf = (text) => createHash('sha256').update(text).digest('hex').slice(0, 16);
+export const etagOf = (text) => createHash('sha256').update(text).digest('hex').slice(0, 16);
 
 /**
  * Windows opens `name.`, `name ` and `name::$DATA` as if they were `name`, which could slip
@@ -73,7 +73,7 @@ export const isCfgLike = (full) => /\.cfg(\.|$)/i.test(path.basename(realName(fu
 const SECRET_VALUE = /cfxk_[A-Za-z0-9_]{8,}|mysql:\/\/[^:\s"'/]+:[^@\s"']+@/;
 export const hasSecretValue = (text) => SECRET_VALUE.test(text);
 
-const scrub = (text) => text
+export const scrub = (text) => text
   .replace(/cfxk_[A-Za-z0-9_]{8,}/g, 'cfxk_(hidden)')
   .replace(/(mysql:\/\/[^:\s"'/]+:)[^@\s"']+@/g, '$1(hidden)@');
 
@@ -162,7 +162,7 @@ function rank(p) {
 
 const isConfigFile = (rel) => /(^|\/)[^/]*(config|settings)[^/]*\.lua$/i.test(rel);
 
-function fieldsFor(scope, rel, text) {
+export function fieldsFor(scope, rel, text) {
   if (scope === SERVER_SCOPE) return { kind: 'cfg', fields: parseCfgFields(text) };
   if (isConfigFile(rel)) return { kind: 'lua', fields: parseLuaFields(text) };
   return { kind: null, fields: [] };
@@ -201,7 +201,7 @@ export async function readEditable(scope, rel) {
   };
 }
 
-const backupDirFor = (scope, rel) => {
+export const backupDirFor = (scope, rel) => {
   const key = createHash('sha1').update(`${scope}/${rel}`).digest('hex').slice(0, 12);
   return path.join(BACKUP_DIR, `${scope}--${path.basename(rel)}--${key}`);
 };
@@ -222,7 +222,7 @@ async function backup(scope, rel, full) {
  * Looks for a typo before saving. Lua is compiled by the running server itself, so FiveM's own
  * extensions are understood and there are no false alarms. With the server off, it can't check.
  */
-async function findMistake(full, text) {
+export async function findMistake(full, text) {
   const ext = path.extname(realName(full)).toLowerCase();
   if (ext === '.json') {
     try {
@@ -246,7 +246,7 @@ async function findMistake(full, text) {
   return { checked: false };
 }
 
-function refuseMistake(check, force) {
+export function refuseMistake(check, force) {
   if (force || !check.plain) return;
   throw new HttpError(422, check.line ? `Line ${check.line}: ${check.plain}` : check.plain, {
     syntax: { line: check.line, message: check.message, plain: check.plain },

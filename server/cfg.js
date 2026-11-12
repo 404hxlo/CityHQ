@@ -19,9 +19,13 @@ export const SECRET_MASK = '(hidden - leave this as is to keep the current value
 
 const EOL = (text) => (text.includes('\r\n') ? '\r\n' : '\n');
 
-export const readCfg = (cfgPath) => readFile(cfgPath, 'utf8');
+// A hosted server's server.cfg is read and written through the host instead (remote/runtime.js).
+let hostedIo = null;
+export const setCfgIo = (io) => { hostedIo = io; };
 
-export const writeCfg = (cfgPath, text) => replaceFile(cfgPath, text);
+export const readCfg = (cfgPath) => (hostedIo ? hostedIo.read(cfgPath) : readFile(cfgPath, 'utf8'));
+
+export const writeCfg = (cfgPath, text) => (hostedIo ? hostedIo.write(cfgPath, text) : replaceFile(cfgPath, text));
 
 function splitComment(line) {
   let quote = null;

@@ -7,7 +7,7 @@ import { serverFramework } from './framework.js';
 import { agentRequest } from './agent.js';
 import { readCfg } from './cfg.js';
 import { isSecondary } from './desktop.js';
-import { findServerData, STATE_DIR } from './paths.js';
+import { findServerData, REMOTE, STATE_DIR } from './paths.js';
 import { rememberIdentifiers } from './people.js';
 import { getProcessState } from './processes.js';
 import { replaceFileSync } from './retry.js';
@@ -115,10 +115,11 @@ async function poll() {
   polling = true;
   try {
     loadAll();
-    const game = getProcessState().game;
+    // A hosted server has no process here; its helper answering is what tells.
+    const game = REMOTE ? true : getProcessState().game;
     let players = null;
     if (game) {
-      try { players = await agentRequest('/players', { timeoutMs: 3000 }); } catch { players = null; }
+      try { players = await agentRequest('/players', { timeoutMs: REMOTE ? 10000 : 3000 }); } catch { players = null; }
     }
     const now = Date.now();
     // While the server runs but the helper doesn't answer (still booting, or busy), the count is

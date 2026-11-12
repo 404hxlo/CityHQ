@@ -33,12 +33,18 @@ The first time, CityHQ asks: **Do you already have a FiveM server?**
   FiveM's server and a private database that only your PC can reach. Then it starts txAdmin, shows
   its PIN, and tells you exactly which recipe to choose.
 
+- **It's hosted.** For a server rented from a host such as RocketNode. Connect with your panel's API
+  key (Pterodactyl-style panels: **Account**, then **API Credentials**) or with SFTP. CityHQ adds its
+  helper to the server, which starts at the server's next restart. Your key stays on your PC, locked
+  with Windows' own protection. Health, Backups, finding problems and installing scripts aren't
+  available for hosted servers yet.
+
 You can switch to a different server later under **Settings**, then **Change server**.
 
 ## What you need
 
 - Windows 10 or 11, 64-bit
-- A QBCore or Qbox server run with txAdmin, or about 4 GB of free space for a new one
+- A QBCore or Qbox server run with txAdmin (on this PC or at a host), or about 4 GB of free space for a new one
 - For a new server, a free FiveM license key from <https://portal.cfx.re> (txAdmin asks for it)
 - **Smart App Control turned off.** It blocks an unsigned file inside FiveM's own server, so no
   FiveM server can start while it is on. Check it under Windows Security, then App & browser

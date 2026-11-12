@@ -1,11 +1,11 @@
 import {
-  AlertTriangle, ArrowLeft, CheckCircle2, Database, FolderOpen, FolderSearch, Hammer, Info, Loader2, PlugZap, RefreshCw, Server, XCircle,
+  AlertTriangle, ArrowLeft, CheckCircle2, Database, FolderOpen, FolderSearch, Globe, Hammer, Info, Loader2, PlugZap, RefreshCw, Server, XCircle,
 } from 'lucide-react';
 import {
   useCallback, useEffect, useRef, useState, type ReactNode,
 } from 'react';
 import {
-  api, FRAMEWORK_NAME, type Framework, type NewServerJob, type ServerCandidate, type WelcomeInfo,
+  api, FRAMEWORK_NAME, type Framework, type HostedCheck, type HostedLogin, type HostedServerChoice, type NewServerJob, type ServerCandidate, type WelcomeInfo,
 } from '../api';
 import { ReportButton } from '../Report';
 import { Term } from '../Term';
@@ -19,6 +19,7 @@ type Step =
   | { kind: 'review'; candidate: ServerCandidate }
   | { kind: 'connecting'; root: string; needsTools: boolean }
   | { kind: 'new' }
+  | { kind: 'hosted' }
   | { kind: 'restarting'; text: string };
 
 const LEVEL_ICON: Record<ServerCandidate['problems'][number]['level'], ReactNode> = {
@@ -292,6 +293,139 @@ function NewServer({ info, onBack, onBuilt }: { info: WelcomeInfo; onBack: () =>
   );
 }
 
+/**
+ * A server rented from a host: log in with the panel's API key (or SFTP), pick the server, see
+ * what CityHQ found, then connect. The key stays on this PC, locked with Windows' protection.
+ */
+function HostedConnect({ onBack, onRestart }: { onBack: () => void; onRestart: (text: string) => void }) {
+  const [mode, setMode] = useState<'panel' | 'sftp'>('panel');
+  const [url, setUrl] = useState('');
+  const [key, setKey] = useState('');
+  const [sftp, setSftp] = useState({ host: '', port: '2022', username: '', password: '' });
+  const [servers, setServers] = useState<HostedServerChoice[] | null>(null);
+  const [login, setLogin] = useState<HostedLogin | null>(null);
+  const [found, setFound] = useState<HostedCheck | null>(null);
+  const { busy, run } = useAction();
+
+  const findServers = async () => {
+    const r = await run('servers', () => api.hostedServers(url.trim(), key.trim()));
+    if (!r) return;
+    setUrl(r.url);
+    setServers(r.servers);
+    if (r.servers.length === 1) await check({ type: 'panel', url: r.url, key: key.trim(), serverId: r.servers[0].id });
+  };
+  const check = async (next: HostedLogin) => {
+    const r = await run('check', () => api.hostedCheck(next));
+    if (r) { setLogin(next); setFound(r); }
+  };
+  const connect = async () => {
+    if (!login) return;
+    const r = await run('use', () => api.hostedUse(login));
+    if (r) onRestart(r.relaunching ? 'CityHQ is starting again on your hosted server. This window closes and opens by itself in a few seconds.' : 'Close CityHQ (right-click its tray icon and choose Quit), then open it again.');
+  };
+
+  if (found && login) {
+    const blocked = !found.found;
+    return (
+      <section className="welcome-card">
+        <button type="button" className="link-plain welcome-back" onClick={() => { setFound(null); setLogin(null); }}><ArrowLeft size={15} />Back</button>
+        <h2>{found.found ? 'This is what CityHQ found' : 'CityHQ couldn\'t find the server\'s files'}</h2>
+        <dl className="path-list welcome-facts">
+          <dt>Server</dt><dd>{found.serverName || 'Hosted server'}</dd>
+          {found.address && <><dt>Address</dt><dd>{found.address.ip}:{found.address.port}</dd></>}
+          {found.cfgPath && <><dt>server.cfg</dt><dd>{found.cfgPath}</dd></>}
+          {found.framework && <><dt>Framework</dt><dd>{FRAMEWORK_NAME[found.framework]}</dd></>}
+          {found.database && <><dt>Database</dt><dd>{found.database.name || '(no name)'} on {found.database.host}:{found.database.port}</dd></>}
+        </dl>
+        <Problems items={found.problems} />
+        {!blocked && (
+          <p className="muted-note">
+            Connecting adds CityHQ's small helper script (qb-control) to your server and a few marked lines to server.cfg. The helper
+            starts at the server's next restart; until then, power, the console and files work. Your {login.type === 'panel' ? 'API key' : 'password'} stays
+            on this PC, locked with Windows' own protection.
+          </p>
+        )}
+        {!found.canKeepSecrets && <Notice kind="error">Hosted servers need the CityHQ desktop app on Windows, which can lock your key safely.</Notice>}
+        <div className="welcome-actions">
+          <Button variant="primary" icon={<PlugZap size={15} />} busy={busy === 'use'} disabled={blocked || !found.canKeepSecrets} onClick={connect}>Connect CityHQ to this server</Button>
+        </div>
+      </section>
+    );
+  }
+
+  if (servers && servers.length > 1) {
+    return (
+      <section className="welcome-card">
+        <button type="button" className="link-plain welcome-back" onClick={() => setServers(null)}><ArrowLeft size={15} />Back</button>
+        <h2>Which server is it?</h2>
+        <ul className="candidate-list">
+          {servers.map((s) => (
+            <li key={s.id} className="candidate">
+              <div className="candidate-main">
+                <Server size={18} />
+                <div>
+                  <strong className="candidate-path">{s.name}</strong>
+                  <span className="muted-note">{s.address ? `${s.address.ip}:${s.address.port}` : s.id}{s.suspended ? ' · suspended' : ''}{s.installing ? ' · installing' : ''}</span>
+                </div>
+              </div>
+              <Button variant="primary" busy={busy === 'check'} disabled={s.suspended} onClick={() => check({ type: 'panel', url, key: key.trim(), serverId: s.id })}>Use this one</Button>
+            </li>
+          ))}
+        </ul>
+      </section>
+    );
+  }
+
+  return (
+    <section className="welcome-card">
+      <button type="button" className="link-plain welcome-back" onClick={onBack}><ArrowLeft size={15} />Back</button>
+      <h2>Connect your hosted server</h2>
+      <div className="segmented" role="group" aria-label="How to connect">
+        <button type="button" className={mode === 'panel' ? 'active' : ''} aria-pressed={mode === 'panel'} onClick={() => setMode('panel')}>Panel API key</button>
+        <button type="button" className={mode === 'sftp' ? 'active' : ''} aria-pressed={mode === 'sftp'} onClick={() => setMode('sftp')}>SFTP</button>
+      </div>
+      {mode === 'panel' ? (
+        <>
+          <p className="muted-note">
+            For hosts with a game panel like RocketNode's (most Pterodactyl-style panels). In your panel, open <strong>Account</strong>, then <strong>API Credentials</strong>,
+            create a key (any name), and copy it. The panel shows it only once.
+          </p>
+          <label className="input-label" htmlFor="panel-url">Your panel's address</label>
+          <input id="panel-url" className="input" placeholder="https://panel.yourhost.com" value={url} onChange={(e) => setUrl(e.target.value)} spellCheck={false} autoComplete="off" />
+          <label className="input-label" htmlFor="panel-key">API key</label>
+          <input id="panel-key" className="input" type="password" placeholder="ptlc_..." value={key} onChange={(e) => setKey(e.target.value)} spellCheck={false} autoComplete="off" />
+          <div className="welcome-actions">
+            <Button variant="primary" busy={busy === 'servers' || busy === 'check'} disabled={!url.trim() || !key.trim()} onClick={findServers}>Find my servers</Button>
+          </div>
+        </>
+      ) : (
+        <>
+          <p className="muted-note">
+            For any host that gives you SFTP. Your host's panel shows the address, port and username (often under <strong>Settings</strong> or <strong>SFTP details</strong>); the password
+            is usually your panel password. With SFTP only, start and stop the server from your host's panel.
+          </p>
+          <div className="input-row wrap">
+            <input className="input" aria-label="SFTP address" placeholder="gs3.yourhost.net" value={sftp.host} onChange={(e) => setSftp({ ...sftp, host: e.target.value })} spellCheck={false} autoComplete="off" />
+            <input className="input input-number small" aria-label="Port" type="number" min={1} max={65535} value={sftp.port} onChange={(e) => setSftp({ ...sftp, port: e.target.value })} />
+          </div>
+          <input className="input" aria-label="SFTP username" placeholder="Username, like name.1a2b3c4d" value={sftp.username} onChange={(e) => setSftp({ ...sftp, username: e.target.value })} spellCheck={false} autoComplete="off" />
+          <input className="input" aria-label="SFTP password" type="password" placeholder="Password" value={sftp.password} onChange={(e) => setSftp({ ...sftp, password: e.target.value })} autoComplete="off" />
+          <div className="welcome-actions">
+            <Button
+              variant="primary"
+              busy={busy === 'check'}
+              disabled={!sftp.host.trim() || !sftp.username.trim() || !sftp.password}
+              onClick={() => check({ type: 'sftp', host: sftp.host.trim(), port: Number(sftp.port) || 22, username: sftp.username.trim(), password: sftp.password })}
+            >
+              Look at the server
+            </Button>
+          </div>
+        </>
+      )}
+    </section>
+  );
+}
+
 /** The first thing a downloaded CityHQ shows: connect to a server, or build one. */
 export function Welcome({ local }: { local: boolean }) {
   const [info, setInfo] = useState<WelcomeInfo | null>(null);
@@ -335,6 +469,11 @@ export function Welcome({ local }: { local: boolean }) {
             <strong>No, make me one</strong>
             <span>CityHQ builds a new QBCore or Qbox server in one folder, with its own database, then walks you through txAdmin's setup.</span>
           </button>
+          <button type="button" className="choice" onClick={() => setStep({ kind: 'hosted' })}>
+            <Globe size={26} />
+            <strong>It's hosted (RocketNode, other hosts)</strong>
+            <span>Your server runs at a hosting company. CityHQ connects through your host's panel or SFTP, so you can run it from this PC and your phone.</span>
+          </button>
         </div>
         <p className="muted-note welcome-db-note"><Database size={14} />CityHQ is made for QBCore and Qbox servers that run with txAdmin.</p>
       </section>
@@ -345,6 +484,8 @@ export function Welcome({ local }: { local: boolean }) {
     body = <Review c={step.candidate} onBack={() => setStep({ kind: 'find' })} onConnect={(port) => connect(step.candidate, port)} />;
   } else if (step.kind === 'connecting') {
     body = <Connecting needsTools={step.needsTools} onRestart={(text) => setStep({ kind: 'restarting', text })} />;
+  } else if (step.kind === 'hosted') {
+    body = <HostedConnect onBack={() => setStep({ kind: 'start' })} onRestart={(text) => setStep({ kind: 'restarting', text })} />;
   } else if (step.kind === 'new') {
     body = <NewServer info={info} onBack={() => setStep({ kind: 'start' })} onBuilt={restartAfterBuild} />;
   } else {

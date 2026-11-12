@@ -238,7 +238,7 @@ export function Overview({ data, error, refresh, local, goTo }: Props) {
     if (action === 'stop') {
       const ok = await confirm({
         title: 'Stop the server?',
-        body: <>{playerWarning}<p>txAdmin stops too. Use Start here to bring both back.</p></>,
+        body: <>{playerWarning}<p>{data?.hosted ? 'Your host stops the server. Use Start here to bring it back.' : 'txAdmin stops too. Use Start here to bring both back.'}</p></>,
         confirm: 'Stop server',
         danger: true,
       });
@@ -257,9 +257,13 @@ export function Overview({ data, error, refresh, local, goTo }: Props) {
   if (!data.deployed) return <FinishTxAdmin data={data} local={local} />;
 
   const { state, status, stats, history } = data;
+  const hosted = data.hosted || null;
   const isBusy = Boolean(busy) || ['starting', 'stopping', 'restarting', 'restoring'].includes(state);
-  const canStart = state === 'stopped' || state === 'panel-only';
-  const connectAddress = `localhost:${data.gamePort}`;
+  // Without the host's panel API, CityHQ can restart a hosted server (through the server itself)
+  // but not start or stop it.
+  const canPower = !hosted || hosted.capabilities.power;
+  const canStart = canPower && (state === 'stopped' || state === 'panel-only');
+  const connectAddress = hosted?.address ? `${hosted.address.ip}:${hosted.address.port}` : `localhost:${data.gamePort}`;
   const d: Dashboard | null = dash.data;
   const name = d?.greetingName || '';
 
@@ -298,6 +302,9 @@ export function Overview({ data, error, refresh, local, goTo }: Props) {
     stopping: 'Saving players and shutting down.',
     stopped: 'The server is off. Start it whenever you are ready.',
     'panel-only': 'txAdmin is running, but the game server is off.',
+    unreachable: hosted?.capabilities.power === false
+      ? 'CityHQ can\'t reach the server right now. It may be off: start it from your host\'s panel.'
+      : 'CityHQ can\'t reach your host right now.',
   }[state];
 
   return (
@@ -327,10 +334,11 @@ export function Overview({ data, error, refresh, local, goTo }: Props) {
               <Button variant="primary" icon={<Play size={16} />} busy={busy === 'start'} disabled={isBusy} onClick={() => power('start')}>Start server</Button>
             ) : (
               <>
-                <Button variant="primary" icon={<RotateCw size={16} />} busy={busy === 'restart'} disabled={isBusy} onClick={() => setAskRestart(true)}>Restart</Button>
-                <Button icon={<Square size={15} />} busy={busy === 'stop'} disabled={isBusy} onClick={() => power('stop')}>Stop</Button>
+                <Button variant="primary" icon={<RotateCw size={16} />} busy={busy === 'restart'} disabled={isBusy || (!canPower && !online)} onClick={() => setAskRestart(true)}>Restart</Button>
+                {canPower && <Button icon={<Square size={15} />} busy={busy === 'stop'} disabled={isBusy} onClick={() => power('stop')}>Stop</Button>}
               </>
             )}
+            {hosted?.panelUrl && !canPower && <a className="btn btn-default" href={hosted.panelUrl} target="_blank" rel="noreferrer">Open your host's panel</a>}
             <Button icon={<Megaphone size={15} />} disabled={!online} onClick={() => setAnnouncing(true)}>Announce</Button>
           </div>
         </div>
@@ -342,6 +350,12 @@ export function Overview({ data, error, refresh, local, goTo }: Props) {
       </section>
 
       {error && <Notice kind="error">{error}</Notice>}
+      {hosted?.problem && <Notice kind="error">{hosted.problem}</Notice>}
+      {hosted && !hosted.problem && online && !status && (
+        <Notice kind="info">
+          Your server is running, but CityHQ's helper on it hasn't answered yet. It starts at the server's next restart, so the player and city tools work after that.
+        </Notice>
+      )}
       {!data.processes.database && !canStart && (
         <Notice kind="error">
           The database is not running, so {frameworkName(data.framework)} cannot save anything.
@@ -534,14 +548,15 @@ export function Overview({ data, error, refresh, local, goTo }: Props) {
           minTop={1}
           niceStep={0.5}
           current={online ? formatBytes(stats.memBytes) : '-'}
-          detail={`Whole PC: ${formatBytes(stats.sysMemUsed)} of ${formatBytes(stats.sysMemTotal)}`}
+          detail={stats.sysMemTotal ? `Whole PC: ${formatBytes(stats.sysMemUsed)} of ${formatBytes(stats.sysMemTotal)}` : hosted ? `On ${hosted.label}` : undefined}
         />
       </div>
 
       {local && (
         <div className="link-row">
           <a className="btn btn-default" href={`fivem://connect/${connectAddress}`} target="_blank" rel="noreferrer"><Gamepad2 size={16} /><span>Open in FiveM</span></a>
-          <a className="btn btn-ghost" href={`http://localhost:${data.txAdminPort}`} target="_blank" rel="noreferrer"><ExternalLink size={16} /><span>Open txAdmin</span></a>
+          {!hosted && <a className="btn btn-ghost" href={`http://localhost:${data.txAdminPort}`} target="_blank" rel="noreferrer"><ExternalLink size={16} /><span>Open txAdmin</span></a>}
+          {hosted?.panelUrl && <a className="btn btn-ghost" href={hosted.panelUrl} target="_blank" rel="noreferrer"><ExternalLink size={16} /><span>Open your host's panel</span></a>}
         </div>
       )}
 
