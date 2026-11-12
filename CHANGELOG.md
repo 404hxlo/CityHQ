@@ -2,6 +2,15 @@
 
 Each version's section is shown in the app before it updates, and on its GitHub release page.
 
+## 1.5.0
+
+- Move to a host: under Settings, CityHQ moves the server on this PC to one you rent (RocketNode and other hosts). It takes every resource, maps and cars included, plus the database and server.cfg.
+- Before anything changes, it checks the space on your host, the database, and whether your resources are already uploaded.
+- The upload picks up where it stopped if the internet drops or CityHQ closes, and the PC is kept awake while it runs.
+- With a panel API key, your host unpacks the resources itself, which is much faster. With SFTP only, files go up one by one.
+- You finish the move yourself, when nobody is on. CityHQ stops the server here, copies the database and settings, starts it on your host and switches over.
+- Your server on this PC is never deleted. The host's old resources and server.cfg are kept as copies too.
+
 ## 1.4.1
 
 - Hosted servers: the join address is your server's Cfx.re join link (or your host's address), not "localhost".

@@ -1,5 +1,5 @@
 import {
-  BookOpen, Compass, ExternalLink, FolderOpen, KeyRound, LogOut, Plus, QrCode, RefreshCw, Repeat, Server, Smartphone, Timer, X,
+  BookOpen, CloudUpload, Compass, ExternalLink, FolderOpen, KeyRound, LogOut, Plus, QrCode, RefreshCw, Repeat, Server, Smartphone, Timer, X,
 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import {
@@ -293,6 +293,17 @@ export function SettingsPage({ online, onSignOut }: { online: boolean; onSignOut
             {data.rootSource === 'saved' && data.desktop && <Button icon={<Repeat size={15} />} onClick={changeServer}>Change server</Button>}
           </div>
           {data.rootSource === 'folder' && <p className="muted-note">This copy of CityHQ is installed inside the server folder, so it always manages this server.</p>}
+        </section>
+      )}
+
+      {data.local && data.desktop && !data.hosted && (
+        <section className="card">
+          <h3 className="card-title"><CloudUpload size={16} />Move to a host</h3>
+          <p className="muted-note">
+            Rent a server from a host such as RocketNode and CityHQ moves this one there: every resource (maps and cars too), the database and
+            server.cfg. It picks up where it stopped if your internet drops, and your server here stays as it is, as a fallback.
+          </p>
+          <div className="button-row"><a className="btn btn-default" href="#move"><CloudUpload size={16} /><span>Move to a host</span></a></div>
         </section>
       )}
     </div>

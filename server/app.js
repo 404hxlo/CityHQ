@@ -646,6 +646,8 @@ function buildApp() {
       paths: local ? { root: ROOT, fxserver: FXSERVER_DIR, serverData: server?.dataPath || null } : null,
       // 'saved' means the server was chosen on the Welcome screen, so Settings can change it.
       rootSource: ROOT_SOURCE,
+      // A hosted server can't be moved again from here (Move to a host is for servers on this PC).
+      hosted: Boolean(REMOTE),
       databaseManaged: MANAGED_DB,
       desktop: local && Boolean(desktop()),
       gamePort: GAME_PORT,

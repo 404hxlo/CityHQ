@@ -1,6 +1,7 @@
 // Files on a hosted server over SFTP: works with almost any host (Pterodactyl panels serve it on
 // port 2022 with the panel login). One connection, opened when needed and closed after a quiet
 // minute. Every path is the host's, with / separators, and stays inside the login's folder.
+import { open as fsOpen, stat as fsStat } from 'node:fs/promises';
 import path from 'node:path';
 import { Client } from 'ssh2';
 import { HttpError } from '../paths.js';
@@ -31,7 +32,7 @@ export function sftpClient({ host, port = 22, username, password, hostKey = null
     try { conn?.end(); } catch { /* ignore */ }
     conn = null; sftp = null; opening = null;
   };
-  const touch = () => { clearTimeout(idle); idle = setTimeout(close, IDLE_MS); };
+  const touch = () => { clearTimeout(idle); idle = setTimeout(() => { if (!busy) close(); }, IDLE_MS); };
 
   function open() {
     if (sftp) { touch(); return Promise.resolve(sftp); }
@@ -125,8 +126,93 @@ export function sftpClient({ host, port = 22, username, password, hostKey = null
     }
   }
 
+  // A long upload must not be cut by the idle timer.
+  let busy = 0;
+  const hold = () => { busy += 1; clearTimeout(idle); };
+  const release = () => { busy -= 1; if (!busy) touch(); };
+
+  const call = (s, method, ...args) => new Promise((resolve, reject) => s[method](...args, (err, value) => (err ? reject(err) : resolve(value))));
+
+  /**
+   * Sends a local file, continuing from what is already on the host when resume is on (same as
+   * WinSCP's resume), with several chunks in flight at once like ssh2's own fastPut.
+   * onProgress(sent, total) is called as it goes; signal stops it (it can be continued later).
+   */
+  async function uploadFile(local, remote, {
+    resume = true, from = null, onProgress, signal, chunk = 256 * 1024, parallel = 16,
+  } = {}) {
+    const target = remotePath(remote);
+    const total = (await fsStat(local)).size;
+    const s = await open();
+    hold();
+    let input = null;
+    let handle = null;
+    try {
+      // Where to continue: a point CityHQ knows everything before was written (from), else the
+      // size on the host, which is safe for uploads written in order (like WinSCP's).
+      let start = 0;
+      if (resume) {
+        let onHost = 0;
+        try { onHost = (await call(s, 'stat', target)).size; } catch { onHost = 0; }
+        start = Number.isInteger(from) ? Math.min(from, onHost) : onHost;
+        if (start > total) start = 0;
+      }
+      onProgress?.(start, total, start);
+      if (start === total && total > 0) return { sent: total, total, resumedFrom: start, skipped: true };
+      handle = await call(s, 'open', target, start > 0 ? 'r+' : 'w');
+      input = await fsOpen(local, 'r');
+      let position = start;
+      let sent = start;
+      let failure = null;
+      const inFlight = new Map();
+      let failedAt = Infinity;
+      // Everything before the oldest chunk still on its way (or the first that failed) has
+      // arrived: a safe place to resume.
+      const safe = () => Math.min(failedAt, position, ...inFlight.values());
+      while (position < total && !failure) {
+        if (signal?.aborted) { await Promise.all(inFlight.keys()); throw Object.assign(new HttpError(499, 'Paused'), { safe: safe() }); }
+        const length = Math.min(chunk, total - position);
+        const buf = Buffer.allocUnsafe(length);
+        const { bytesRead } = await input.read(buf, 0, length, position);
+        if (!bytesRead) break;
+        const at = position;
+        position += bytesRead;
+        const job = call(s, 'write', handle, buf, 0, bytesRead, at)
+          .then(() => { inFlight.delete(job); sent += bytesRead; onProgress?.(sent, total, safe()); })
+          .catch((err) => { inFlight.delete(job); failedAt = Math.min(failedAt, at); failure ||= err; });
+        inFlight.set(job, at);
+        if (inFlight.size >= parallel) await Promise.race(inFlight.keys());
+      }
+      await Promise.all(inFlight.keys());
+      if (failure) throw Object.assign(new HttpError(502, `The upload stopped: ${failure.message}. Start it again to continue where it left off.`), { safe: safe() });
+      return { sent, total, resumedFrom: start, skipped: false };
+    } finally {
+      await input?.close().catch(() => {});
+      if (handle) await call(s, 'close', handle).catch(() => {});
+      release();
+    }
+  }
+
+  /** The size of a file on the host, or null when it isn't there. */
+  async function sizeOf(p) {
+    try { return (await stat(remotePath(p))).size; } catch { return null; }
+  }
+
+  /** Makes a folder and any missing folders above it. */
+  async function mkdirs(p) {
+    const parts = remotePath(p).split('/').filter(Boolean);
+    let at = '';
+    for (const part of parts) {
+      at += `/${part}`;
+      try { await stat(at); } catch { await wrap((s, x, cb) => s.mkdir(x, cb))(at); }
+    }
+  }
+
   return {
     close,
+    uploadFile,
+    sizeOf,
+    mkdirs,
     files: {
       async list(dir) {
         const entries = await readdir(remotePath(dir));

@@ -1,5 +1,5 @@
 import {
-  Archive, Bell, BookOpen, Boxes, Building2, CircleHelp, ExternalLink, FolderOpen, Gauge, HeartPulse, KeyRound, Settings as SettingsIcon, Terminal, Users,
+  Archive, Bell, BookOpen, Boxes, Building2, CircleHelp, CloudUpload, ExternalLink, FolderOpen, Gauge, HeartPulse, KeyRound, Settings as SettingsIcon, Terminal, Users,
 } from 'lucide-react';
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { api, onSignedOut } from './api';
@@ -10,6 +10,7 @@ import { GlobalSearch } from './Search';
 import { Files } from './pages/Files';
 import { Health } from './pages/Health';
 import { Learn } from './pages/Learn';
+import { Move } from './pages/Move';
 import { Tour } from './Tour';
 import { Overview } from './pages/Overview';
 import { Players } from './pages/Players';
@@ -21,7 +22,7 @@ import {
   Button, ConfirmProvider, Notice, ServerBadge, Spinner, ToastProvider, usePoll,
 } from './ui';
 
-type Page = 'overview' | 'health' | 'city' | 'resources' | 'players' | 'files' | 'backups' | 'console' | 'settings' | 'learn';
+type Page = 'overview' | 'health' | 'city' | 'resources' | 'players' | 'files' | 'backups' | 'console' | 'settings' | 'learn' | 'move';
 const NAV: { id: Page; label: string; icon: ReactNode }[] = [
   { id: 'overview', label: 'Overview', icon: <Gauge size={20} /> },
   { id: 'health', label: 'Health', icon: <HeartPulse size={20} /> },
@@ -37,7 +38,11 @@ const NAV: { id: Page; label: string; icon: ReactNode }[] = [
 const HOSTED_LATER = new Set<Page>(['health', 'backups']);
 
 // Learn isn't in the menu (which is full on phones); it's reached from the ? button, Settings and search.
-const SEARCHABLE = [...NAV, { id: 'learn' as Page, label: 'Learn the basics', icon: <BookOpen size={20} /> }];
+const SEARCHABLE = [
+  ...NAV,
+  { id: 'learn' as Page, label: 'Learn the basics', icon: <BookOpen size={20} /> },
+  { id: 'move' as Page, label: 'Move to a host', icon: <CloudUpload size={20} /> },
+];
 const isPage = (value: string): value is Page => SEARCHABLE.some((n) => n.id === value);
 const pageFromHash = (): Page => {
   const hash = window.location.hash.slice(1);
@@ -181,6 +186,7 @@ function Shell({ local, onSignOut }: { local: boolean; onSignOut: () => void }) 
         {page === 'console' && <Console online={online} />}
         {page === 'settings' && <SettingsPage online={online} onSignOut={onSignOut} />}
         {page === 'learn' && <Learn />}
+        {page === 'move' && (hosted ? <Notice kind="info">This CityHQ runs a hosted server already. Moving works from a server on this PC.</Notice> : local ? <Move /> : <Notice kind="info">Moving a server is done on the PC that runs it.</Notice>)}
       </main>
       <Tour autoStart={Boolean(overview.data?.deployed)} />
     </div>

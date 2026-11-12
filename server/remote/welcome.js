@@ -24,7 +24,7 @@ export async function listPanelServers(body) {
 }
 
 /** What the connection would be, from what the screen sent. Secrets stay on the PC side. */
-function remoteFrom(body) {
+export function remoteFrom(body) {
   if (body?.type === 'panel') {
     const serverId = text(body.serverId, 40);
     if (!/^[A-Za-z0-9-]{4,40}$/.test(serverId)) throw new HttpError(400, 'Choose a server first');

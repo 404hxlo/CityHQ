@@ -1018,3 +1018,13 @@ button.stat-card:hover { border-color: var(--line-strong); }
 .check-row { display: flex; align-items: flex-start; gap: 9px; font-size: 13.5px; line-height: 1.45; cursor: pointer; }
 .check-row input { margin-top: 3px; accent-color: var(--accent); flex: none; }
 .welcome-foot { width: min(760px, 100%); display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 10px; }
+
+/* Move to a host */
+.move-steps { list-style: none; margin: 4px 0 16px; padding: 0; display: grid; gap: 14px; }
+.move-step { display: grid; grid-template-columns: 24px 1fr; gap: 12px; align-items: start; color: var(--ink-soft); }
+.move-step strong { color: var(--ink); font-weight: 600; }
+.move-step.done .move-step-icon { color: var(--good, #4ade80); }
+.move-step.active .move-step-icon { color: var(--accent-text); }
+.move-step .update-progress { margin-top: 8px; }
+.move-dot { display: inline-block; width: 10px; height: 10px; margin: 4px; border-radius: 50%; border: 2px solid var(--line-strong); }
+.move-sub { margin: 14px 0 4px; font-size: 14px; }

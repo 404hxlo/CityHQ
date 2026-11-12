@@ -39,7 +39,10 @@ The first time, CityHQ asks: **Do you already have a FiveM server?**
   with Windows' own protection. Health, Backups, finding problems and installing scripts aren't
   available for hosted servers yet.
 
-You can switch to a different server later under **Settings**, then **Change server**.
+You can switch to a different server later under **Settings**, then **Change server**. To move a
+server from your PC to a host, use **Settings**, then **Move to a host**: CityHQ uploads every
+resource (maps and cars included), the database and server.cfg, and picks up where it stopped if the
+connection drops.
 
 ## What you need
 

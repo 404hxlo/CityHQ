@@ -9,6 +9,9 @@ import {
 import { connection } from './connection.js';
 import { hostedResourceAction, listHostedResources, setHostedBoot } from './resources.js';
 import { checkHosted, listPanelServers, useHosted } from './welcome.js';
+import {
+  cancelMove, checkMove, finishMove, moveStatus, pauseMove, startMove,
+} from '../move/job.js';
 
 // Pages that work on files, processes or Windows on this PC, and so not for a hosted server yet.
 const NOT_YET = [
@@ -26,6 +29,21 @@ export function registerHostedRoutes(api, { json, handler, localOnly, relaunchSo
     const saved = await useHosted(req.body);
     return { ...saved, relaunching: relaunchSoon() };
   }));
+
+  // Moving a server on this PC to a host. The key, passwords and database login stay on the PC.
+  api.post('/move/check', localOnly, json, handler(async (req) => {
+    const { _internal, ...shown } = await checkMove(req.body);
+    return shown;
+  }));
+  api.post('/move/start', localOnly, json, handler((req) => startMove(req.body)));
+  api.post('/move/continue', localOnly, handler(() => startMove({})));
+  api.post('/move/pause', localOnly, handler(() => pauseMove()));
+  api.post('/move/finish', localOnly, json, handler(async (req) => {
+    const done = await finishMove(req.body);
+    return { ...done, relaunching: relaunchSoon() };
+  }));
+  api.post('/move/cancel', localOnly, handler(() => cancelMove()));
+  api.get('/move', localOnly, handler(() => moveStatus()));
 
   if (!REMOTE) return;
 

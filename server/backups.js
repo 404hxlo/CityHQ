@@ -38,7 +38,7 @@ function requireServer() {
   return server;
 }
 
-async function connection(cfgPath) {
+export async function connection(cfgPath) {
   const conn = parseConnection(connectionStringOf(await readCfg(cfgPath)));
   if (!conn?.database || !SAFE_DB.test(conn.database)) throw new HttpError(400, 'Could not read the database settings from server.cfg.');
   return conn;
@@ -67,7 +67,7 @@ function gently(run) {
 export const isRetryableDumpError = (err) => /\b(1412|1205|1213)\b|Table definition has changed|Lock wait timeout|Deadlock found/i
   .test(`${err?.stderr || ''} ${err?.message || ''}`);
 
-async function dumpDatabase(conn, file, { run = exec, wait } = {}) {
+export async function dumpDatabase(conn, file, { run = exec, wait } = {}) {
   try {
     const dump = dbDump();
     await retry(() => gently(run(dump, [
@@ -91,16 +91,16 @@ async function dumpDatabase(conn, file, { run = exec, wait } = {}) {
   }
 }
 
-async function runSql(conn, sql, database) {
+export async function runSql(conn, sql, database) {
   const args = [...clientArgs(conn), '--batch', '--skip-column-names', `--execute=${sql}`];
   if (database) args.push(database);
   const { stdout } = await exec(dbClient(), args, { env: clientEnv(conn), windowsHide: true, timeout: 120_000 });
   return stdout.trim();
 }
 
-const countTables = async (conn, database) => Number(await runSql(conn, `SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = '${database}';`));
+export const countTables = async (conn, database) => Number(await runSql(conn, `SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = '${database}';`));
 
-function importFile(conn, database, file) {
+export function importFile(conn, database, file) {
   return new Promise((resolve, reject) => {
     const child = spawn(dbClient(), [...clientArgs(conn), database], { env: clientEnv(conn), windowsHide: true, stdio: ['pipe', 'ignore', 'pipe'] });
     let stderr = '';

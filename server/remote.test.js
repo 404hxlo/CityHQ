@@ -17,6 +17,9 @@ import { helperAddress, joinLinkOf } from './remote/helper.js';
 import { panelBase, panelClient, panelConsole, serverSummary } from './remote/panel.js';
 import { categoriesOf } from './remote/resources.js';
 import { remotePath, sftpClient } from './remote/sftp.js';
+import {
+  databaseNameFor, execFiles, mergeCfgForHost, preflight,
+} from './move/plan.js';
 import { redact } from './report.js';
 
 const KEY = 'ptlc_TestKey1234567890abcdefghij';
@@ -40,7 +43,7 @@ function fakePanel() {
         const server = (n) => ({ attributes: { identifier: `abcd00${n}`, name: `City ${n}`, node: 'gs3', sftp_details: { ip: 'gs3.example.net', port: 2022 }, relationships: { allocations: { data: [{ attributes: { ip: '10.0.0.1', ip_alias: 'play.example.net', port: 30120, is_default: true } }] } } } });
         return send(200, { data: page === 1 ? [server(1)] : [server(2)], meta: { pagination: { total_pages: 2 } } });
       }
-      if (p === '/api/client/servers/abcd001') return send(200, { attributes: { identifier: 'abcd001', name: 'City 1' } });
+      if (p === '/api/client/servers/abcd001') return send(200, { attributes: { identifier: 'abcd001', name: 'City 1', limits: { disk: 148480, memory: 8192 }, feature_limits: { databases: 2, backups: 3 } } });
       if (p === '/api/client/servers/abcd001/resources') return send(200, { attributes: { current_state: 'running', resources: { cpu_absolute: 12.5, memory_bytes: 1024, uptime: 400000 } } });
       if (p === '/api/client/servers/abcd001/power') { seen.power.push(JSON.parse(body).signal); return send(204, ''); }
       if (p === '/api/client/servers/abcd001/command') { seen.commands.push(JSON.parse(body).command); return send(204, ''); }
@@ -54,6 +57,15 @@ function fakePanel() {
         return f === undefined ? send(404, { errors: [{ detail: 'not found' }] }) : send(200, f, 'text/plain');
       }
       if (p === '/api/client/servers/abcd001/files/write') { files.set(url.searchParams.get('file'), body); return send(204, ''); }
+      if (p === '/api/client/account') return send(200, { attributes: { username: 'mayor' } });
+      if (p === '/api/client/servers/abcd001/files/decompress') { seen.decompress = JSON.parse(body); return send(204, ''); }
+      if (p === '/api/client/servers/abcd001/databases' && req.method === 'GET') {
+        return send(200, { data: [{ attributes: { id: 'db1', name: 's1_city', username: 'u1', host: { address: 'db.example.net', port: 3306 }, connections_from: '%', relationships: { password: { attributes: { password: 'pw1' } } } } }] });
+      }
+      if (p === '/api/client/servers/abcd001/databases' && req.method === 'POST') {
+        const { database } = JSON.parse(body);
+        return send(200, { attributes: { id: 'db2', name: `s1_${database}`, username: 'u2', host: { address: 'db.example.net', port: 3306 }, relationships: { password: { attributes: { password: 'pw2' } } } } });
+      }
       if (p === '/api/client/servers/abcd001/websocket') return send(200, { data: { token: 'tok-1', socket: `ws://127.0.0.1:${server.address().port}/socket` } });
       return send(404, { errors: [{ detail: 'not found' }] });
     });
@@ -270,7 +282,10 @@ function sftpServer() {
           const handle = (value) => { const h = Buffer.alloc(4); h.writeUInt32BE(next++); handles.set(h.toString('hex'), value); return h; };
           s.on('OPEN', (id, p, flags) => {
             try {
-              if (flags & OPEN_MODE.WRITE) writeFileSync(local(p), '');
+              // Only a new file or one opened to be emptied starts empty ('r+' keeps what's there).
+              let exists = true;
+              try { statSync(local(p)); } catch { exists = false; }
+              if ((flags & OPEN_MODE.TRUNC) || ((flags & OPEN_MODE.CREAT) && !exists)) writeFileSync(local(p), '');
               statSync(local(p));
               s.handle(id, handle({ file: local(p) }));
             } catch { s.status(id, STATUS_CODE.NO_SUCH_FILE); }
@@ -368,4 +383,86 @@ test('hosted secrets: a key only becomes a saved file locked by Windows (desktop
     setDesktopHooks(null);
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+// ---------------------------------------------------------------- moving to a host
+test('panel: the account, plan limits, databases with their passwords, and unpacking on the host', async () => {
+  const client = panelClient({ url: panel.url, key: KEY, serverId: 'abcd001' });
+  assert.equal((await client.account()).username, 'mayor');
+  assert.deepEqual(await client.limits(), { diskMb: 148480, memoryMb: 8192, databases: 2, backups: 3 });
+  const [db] = await client.databases.list();
+  assert.deepEqual(db, { id: 'db1', name: 's1_city', username: 'u1', host: 'db.example.net', port: 3306, connectionsFrom: '%', password: 'pw1' });
+  const made = await client.databases.create('midnight');
+  assert.equal(made.name, 's1_midnight');
+  assert.equal(made.password, 'pw2');
+  await client.files.decompress('/', 'resources.zip');
+  assert.deepEqual(panel.seen.decompress, { root: '/', file: 'resources.zip' });
+});
+
+test('sftp: a big upload cut off halfway continues from the last safe point, and ends identical', async () => {
+  const big = path.join(ROOT, 'big-local.bin');
+  const data = randomBytes(3 * 1024 * 1024 + 12345);
+  writeFileSync(big, data);
+  const c = sftpClient(login);
+  try {
+    const stopper = new AbortController();
+    let safe = 0;
+    await assert.rejects(c.uploadFile(big, '/big.bin', {
+      chunk: 64 * 1024, parallel: 8, signal: stopper.signal,
+      onProgress: (sent, total, s) => { safe = s; if (sent > total / 2) stopper.abort(); },
+    }), (err) => err.status === 499 && Number.isInteger(err.safe) && (safe = err.safe, true));
+    assert.ok(safe > 0 && safe < data.length, `stopped part way (${safe})`);
+    const resumed = await c.uploadFile(big, '/big.bin', { from: safe, chunk: 64 * 1024 });
+    assert.equal(resumed.resumedFrom, safe);
+    assert.ok(readFileSync(path.join(ROOT, 'big.bin')).equals(data), 'the file on the host is byte for byte the same');
+    const again = await c.uploadFile(big, '/big.bin');
+    assert.equal(again.skipped, true, 'a finished upload isn\'t sent again');
+    assert.equal(await c.sizeOf('/big.bin'), data.length);
+    await c.mkdirs('/deep/er/folder');
+    assert.equal(await c.files.exists('/deep/er/folder'), true);
+  } finally { c.close(); }
+});
+
+test('the host\'s server.cfg: your settings, the host\'s ports and key, the host\'s database, no CityHQ block', () => {
+  const local = [
+    'endpoint_add_tcp "0.0.0.0:30229"',
+    'endpoint_add_udp "0.0.0.0:30229"',
+    'sv_licenseKey "cfxk_LOCALKEY_abc"',
+    'set mysql_connection_string "mysql://root@127.0.0.1:3319/city"',
+    'sv_hostname "Harbor Town"',
+    'ensure qb-core',
+    'exec permissions.cfg',
+    '# >>> CityHQ (managed by the app, edits here may be replaced)',
+    'add_ace resource.qb-control command allow',
+    'ensure qb-control',
+    '# <<< CityHQ',
+  ].join('\n');
+  const host = 'endpoint_add_tcp "0.0.0.0:30123"\nendpoint_add_udp "0.0.0.0:30123"\nsv_licenseKey "cfxk_HOSTKEY_xyz"\nensure qb-core\n';
+  const out = mergeCfgForHost(local, host, { host: 'db.example.net', port: 3306, username: 'u@2', password: 'p:w', name: 's1_city' }, { when: new Date('2026-11-12T00:00:00Z') });
+  assert.match(out, /endpoint_add_tcp "0\.0\.0\.0:30123"/);
+  assert.doesNotMatch(out, /30229/);
+  assert.match(out, /cfxk_HOSTKEY_xyz/);
+  assert.doesNotMatch(out, /LOCALKEY/);
+  assert.match(out, /set mysql_connection_string "mysql:\/\/u%402:p%3Aw@db\.example\.net:3306\/s1_city\?charset=utf8mb4"/);
+  assert.match(out, /sv_hostname "Harbor Town"/);
+  assert.match(out, /exec permissions\.cfg/);
+  assert.doesNotMatch(out, /qb-control/);
+  // A host whose key lives in txAdmin: no key line on either side afterwards.
+  assert.doesNotMatch(mergeCfgForHost(local, 'endpoint_add_tcp "0.0.0.0:30123"', null), /sv_licenseKey/);
+  assert.deepEqual(execFiles('exec permissions.cfg\nexec "voice.cfg" # chat\nexec resources/[qb]/x.cfg\nexec ../secret.cfg\nexec @qb-core/a.cfg\n# exec old.cfg'), ['permissions.cfg', 'voice.cfg']);
+  assert.equal(databaseNameFor('Midnight-Society DB'), 'midnight_society_db');
+});
+
+test('checks before moving: space, an upload already there, the database', () => {
+  const base = { localCfg: 'x', hostFound: true, resourcesBytes: 34 * 1024 ** 3, localFreeBytes: 500 * 1024 ** 3, database: { name: 's1_city', host: 'db', port: 3306, reachable: true, tables: 0 } };
+  assert.equal(preflight({ ...base, hostDiskLimitBytes: 145 * 1024 ** 3, hostDiskUsedBytes: 1024 ** 3 }).ok, true);
+  const tight = preflight({ ...base, hostDiskLimitBytes: 50 * 1024 ** 3, hostDiskUsedBytes: 0 });
+  assert.equal(tight.ok, false, 'a zip plus its unpacked copy doesn\'t fit');
+  assert.equal(preflight({ ...base, hostDiskLimitBytes: 50 * 1024 ** 3, alreadyUploaded: true }).ok, true, 'with the zip already there it fits');
+  assert.ok(preflight({ ...base, alreadyUploaded: true }).items.some((i) => /already on your host/.test(i.text)));
+  assert.equal(preflight({ ...base, database: { ...base.database, reachable: false } }).ok, false);
+  assert.equal(preflight({ ...base, localFreeBytes: 10 * 1024 ** 3 }).ok, false, 'no room on this PC to pack');
+  assert.equal(preflight({ ...base, localFreeBytes: 10 * 1024 ** 3, localZipReady: true }).ok, true, 'unless a zip is ready');
+  assert.equal(preflight({ ...base, hostFound: false }).ok, false);
+  assert.ok(preflight({ ...base, localMemoryBytes: 7 * 1024 ** 3, hostMemoryLimitBytes: 8 * 1024 ** 3 }).items.some((i) => /run out of memory/.test(i.text)));
 });

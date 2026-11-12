@@ -24,6 +24,37 @@ export interface HostedCheck {
   database?: { host: string; port: number; user: string; name: string; hasPassword: boolean } | null;
   problems: { level: 'bad' | 'warn' | 'info'; text: string }[];
 }
+/** Moving the server on this PC to a host. */
+export type MoveLogin = HostedLogin & {
+  sftpPassword?: string;
+  databaseId?: string;
+  database?: { host: string; port: number; name: string; username: string; password: string };
+  copyPlayersDb?: boolean;
+};
+export interface MoveCheck {
+  ok: boolean;
+  items: { level: 'ok' | 'warn' | 'bad'; text: string }[];
+  target: { type: 'panel' | 'sftp'; name: string | null; address: { ip: string; port: number } | null; dataPath: string | null };
+  resources: { bytes: number; files: number };
+  databases: { id: string; name: string; host: string; port: number; username: string }[];
+  database: { name: string; host: string | null; port: number; create: boolean; reachable: boolean | null; tables: number | null } | null;
+  alreadyUploaded: boolean;
+}
+export interface MoveStatus {
+  phase: null | 'moving' | 'paused' | 'stopped' | 'ready' | 'finishing' | 'done';
+  running?: boolean;
+  step?: string | null;
+  error?: string | null;
+  target?: { type: 'panel' | 'sftp'; name: string | null; panelUrl: string | null; host: string | null } | null;
+  database?: { name: string; host: string } | null;
+  steps?: {
+    pack: { done: boolean; size?: number | null; packed?: number | null };
+    upload: { done: boolean; sent?: number; total?: number | null; rate?: number };
+    unpack: { done: boolean; files?: number; folders?: number; localFolders?: number; setAside?: string };
+    files: { done: boolean; sent?: string[] };
+  };
+}
+
 export type HostedLogin =
   | { type: 'panel'; url: string; key: string; serverId?: string }
   | { type: 'sftp'; host: string; port: number; username: string; password: string };
@@ -252,7 +283,7 @@ export interface Settings {
   local: boolean; lanEnabled: boolean; lanListening: boolean; appPort: number; gamePort: number; txAdminPort: number;
   paths: { root: string; fxserver: string; serverData: string | null } | null;
   urls: string[]; passcode: string | null; desktop: boolean;
-  rootSource?: 'folder' | 'saved' | 'env' | null; databaseManaged?: boolean;
+  rootSource?: 'folder' | 'saved' | 'env' | null; databaseManaged?: boolean; hosted?: boolean;
 }
 
 /** One server found on this PC, or the folder someone picked, as the Welcome screen reads it. */
@@ -339,6 +370,13 @@ export const api = {
   welcomeUse: (folder: string, txAdminPort?: number) => request<{ root: string; external: boolean; needsTools: boolean }>('POST', '/api/welcome/use', { folder, txAdminPort }),
   welcomeTools: () => request<DbToolsState>('POST', '/api/welcome/tools'),
   welcomeProgress: () => request<WelcomeProgress>('GET', '/api/welcome/progress'),
+  move: () => request<MoveStatus>('GET', '/api/move'),
+  moveCheck: (login: MoveLogin) => request<MoveCheck>('POST', '/api/move/check', login),
+  moveStart: (login: MoveLogin) => request<MoveStatus>('POST', '/api/move/start', login),
+  moveContinue: () => request<MoveStatus>('POST', '/api/move/continue'),
+  movePause: () => request<MoveStatus>('POST', '/api/move/pause'),
+  moveFinish: (options: { stopLocal: boolean; playersOk?: boolean }) => request<MoveStatus & { relaunching: boolean }>('POST', '/api/move/finish', options),
+  moveCancel: () => request<MoveStatus>('POST', '/api/move/cancel'),
   hostedServers: (url: string, key: string) => request<{ url: string; servers: HostedServerChoice[] }>('POST', '/api/welcome/hosted/servers', { url, key }),
   hostedCheck: (login: HostedLogin) => request<HostedCheck>('POST', '/api/welcome/hosted/check', login),
   hostedUse: (login: HostedLogin) => request<{ root: string; relaunching: boolean }>('POST', '/api/welcome/hosted/use', login),

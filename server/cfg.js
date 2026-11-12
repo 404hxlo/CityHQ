@@ -81,6 +81,16 @@ function withBlock(text, mutate) {
   return [...head, '', BLOCK_START, ...next, BLOCK_END, ...tail.filter((l, i) => l.trim() !== '' || i < tail.length - 1), ''].join(eol);
 }
 
+/** server.cfg without the app's block (any of its names), for copying a server elsewhere. */
+export function removeManagedBlock(text) {
+  const eol = EOL(text);
+  const lines = text.split(/\r?\n/);
+  const start = lines.findIndex((l) => STARTS.includes(l));
+  const end = start === -1 ? -1 : lines.findIndex((l, i) => i > start && ENDS.includes(l));
+  if (start === -1 || end === -1) return text;
+  return [...lines.slice(0, start), ...lines.slice(end + 1)].join(eol).replace(/(\r?\n){3,}/g, `${eol}${eol}`);
+}
+
 /** Adds the app's block (agent permission and start line) when it is not there yet. */
 export const ensureManagedBlock = (text) => withBlock(text);
 

@@ -104,7 +104,59 @@ export function panelClient({ url, key, serverId, timeoutMs = 15000 }) {
       mkdir: (root, name) => call('POST', server('/files/create-folder'), { json: { root, name } }),
       remove: (root, files) => call('POST', server('/files/delete'), { json: { root, files } }),
       rename: (root, from, to) => call('PUT', server('/files/rename'), { json: { root, files: [{ from, to }] } }),
+      /** Unpacks an archive on the host itself, so big uploads don't come back down. */
+      decompress: (root, file) => call('POST', server('/files/decompress'), { json: { root, file }, timeout: 15 * 60000 }),
+      compress: (root, files) => call('POST', server('/files/compress'), { json: { root, files }, timeout: 15 * 60000 }),
     },
+    /** The account the key belongs to: its SFTP username is <username>.<server id>. */
+    async account() { return (await call('GET', '/account'))?.attributes || {}; },
+    /** Disk and memory the plan allows (MB, 0 = no limit) and how many databases and backups. */
+    async limits() {
+      const a = (await call('GET', server()))?.attributes || {};
+      return {
+        diskMb: a.limits?.disk ?? null,
+        memoryMb: a.limits?.memory ?? null,
+        databases: a.feature_limits?.databases ?? null,
+        backups: a.feature_limits?.backups ?? null,
+      };
+    },
+    databases: {
+      /** The server's databases with their passwords (the panel only shows them to the owner). */
+      async list() {
+        const r = await call('GET', server('/databases'), { query: { include: 'password' } });
+        return (r?.data || []).map(({ attributes: d }) => databaseSummary(d));
+      },
+      async create(name, remote = '%') {
+        return databaseSummary((await call('POST', server('/databases'), { json: { database: name, remote } }))?.attributes || {});
+      },
+    },
+    backups: {
+      async list() {
+        const r = await call('GET', server('/backups'), { query: { per_page: '50' } });
+        return (r?.data || []).map(({ attributes: b }) => ({
+          id: b.uuid, name: b.name, bytes: b.bytes ?? 0, done: Boolean(b.completed_at), ok: b.is_successful !== false,
+          locked: Boolean(b.is_locked), createdAt: Date.parse(b.created_at) || null, completedAt: Date.parse(b.completed_at) || null,
+        }));
+      },
+      create: (name) => call('POST', server('/backups'), { json: { name, ignored: '', is_locked: false } }),
+      async downloadUrl(id) { return (await call('GET', server(`/backups/${encodeURIComponent(id)}/download`)))?.attributes?.url || null; },
+      restore: (id) => call('POST', server(`/backups/${encodeURIComponent(id)}/restore`), { json: { truncate: false } }),
+      remove: (id) => call('DELETE', server(`/backups/${encodeURIComponent(id)}`)),
+    },
+  };
+}
+
+/** A panel database: where it is, its name, login and who may connect (% means anywhere). */
+export function databaseSummary(d = {}) {
+  const password = d.relationships?.password?.attributes?.password ?? d.relationships?.database_password?.attributes?.password ?? null;
+  return {
+    id: d.id || null,
+    name: d.name || null,
+    username: d.username || null,
+    host: d.host?.address || null,
+    port: Number(d.host?.port) || 3306,
+    connectionsFrom: d.connections_from || null,
+    password,
   };
 }
 

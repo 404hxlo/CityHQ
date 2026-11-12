@@ -19,16 +19,22 @@ export function awakeMode({ enabled, screenOnBattery, serverRunning, onBattery }
   return onBattery && screenOnBattery ? 'display' : 'system';
 }
 
+// Long jobs (moving a server to a host) keep the PC awake whatever the setting, while they run.
+const holds = new Set();
+export function holdAwake(reason) { holds.add(reason); apply(); }
+export function releaseAwake(reason) { holds.delete(reason); apply(); }
+
 function apply() {
   const hooks = desktop();
   if (!hooks?.setKeepAwake) return;
   const { keepAwake } = getSettings();
   const p = getProcessState();
-  const mode = awakeMode({
+  let mode = awakeMode({
     ...keepAwake,
     serverRunning: Boolean(p.monitor || p.game),
     onBattery: Boolean(hooks.onBattery?.()),
   });
+  if (holds.size && mode === 'off') mode = 'system';
   // Windows drops power requests when the user puts the PC to sleep (lid, power button). A long gap
   // between checks means the PC slept, so the request is made again after it wakes.
   const now = Date.now();
