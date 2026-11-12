@@ -2,6 +2,12 @@
 
 Each version's section is shown in the app before it updates, and on its GitHub release page.
 
+## 1.7.1
+
+- Move to a host works with panels that don't share their database's address, such as RocketNode's. CityHQ looks for it in more places, and if the panel doesn't give it, asks you to type the Endpoint from your panel's Databases tab.
+- The new database for your server is made when the move starts, and CityHQ checks it can sign in to it then. Before, that was only found out at the very end, after your server on this PC had stopped.
+- If a move was started before, CityHQ uses the database it already made instead of making another.
+
 ## 1.7.0
 
 - New look for CityHQ's messages in game. Announcements appear at the top of the screen with a purple tag, a large title and a timer line that shrinks until they close. They replace GTA's old big-message banner.

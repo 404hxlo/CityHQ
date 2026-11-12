@@ -163,14 +163,30 @@ export function panelClient({ url, key, serverId, timeoutMs = 15000 }) {
 }
 
 /** A panel database: where it is, its name, login and who may connect (% means anywhere). */
+/** "name:port" or "mysql://user:pass@name:port/db" as { host, port }; null when it isn't one. */
+export function databaseAddress(text) {
+  const value = String(text || '').trim();
+  if (!value) return null;
+  // The address follows the last @ (a password may contain @ too).
+  const m = value.match(/^(?:[a-z]+:\/\/(?:.*@)?)?([a-z0-9.-]+)(?::(\d{1,5}))?(?:\/[^@]*)?$/i);
+  if (!m || !m[1].includes('.')) return null;
+  return { host: m[1], port: Number(m[2]) || null };
+}
+
 export function databaseSummary(d = {}) {
   const password = d.relationships?.password?.attributes?.password ?? d.relationships?.database_password?.attributes?.password ?? null;
+  // Pterodactyl gives host.address; some panels built on it (Apollo, for one) leave that out
+  // and give the address in another field, or only on their own page.
+  const host = typeof d.host === 'object' && d.host ? d.host : {};
+  const found = [host.address, host.hostname, host.host, host.endpoint, d.endpoint, d.address, d.hostname,
+    d.connection_string, d.connectionString, typeof d.host === 'string' ? d.host : null]
+    .map(databaseAddress).find(Boolean);
   return {
     id: d.id || null,
     name: d.name || null,
     username: d.username || null,
-    host: d.host?.address || null,
-    port: Number(d.host?.port) || 3306,
+    host: found?.host || null,
+    port: Number(host.port) || found?.port || 3306,
     connectionsFrom: d.connections_from || null,
     password,
   };

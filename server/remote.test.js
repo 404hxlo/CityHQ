@@ -14,7 +14,9 @@ import {
   describeHosted, findHostedServer, hostPath, serverNameOf,
 } from './remote/find.js';
 import { helperAddress, joinLinkOf } from './remote/helper.js';
-import { panelBase, panelClient, panelConsole, serverSummary } from './remote/panel.js';
+import {
+  databaseAddress, databaseSummary, panelBase, panelClient, panelConsole, serverSummary,
+} from './remote/panel.js';
 import { categoriesOf } from './remote/resources.js';
 import { remotePath, sftpClient } from './remote/sftp.js';
 import {
@@ -528,6 +530,36 @@ test('hosted health: the plan\'s disk and memory, in plain words', async () => {
   assert.equal(limitFinding('d', 99 * GB, 100 * GB, 'used', words).status, 'bad');
   assert.equal(limitFinding('d', 5 * GB, null, 'used', words), null, 'no limit, no finding');
   assert.match(limitFinding('d', 10 * GB, 100 * GB, 'used', words).detail, /10\.0 GB of 100\.0 GB used/);
+});
+
+test('a panel database\'s address: Pterodactyl\'s field, other panels\' fields, or none at all', () => {
+  assert.deepEqual(databaseAddress('abc123.db.example-host.com:3319'), { host: 'abc123.db.example-host.com', port: 3319 });
+  assert.deepEqual(databaseAddress(' mysql://u1:p@ss~w0rd@abc123.db.example-host.com:3319/s1_city '), { host: 'abc123.db.example-host.com', port: 3319 });
+  assert.deepEqual(databaseAddress('db.example.net'), { host: 'db.example.net', port: null });
+  assert.equal(databaseAddress('DB-ASH-01'), null, 'a label is not an address');
+  assert.equal(databaseAddress(''), null);
+
+  const pterodactyl = databaseSummary({ id: 'a', name: 's1_city', host: { address: 'db.example.net', port: 3306 } });
+  assert.equal(pterodactyl.host, 'db.example.net');
+  // A panel that names its database server but leaves the address out: the port is still known.
+  const labelOnly = databaseSummary({ id: 'b', name: 's1_city', host: { name: 'DB-EX-01', port: 3319 } });
+  assert.equal(labelOnly.host, null);
+  assert.equal(labelOnly.port, 3319);
+  const elsewhere = databaseSummary({ id: 'c', name: 's1_city', host: { port: 3319 }, endpoint: 'abc123.db.example-host.com:3319' });
+  assert.deepEqual([elsewhere.host, elsewhere.port], ['abc123.db.example-host.com', 3319]);
+});
+
+test('checks before moving: a database address to type in, and a new database that can\'t be reached', () => {
+  const base = { localCfg: 'x', hostFound: true, resourcesBytes: 1, alreadyUploaded: true, localZipReady: true };
+  const typeIt = preflight({ ...base, database: { create: 'city', name: 'city', host: null, needsAddress: true } });
+  assert.equal(typeIt.ok, false);
+  assert.match(typeIt.items.find((i) => i.level === 'bad').text, /Endpoint/);
+  assert.doesNotMatch(JSON.stringify(typeIt.items), /null:/, 'never shows an empty address');
+  const closed = preflight({ ...base, database: { create: 'city', name: 'city', host: 'db.example.net', port: 3319, reachable: false } });
+  assert.match(closed.items.find((i) => i.level === 'bad').text, /can't reach your host's database server \(db\.example\.net:3319\)/);
+  const fine = preflight({ ...base, database: { create: 'city', name: 'city', host: 'db.example.net', port: 3319, reachable: true } });
+  assert.equal(fine.ok, true);
+  assert.match(fine.items.map((i) => i.text).join(' '), /A new database, "city", is made on your host when the move starts/);
 });
 
 test('the helper goes onto a host with its in-game page, its token and its server.cfg line', async () => {

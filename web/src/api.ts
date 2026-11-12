@@ -38,6 +38,8 @@ export interface HostedBackups {
 export type MoveLogin = HostedLogin & {
   sftpPassword?: string;
   databaseId?: string;
+  /** The host's database address, typed in when its panel doesn't share it (name:port). */
+  databaseHost?: string;
   database?: { host: string; port: number; name: string; username: string; password: string };
   copyPlayersDb?: boolean;
 };
@@ -47,7 +49,9 @@ export interface MoveCheck {
   target: { type: 'panel' | 'sftp'; name: string | null; address: { ip: string; port: number } | null; dataPath: string | null };
   resources: { bytes: number; files: number };
   databases: { id: string; name: string; host: string; port: number; username: string }[];
-  database: { name: string; host: string | null; port: number; create: boolean; reachable: boolean | null; tables: number | null } | null;
+  database: {
+    name: string; host: string | null; port: number; create: boolean; reachable: boolean | null; tables: number | null; needsAddress?: boolean;
+  } | null;
   alreadyUploaded: boolean;
 }
 export interface MoveStatus {

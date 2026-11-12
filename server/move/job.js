@@ -24,7 +24,7 @@ import { ensureDatabase, getProcessState, isPortOpen } from '../processes.js';
 import { replaceFileSync } from '../retry.js';
 import { makeConnection } from '../remote/connection.js';
 import { findHostedServer } from '../remote/find.js';
-import { panelClient } from '../remote/panel.js';
+import { databaseAddress, panelClient } from '../remote/panel.js';
 import { forgetSecret, loadSecret, saveSecret } from '../remote/secret.js';
 import { sftpClient } from '../remote/sftp.js';
 import { remoteFrom, useHosted } from '../remote/welcome.js';
@@ -166,17 +166,28 @@ export async function checkMove(body) {
     let database = null;
     const localName = localCfg ? (await localConnection(local.cfgPath).catch(() => null))?.database : null;
     if (remote.type === 'panel') {
-      const existing = databases.find((d) => d.id === body.databaseId);
+      // Some panels don't share a database's address; then it's typed in (their Databases tab).
+      const typed = databaseAddress(body.databaseHost);
+      const withAddress = (d) => (d.host ? d : { ...d, host: typed?.host || null, port: typed?.port || d.port });
+      const wanted = databaseNameFor(localName);
+      // The one chosen, or the one CityHQ made for this move before (panels add a prefix: s1_name).
+      const existing = databases.find((d) => d.id === body.databaseId)
+        || databases.find((d) => d.name === wanted || String(d.name || '').endsWith(`_${wanted}`));
       if (existing) {
-        database = { ...existing, reachable: await reachable(existing) };
-        if (database.reachable) database.tables = await countTables({ host: existing.host, port: existing.port, user: existing.username, password: existing.password }, existing.name).catch(() => 0);
+        database = withAddress(existing);
+        database.reachable = database.host ? await reachable(database) : null;
+        if (database.reachable) database.tables = await countTables({ host: database.host, port: database.port, user: database.username, password: database.password }, database.name).catch(() => 0);
       } else {
-        const sample = databases[0];
-        database = { create: databaseNameFor(localName), name: databaseNameFor(localName), host: sample?.host || null, port: sample?.port || 3306, reachable: sample ? await reachable(sample) : null };
+        // A new one, made when the move starts. Until then, only the database server can be
+        // tried: the host's other databases may only allow the game server to sign in.
+        const sample = withAddress(databases[0] || { port: 3306 });
+        database = { create: wanted, name: wanted, host: sample.host, port: sample.port || 3306 };
+        database.reachable = database.host ? await isPortOpen(database.port, database.host, 5000).catch(() => false) : null;
         if (facts.databaseLimit !== null && databases.length >= facts.databaseLimit) {
           database = { ...database, limitReached: true };
         }
       }
+      if (!database.host) database.needsAddress = true;
     } else if (body.database?.host) {
       const d = body.database;
       database = { host: String(d.host).trim(), port: Number(d.port) || 3306, name: String(d.name || '').trim(), username: String(d.username || '').trim(), password: String(d.password || '') };
@@ -191,7 +202,10 @@ export async function checkMove(body) {
       target: { type: target.type, name: target.serverName || target.host, address: target.address || null, dataPath: found?.dataPath || null },
       resources: resources,
       databases: databases.map(({ password, ...d }) => d),
-      database: database ? { name: database.name, host: database.host, port: database.port, create: Boolean(database.create), reachable: database.reachable, tables: database.tables ?? null } : null,
+      database: database ? {
+        name: database.name, host: database.host, port: database.port, create: Boolean(database.create), reachable: database.reachable,
+        tables: database.tables ?? null, needsAddress: Boolean(database.needsAddress),
+      } : null,
       alreadyUploaded: Boolean(facts.alreadyUploaded),
       _internal: { target, found, database, zip, localName },
     };
@@ -208,8 +222,20 @@ export async function startMove(body) {
   if (!s || body?.restart) {
     const check = await checkMove(body);
     if (!check.ok) throw new HttpError(409, check.items.find((i) => i.level === 'bad')?.text || 'Fix the problems shown first.');
-    const { target, found, database, zip } = check._internal;
+    const { target, found, zip } = check._internal;
+    let { database } = check._internal;
     const login = remoteFrom(body);
+    // A new database is made now, not at the end: if this PC can't sign in to it, that's found
+    // out before your server here is stopped.
+    if (database?.create && target.type === 'panel') {
+      const panel = panelClient({ url: target.panelUrl, key: login.secret, serverId: target.serverId });
+      const made = await panel.databases.create(database.create, '%');
+      database = { ...made, host: made.host || database.host, port: made.host ? made.port : database.port, create: null };
+      if (!(await reachable(database))) {
+        const from = made.connectionsFrom && made.connectionsFrom !== '%' ? ` It only allows connections from ${made.connectionsFrom}.` : '';
+        throw new HttpError(409, `Your host made the database "${made.name}", but this PC can't sign in to it.${from} Ask your host to let it accept connections from anywhere ("%"), then check again: CityHQ uses that database instead of making another.`);
+      }
+    }
     saveSecret(STATE_DIR, JSON.stringify({ key: login.secret, sftpPassword: body.sftpPassword || null, dbPassword: database?.password || null }), SECRET_FILE);
     state = s = {
       phase: 'moving',
@@ -442,8 +468,8 @@ export async function finishMove(body = {}) {
       let db = s.database ? { ...s.database, password: secret.dbPassword } : null;
       if (db?.create) {
         const made = await panel.databases.create(db.create);
-        db = { ...made };
-        s.database = { ...made, password: undefined, create: null };
+        db = { ...made, host: made.host || db.host, port: made.host ? made.port : db.port };
+        s.database = { ...db, password: undefined, create: null };
         saveSecret(STATE_DIR, JSON.stringify({ ...secret, dbPassword: made.password }), SECRET_FILE);
         save();
       }

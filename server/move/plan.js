@@ -90,7 +90,10 @@ export function preflight(f) {
   else if (f.localZipReady) add('ok', 'A resources.zip of your server is ready on this PC; CityHQ uses it instead of packing again.');
 
   if (!f.database) add('bad', 'Choose the database on your host for your data.');
-  else if (f.database.reachable === false) add('bad', `This PC can't reach the host's database (${f.database.host}:${f.database.port}). In your host's panel, allow connections to it from anywhere (often "Connections from: %"), or ask your host.`);
+  else if (f.database.needsAddress) add('bad', 'Your host\'s panel doesn\'t tell CityHQ where its databases are. Type the address below: in your panel\'s Databases tab, open a database (the eye button) and copy its Endpoint, such as abc.db.yourhost.com:3306.');
+  else if (f.database.reachable === false && f.database.create) add('bad', `This PC can't reach your host's database server (${f.database.host}:${f.database.port}). Check the address, or ask your host whether databases can be reached from outside.`);
+  else if (f.database.reachable === false) add('bad', `This PC can't sign in to the host's database "${f.database.name}" (${f.database.host}:${f.database.port}). In your host's panel, allow connections to it from anywhere (often "Connections from: %"), or ask your host.`);
+  else if (f.database.create) add('ok', `A new database, "${f.database.name}", is made on your host when the move starts, open to this PC so your data can be copied in.`);
   else if (f.database.tables > 0) add('warn', `The host's database "${f.database.name}" already has ${f.database.tables} tables. They'll be replaced by yours.`);
   else add('ok', `Your data goes into the host's database "${f.database.name}".`);
 

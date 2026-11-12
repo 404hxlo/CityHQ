@@ -127,6 +127,7 @@ export function Move() {
   const [status, setStatus] = useState<MoveStatus | null>(null);
   const [checked, setChecked] = useState<{ login: MoveLogin; check: MoveCheck } | null>(null);
   const [copyPlayers, setCopyPlayers] = useState(true);
+  const [dbHost, setDbHost] = useState('');
   const [finishing, setFinishing] = useState(false);
   const [done, setDone] = useState<string | null>(null);
   const { busy, run } = useAction();
@@ -148,6 +149,13 @@ export function Move() {
     const r = await run('start', () => api.moveStart({ ...checked.login, copyPlayersDb: copyPlayers }));
     if (r) { setStatus(r); setChecked(null); }
   };
+  const checkAgain = async () => {
+    if (!checked) return;
+    const login = { ...checked.login, databaseHost: dbHost.trim() || undefined };
+    const r = await run('recheck', () => api.moveCheck(login));
+    if (r) setChecked({ login, check: r });
+  };
+  const askAddress = Boolean(checked && (checked.check.database?.needsAddress || checked.login.databaseHost));
   const finish = async () => {
     const ok = await confirm({
       title: 'Finish the move?',
@@ -201,6 +209,15 @@ export function Move() {
                 </li>
               ))}
             </ul>
+            {askAddress && (
+              <div className="move-db-address">
+                <label className="input-label" htmlFor="mv-dbhost">Your host's database address (the Endpoint in your panel's Databases tab)</label>
+                <div className="input-row">
+                  <input id="mv-dbhost" className="input" placeholder="abc.db.yourhost.com:3306" value={dbHost} onChange={(e) => setDbHost(e.target.value)} spellCheck={false} autoComplete="off" />
+                  <Button busy={busy === 'recheck'} disabled={!dbHost.trim()} onClick={checkAgain}>Check again</Button>
+                </div>
+              </div>
+            )}
             <label className="switch-line">
               <Toggle checked={copyPlayers} onChange={setCopyPlayers} label="Bring txAdmin's player records" />
               <span>Bring txAdmin's player records too (bans, warnings, playtime)</span>
