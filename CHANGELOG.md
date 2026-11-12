@@ -2,6 +2,13 @@
 
 Each version's section is shown in the app before it updates, and on its GitHub release page.
 
+## 1.7.0
+
+- New look for CityHQ's messages in game. Announcements appear at the top of the screen with a purple tag, a large title and a timer line that shrinks until they close. They replace GTA's old big-message banner.
+- Small messages, such as "Your car was repaired" or a message from staff, appear on the right in the same style, with a tag that says who they're from. They stack when several arrive at once.
+- Restart warnings, Clear the streets and messages to one player use the new look too.
+- CityHQ's helper on the server updates to 1.7.0 at its next restart.
+
 ## 1.6.0
 
 - Hosted servers get **Health**: CityHQ's helper, the database, the start order, scripts server.cfg starts that aren't there, and your plan's disk and memory. The PC-only checks (sleep, firewall, router) aren't shown.

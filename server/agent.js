@@ -65,7 +65,7 @@ export async function installAgent() {
   const sameToken = existsSync(tokenFile) && readFileSync(tokenFile, 'utf8').trim() === token;
   const sameFile = (name) => existsSync(path.join(target, name))
     && readFileSync(path.join(target, name), 'utf8') === readFileSync(path.join(AGENT_SOURCE, name), 'utf8');
-  const sameCode = sameVersion && sameFile('server.lua') && sameFile('client.lua');
+  const sameCode = sameVersion && sameFile('server.lua') && sameFile('client.lua') && sameFile('html/index.html');
   if (sameCode && sameToken) return { installed: true, changed: false };
 
   mkdirSync(path.dirname(target), { recursive: true });

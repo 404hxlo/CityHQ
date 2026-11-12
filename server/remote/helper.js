@@ -8,7 +8,7 @@ import { APP_DIR, HttpError } from '../paths.js';
 import { getSettings } from '../settings.js';
 
 const SOURCE = process.env.QBC_AGENT_SOURCE || path.join(APP_DIR, 'agent-resource', 'qb-control');
-const FILES = ['fxmanifest.lua', 'server.lua', 'client.lua'];
+const FILES = ['fxmanifest.lua', 'server.lua', 'client.lua', 'html/index.html'];
 const versionOf = (text) => String(text || '').match(/^version\s+['"]([^'"]+)/m)?.[1] || null;
 
 export const helperFolder = (dataPath) => path.posix.join(dataPath || '/', 'resources', '[local]', 'qb-control');
@@ -43,7 +43,8 @@ export async function installRemoteHelper(conn, { dataPath, cfgPath, token = get
   const resources = path.posix.join(dataPath || '/', 'resources');
   if (!(await conn.files.exists(path.posix.join(resources, '[local]')))) await conn.files.mkdir(resources, '[local]');
   if (!(await conn.files.exists(folder))) await conn.files.mkdir(path.posix.join(resources, '[local]'), 'qb-control');
-  for (const name of FILES) await conn.files.write(path.posix.join(folder, name), readFileSync(path.join(SOURCE, name), 'utf8'));
+  if (!(await conn.files.exists(path.posix.join(folder, 'html')))) await conn.files.mkdir(folder, 'html');
+  for (const name of FILES) await conn.files.write(path.posix.join(folder, name), readFileSync(path.join(SOURCE, ...name.split('/')), 'utf8'));
   await conn.files.write(path.posix.join(folder, 'token.txt'), token);
   await conn.files.write(path.posix.join(folder, 'remote.txt'), 'CityHQ connects to this server over the internet. Delete this file to allow only this machine.\n');
   const cfg = await conn.files.read(cfgPath);

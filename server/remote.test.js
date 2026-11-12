@@ -334,7 +334,7 @@ function sftpServer() {
           const statHandler = (id, p) => { try { s.attrs(id, attrs(statSync(local(p)))); } catch { s.status(id, STATUS_CODE.NO_SUCH_FILE); } };
           s.on('STAT', statHandler);
           s.on('LSTAT', statHandler);
-          s.on('MKDIR', (id, p) => { mkdirSync(local(p)); s.status(id, STATUS_CODE.OK); });
+          s.on('MKDIR', (id, p) => { try { mkdirSync(local(p)); s.status(id, STATUS_CODE.OK); } catch { s.status(id, STATUS_CODE.FAILURE); } });
           s.on('RENAME', (id, a, b) => { renameSync(local(a), local(b)); s.status(id, STATUS_CODE.OK); });
           s.on('REMOVE', (id, p) => { unlinkSync(local(p)); s.status(id, STATUS_CODE.OK); });
           s.on('REALPATH', (id, p) => s.name(id, [{ filename: path.posix.normalize(`/${p}`), longname: '', attrs: {} }]));
@@ -528,4 +528,23 @@ test('hosted health: the plan\'s disk and memory, in plain words', async () => {
   assert.equal(limitFinding('d', 99 * GB, 100 * GB, 'used', words).status, 'bad');
   assert.equal(limitFinding('d', 5 * GB, null, 'used', words), null, 'no limit, no finding');
   assert.match(limitFinding('d', 10 * GB, 100 * GB, 'used', words).detail, /10\.0 GB of 100\.0 GB used/);
+});
+
+test('the helper goes onto a host with its in-game page, its token and its server.cfg line', async () => {
+  const { installRemoteHelper } = await import('./remote/helper.js');
+  mkdirSync(path.join(ROOT, 'resources'), { recursive: true });
+  const c = sftpClient(login);
+  try {
+    const result = await installRemoteHelper(c, { dataPath: '/', cfgPath: '/server.cfg', token: 'test-token' });
+    assert.equal(result.installed, true);
+    const folder = path.join(ROOT, 'resources', '[local]', 'qb-control');
+    const source = path.join(import.meta.dirname, '..', 'agent-resource', 'qb-control');
+    for (const name of ['fxmanifest.lua', 'server.lua', 'client.lua', path.join('html', 'index.html')]) {
+      assert.equal(readFileSync(path.join(folder, name), 'utf8'), readFileSync(path.join(source, name), 'utf8'), name);
+    }
+    assert.equal(readFileSync(path.join(folder, 'token.txt'), 'utf8'), 'test-token');
+    assert.match(readFileSync(path.join(ROOT, 'server.cfg'), 'utf8'), /ensure qb-control/);
+    // A second time (an update) finds the folders already there.
+    await installRemoteHelper(c, { dataPath: '/', cfgPath: '/server.cfg', token: 'test-token' });
+  } finally { c.close(); }
 });

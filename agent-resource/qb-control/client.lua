@@ -4,55 +4,50 @@
 
 local RES = GetCurrentResourceName()
 
--- ---------------------------------------------------------------- big announcements
-local banner = nil
+-- ---------------------------------------------------------------- messages on screen
+-- Drawn by html/index.html: a big announcement at the top, small messages on the right.
+local ICONS = { megaphone = true, car = true, tool = true, fuel = true, shield = true, message = true, clock = true, warning = true }
 
-local function loadScaleform(name)
-    local handle = RequestScaleformMovie(name)
-    local waited = 0
-    while not HasScaleformMovieLoaded(handle) and waited < 3000 do
-        Wait(10)
-        waited = waited + 10
-    end
-    return HasScaleformMovieLoaded(handle) and handle or nil
+local function words(value, max)
+    return type(value) == 'string' and value:sub(1, max) or nil
 end
 
-local function showBanner(title, message, seconds, countdown)
-    local scaleform = loadScaleform('MP_BIG_MESSAGE_FREEMODE')
-    if not scaleform then return end
-    local token = {}
-    banner = token
-    local endsAt = GetGameTimer() + seconds * 1000
-    local lastShown = -1
+local function iconName(value, fallback)
+    return ICONS[value] and value or fallback
+end
+
+-- A big announcement: tag (who it's from), title, an optional line under it, and a countdown.
+RegisterNetEvent(RES .. ':client:banner', function(data)
+    if type(data) ~= 'table' then return end
+    local title = words(data.title, 240)
+    if not title or title == '' then return end
     PlaySoundFrontend(-1, 'CHECKPOINT_PERFECT', 'HUD_MINI_GAME_SOUNDSET', true)
-    CreateThread(function()
-        while banner == token and GetGameTimer() < endsAt do
-            local left = math.ceil((endsAt - GetGameTimer()) / 1000)
-            if left ~= lastShown then
-                lastShown = left
-                local body = message
-                if countdown then
-                    body = ('%s~n~~HUD_COLOUR_PURPLELIGHT~%d:%02d'):format(message, left // 60, left % 60)
-                end
-                BeginScaleformMovieMethod(scaleform, 'SHOW_SHARD_CENTERED_MP_MESSAGE')
-                ScaleformMovieMethodAddParamTextureNameString(title)
-                ScaleformMovieMethodAddParamTextureNameString(body)
-                ScaleformMovieMethodAddParamInt(0)
-                ScaleformMovieMethodAddParamInt(21)
-                EndScaleformMovieMethod()
-            end
-            DrawScaleformMovieFullscreen(scaleform, 255, 255, 255, 255, 0)
-            Wait(0)
-        end
-        SetScaleformMovieAsNoLongerNeeded(scaleform)
-        if banner == token then banner = nil end
-    end)
+    SendNUIMessage({
+        action = 'banner',
+        tag = words(data.tag, 60) or 'Announcement',
+        title = title,
+        sub = words(data.sub, 120),
+        seconds = math.max(3, math.min(tonumber(data.seconds) or 8, 900)),
+        countdown = data.countdown == true,
+        icon = iconName(data.icon, 'megaphone'),
+    })
+end)
+
+-- A small message on the right of the screen.
+local function toast(text, tag, icon, seconds)
+    if type(text) ~= 'string' or text == '' then return end
+    SendNUIMessage({
+        action = 'toast',
+        tag = words(tag, 40) or 'Server',
+        text = text:sub(1, 200),
+        seconds = math.max(2, math.min(tonumber(seconds) or 6, 30)),
+        icon = iconName(icon, 'message'),
+    })
 end
 
-RegisterNetEvent(RES .. ':client:banner', function(title, message, seconds, countdown)
-    if type(title) ~= 'string' or type(message) ~= 'string' then return end
-    seconds = math.max(3, math.min(tonumber(seconds) or 8, 900))
-    showBanner(title:sub(1, 80), message:sub(1, 240), seconds, countdown == true)
+RegisterNetEvent(RES .. ':client:toast', function(data)
+    if type(data) ~= 'table' then return end
+    toast(data.text, data.tag, data.icon, data.seconds)
 end)
 
 -- ---------------------------------------------------------------- player tools
@@ -94,15 +89,6 @@ local function currentVehicle()
     return vehicle ~= 0 and DoesEntityExist(vehicle) and vehicle or nil
 end
 
--- Qbox shows notifications through ox_lib; QBCore through its own event.
-local function notify(message, kind)
-    if GetResourceState('qbx_core') == 'started' then
-        TriggerEvent('ox_lib:notify', { description = message, type = kind or 'inform', duration = 5000 })
-    else
-        TriggerEvent('QBCore:Notify', message, kind or 'primary', 5000)
-    end
-end
-
 -- Qbox has no teleport event of its own for other scripts, so CityHQ moves the player itself.
 RegisterNetEvent(RES .. ':client:teleport', function(x, y, z, heading)
     x, y, z = tonumber(x), tonumber(y), tonumber(z)
@@ -118,7 +104,7 @@ end)
 
 RegisterNetEvent(RES .. ':client:fixVehicle', function()
     local vehicle = currentVehicle()
-    if not vehicle then return notify('You need to be in or next to your car', 'error') end
+    if not vehicle then return toast('Get in or next to your car to have it repaired', 'Admin', 'car') end
     SetVehicleFixed(vehicle)
     SetVehicleDeformationFixed(vehicle)
     SetVehicleEngineHealth(vehicle, 1000.0)
@@ -126,14 +112,14 @@ RegisterNetEvent(RES .. ':client:fixVehicle', function()
     SetVehiclePetrolTankHealth(vehicle, 1000.0)
     SetVehicleDirtLevel(vehicle, 0.0)
     SetVehicleUndriveable(vehicle, false)
-    notify('Your car was repaired by an admin', 'success')
+    toast('Your car was repaired', 'Admin', 'tool')
 end)
 
 -- Different fuel scripts keep the level in different places, so set every common one.
 local FUEL_EXPORTS = { 'qb-fuel', 'LegacyFuel', 'ps-fuel', 'cdn-fuel', 'lj-fuel' }
 RegisterNetEvent(RES .. ':client:refuel', function()
     local vehicle = currentVehicle()
-    if not vehicle then return notify('You need to be in or next to your car', 'error') end
+    if not vehicle then return toast('Get in or next to your car to have it filled up', 'Admin', 'car') end
     SetVehicleFuelLevel(vehicle, 100.0)
     for _, name in ipairs(FUEL_EXPORTS) do
         if GetResourceState(name) == 'started' then
@@ -142,5 +128,5 @@ RegisterNetEvent(RES .. ':client:refuel', function()
     end
     if DecorIsRegisteredAsType('_FUEL_LEVEL', 1) then DecorSetFloat(vehicle, '_FUEL_LEVEL', 100.0) end
     pcall(function() Entity(vehicle).state:set('fuel', 100.0, true) end)
-    notify('Your tank was filled by an admin', 'success')
+    toast('Your tank was filled up', 'Admin', 'fuel')
 end)

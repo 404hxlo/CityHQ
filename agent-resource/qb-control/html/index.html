@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>CityHQ</title>
+<!-- CityHQ's messages on the player's screen: a big announcement at the top, and small messages on the right. -->
+<style>
+  :root {
+    --purple: #534AB7;
+    --purple-light: #AFA9EC;
+    --text: #ffffff;
+    --soft: #d6d0e6;
+    --track: rgba(255, 255, 255, 0.16);
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: transparent; }
+  body {
+    font-family: 'Segoe UI Variable Text', 'Segoe UI', system-ui, sans-serif;
+    color: var(--text);
+    -webkit-font-smoothing: antialiased;
+    user-select: none;
+  }
+  .tag {
+    display: inline-flex; align-items: center; gap: 0.45em;
+    background: var(--purple); border-radius: 0.35em;
+    padding: 0.32em 0.75em; font-weight: 600; letter-spacing: 0.16em; text-transform: uppercase;
+  }
+  .tag svg { width: 1.2em; height: 1.2em; flex: none; }
+  .line { height: 3px; background: var(--track); border-radius: 2px; overflow: hidden; }
+  .line i { display: block; height: 100%; width: 100%; background: var(--purple-light); }
+
+  /* ---------------------------------------------------------------- big announcement */
+  #banner {
+    position: fixed; top: 6vh; left: 50%;
+    width: min(70vw, 900px);
+    transform: translate(-50%, -12px); opacity: 0;
+    transition: opacity 0.35s ease, transform 0.35s ease;
+    text-align: center; padding: 3vh 6vw 3.4vh;
+    /* A soft dark fade behind the text, so it reads over a bright daytime sky. */
+    background: radial-gradient(closest-side, rgba(10, 9, 16, 0.42) 0%, rgba(10, 9, 16, 0.3) 40%, rgba(10, 9, 16, 0.12) 75%, rgba(10, 9, 16, 0) 100%);
+  }
+  #banner.show { opacity: 1; transform: translate(-50%, 0); }
+  #banner .tag { font-size: clamp(11px, 1.15vh, 15px); }
+  #banner .title {
+    font-size: clamp(22px, 3.3vh, 44px); font-weight: 600; line-height: 1.2;
+    margin-top: 1.1vh; text-shadow: 0 2px 12px rgba(0, 0, 0, 0.55);
+    overflow-wrap: anywhere;
+  }
+  #banner .line { width: clamp(180px, 16vw, 300px); margin: 1.4vh auto 1vh; }
+  #banner .line i { margin: 0 auto; }
+  #banner .sub {
+    font-size: clamp(13px, 1.6vh, 20px); color: var(--soft);
+    text-shadow: 0 1px 8px rgba(0, 0, 0, 0.6); font-variant-numeric: tabular-nums;
+  }
+  #banner .sub:empty { display: none; }
+
+  /* ---------------------------------------------------------------- small messages */
+  #toasts {
+    position: fixed; right: 2.2vw; top: 30vh;
+    display: flex; flex-direction: column; align-items: flex-end; gap: 1.6vh;
+    width: min(30vw, 420px);
+  }
+  .toast {
+    text-align: right; max-width: 100%;
+    opacity: 0; transform: translateX(16px);
+    transition: opacity 0.3s ease, transform 0.3s ease;
+  }
+  .toast.show { opacity: 1; transform: translateX(0); }
+  .toast .tag { font-size: clamp(10px, 1vh, 13px); padding: 0.28em 0.65em; }
+  .toast .text {
+    font-size: clamp(14px, 1.75vh, 22px); font-weight: 600; line-height: 1.25;
+    margin-top: 0.6vh; text-shadow: 0 1px 4px rgba(0, 0, 0, 0.85), 0 0 14px rgba(0, 0, 0, 0.5);
+    overflow-wrap: anywhere;
+  }
+  .toast .line { width: clamp(100px, 8vw, 160px); height: 2px; margin: 0.7vh 0 0 auto; }
+  .toast .line i { margin-left: auto; }
+</style>
+</head>
+<body>
+<div id="banner" aria-live="polite">
+  <div class="tag"><span data-icon></span><span data-tag></span></div>
+  <div class="title" data-title></div>
+  <div class="line"><i data-bar></i></div>
+  <div class="sub" data-sub></div>
+</div>
+<div id="toasts" aria-live="polite"></div>
+
+<script>
+  // Simple line icons (24 x 24), drawn with the text colour.
+  const ICON_PATHS = {
+    megaphone: '<path d="M3 11v2a1 1 0 0 0 1 1h2l5 4V6L6 10H4a1 1 0 0 0-1 1z"/><path d="M15 9a3 3 0 0 1 0 6"/><path d="M18 6a7 7 0 0 1 0 12"/>',
+    car: '<path d="M5 17h-1a1 1 0 0 1-1-1v-4l2-5h14l2 5v4a1 1 0 0 1-1 1h-1"/><path d="M3 12h18"/><circle cx="7.5" cy="17" r="1.8"/><circle cx="16.5" cy="17" r="1.8"/>',
+    tool: '<path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L4 17l3 3 5.3-5.3a4 4 0 0 0 5.4-5.4l-2.5 2.5-2.4-.6-.6-2.4z"/>',
+    fuel: '<path d="M4 20V5a1 1 0 0 1 1-1h7a1 1 0 0 1 1 1v15"/><path d="M3 20h11"/><path d="M4 10h9"/><path d="M13 8h2a2 2 0 0 1 2 2v6a1.5 1.5 0 0 0 3 0V8l-3-3"/>',
+    shield: '<path d="M12 3l8 3v6c0 4.5-3.4 8-8 9-4.6-1-8-4.5-8-9V6z"/>',
+    message: '<path d="M4 5h16v11H9l-5 4z"/>',
+    clock: '<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>',
+    warning: '<path d="M12 4l9 16H3z"/><path d="M12 10v4"/><path d="M12 17v.5"/>',
+  };
+  const icon = (name) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${ICON_PATHS[name] || ICON_PATHS.message}</svg>`;
+  const clean = (value, max) => String(value == null ? '' : value).slice(0, max);
+  const clock = (seconds) => `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
+
+  // ---------------------------------------------------------------- big announcement
+  const banner = document.getElementById('banner');
+  const part = (name) => banner.querySelector(`[data-${name}]`);
+  let bannerRun = 0;
+
+  function showBanner({ tag, title, sub, seconds, countdown, icon: iconName }) {
+    const run = ++bannerRun;
+    const ms = Math.max(3, Math.min(Number(seconds) || 8, 900)) * 1000;
+    const endsAt = performance.now() + ms;
+    part('icon').innerHTML = icon(iconName || 'megaphone');
+    part('tag').textContent = clean(tag || 'Announcement', 60);
+    part('title').textContent = clean(title, 240);
+    const baseSub = clean(sub, 120);
+    const bar = part('bar');
+    banner.classList.add('show');
+
+    const tick = () => {
+      if (run !== bannerRun) return;
+      const left = Math.max(0, endsAt - performance.now());
+      bar.style.width = `${(left / ms) * 100}%`;
+      const secondsLeft = Math.ceil(left / 1000);
+      part('sub').textContent = countdown ? [baseSub, clock(secondsLeft)].filter(Boolean).join(' ') : baseSub;
+      if (left > 0) requestAnimationFrame(tick);
+      else banner.classList.remove('show');
+    };
+    tick();
+  }
+
+  // ---------------------------------------------------------------- small messages
+  const toasts = document.getElementById('toasts');
+  const MAX_TOASTS = 4;
+
+  function showToast({ tag, text, seconds, icon: iconName }) {
+    const ms = Math.max(2, Math.min(Number(seconds) || 5, 30)) * 1000;
+    const el = document.createElement('div');
+    el.className = 'toast';
+    el.innerHTML = '<div class="tag"><span data-icon></span><span data-tag></span></div><div class="text"></div><div class="line"><i></i></div>';
+    el.querySelector('[data-icon]').innerHTML = icon(iconName || 'message');
+    el.querySelector('[data-tag]').textContent = clean(tag || 'Server', 40);
+    el.querySelector('.text').textContent = clean(text, 200);
+    toasts.appendChild(el);
+    while (toasts.children.length > MAX_TOASTS) toasts.firstElementChild.remove();
+    requestAnimationFrame(() => el.classList.add('show'));
+
+    const bar = el.querySelector('.line i');
+    bar.animate([{ width: '100%' }, { width: '0%' }], { duration: ms, easing: 'linear', fill: 'forwards' });
+    setTimeout(() => {
+      el.classList.remove('show');
+      setTimeout(() => el.remove(), 350);
+    }, ms);
+  }
+
+  window.addEventListener('message', (event) => {
+    const data = event.data || {};
+    if (data.action === 'banner') showBanner(data);
+    else if (data.action === 'toast') showToast(data);
+    else if (data.action === 'hideBanner') { bannerRun++; banner.classList.remove('show'); }
+  });
+</script>
+</body>
+</html>

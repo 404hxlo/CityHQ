@@ -104,13 +104,11 @@ local function core()
     return ok and obj or nil
 end
 
--- A notification in the corner of a player's screen (-1 for everyone).
-local function notifyPlayer(target, message, ms)
-    if framework() == 'qbox' then
-        TriggerClientEvent('ox_lib:notify', target, { description = message, type = 'inform', duration = ms })
-    else
-        TriggerClientEvent('QBCore:Notify', target, message, 'primary', ms)
-    end
+-- A small message on the right of a player's screen (-1 for everyone), drawn by html/index.html.
+local function notifyPlayer(target, message, ms, tag, icon)
+    TriggerClientEvent(RES .. ':client:toast', target, {
+        text = message, tag = tag or 'Server', icon = icon or 'message', seconds = (ms or 6000) / 1000,
+    })
 end
 
 -- Scripts that differ between servers, and whether this one has them.
@@ -355,7 +353,7 @@ routes['POST /announce'] = function(body)
     TriggerClientEvent('chat:addMessage', -1, {
         color = { 255, 138, 61 }, multiline = true, args = { 'Server', message },
     })
-    notifyPlayer(-1, message, 10000)
+    notifyPlayer(-1, message, 10000, 'Server', 'megaphone')
     return { sent = true, players = #GetPlayers() }
 end
 
@@ -525,7 +523,7 @@ end
 function playerActions.notify(src, body)
     local message = text(body.message, 200)
     if not message or message == '' then error('Type a message first') end
-    notifyPlayer(src, message, 10000)
+    notifyPlayer(src, message, 10000, 'Staff', 'message')
     return 'Message sent'
 end
 
@@ -793,7 +791,10 @@ routes['POST /events/banner'] = function(body)
     local message = text(body.message, 240)
     if not message or message == '' then error('Type a message first') end
     local seconds = wholeNumber(body.seconds, 3, 900) or 10
-    TriggerClientEvent(RES .. ':client:banner', -1, (title and title ~= '') and title or 'Announcement', message, seconds, body.countdown == true)
+    TriggerClientEvent(RES .. ':client:banner', -1, {
+        tag = (title and title ~= '') and title or 'Announcement',
+        title = message, seconds = seconds, countdown = body.countdown == true, icon = 'megaphone',
+    })
     return { sent = true, players = #GetPlayers() }
 end
 
@@ -827,10 +828,13 @@ end
 routes['POST /events/clear-vehicles'] = function(body)
     local seconds = wholeNumber(body.seconds, 0, 600) or 0
     if seconds == 0 then return { removed = clearEmptyVehicles() } end
-    TriggerClientEvent(RES .. ':client:banner', -1, 'Clearing the streets', 'Empty cars will be removed in', seconds, true)
+    TriggerClientEvent(RES .. ':client:banner', -1, {
+        tag = 'Server', title = 'Clearing the streets', sub = 'Empty cars will be removed in',
+        seconds = seconds, countdown = true, icon = 'car',
+    })
     SetTimeout(seconds * 1000, function()
         local removed = clearEmptyVehicles()
-        notifyPlayer(-1, ('%d empty cars were cleared from the streets'):format(removed), 7000)
+        notifyPlayer(-1, ('%d empty cars were cleared from the streets'):format(removed), 7000, 'Server', 'car')
     end)
     return { scheduled = seconds }
 end
