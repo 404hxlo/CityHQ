@@ -3,7 +3,7 @@ import {
 } from 'lucide-react';
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { api, onSignedOut } from './api';
-import { Backups } from './pages/Backups';
+import { Backups, HostedBackups } from './pages/Backups';
 import { City } from './pages/City';
 import { Console } from './pages/Console';
 import { GlobalSearch } from './Search';
@@ -35,7 +35,7 @@ const NAV: { id: Page; label: string; icon: ReactNode }[] = [
   { id: 'settings', label: 'Settings', icon: <SettingsIcon size={20} /> },
 ];
 
-const HOSTED_LATER = new Set<Page>(['health', 'backups']);
+const HOSTED_LATER = new Set<Page>([]);
 
 // Learn isn't in the menu (which is full on phones); it's reached from the ? button, Settings and search.
 const SEARCHABLE = [
@@ -177,12 +177,12 @@ function Shell({ local, onSignOut }: { local: boolean; onSignOut: () => void }) 
         {local && overview.data?.update && page !== 'console' && page !== 'files' && <UpdateNotice version={overview.data.update.version} />}
         {page === 'overview' && <Overview data={overview.data} error={overview.error} refresh={overview.refresh} local={local} goTo={goTo} />}
         {later && <Notice kind="info">This page isn't available for hosted servers yet. It's coming in a later version of CityHQ.</Notice>}
-        {page === 'health' && !later && <Health />}
+        {page === 'health' && !later && <Health hosted={Boolean(hosted)} />}
         {page === 'city' && <City online={online} helperOutdated={Boolean(overview.data?.helperOutdated)} />}
         {page === 'resources' && <Resources />}
         {page === 'players' && <Players gamePort={overview.data?.gamePort ?? 30121} />}
         {page === 'files' && <Files online={online} />}
-        {page === 'backups' && !later && <Backups />}
+        {page === 'backups' && !later && (hosted ? <HostedBackups /> : <Backups />)}
         {page === 'console' && <Console online={online} />}
         {page === 'settings' && <SettingsPage online={online} onSignOut={onSignOut} />}
         {page === 'learn' && <Learn />}

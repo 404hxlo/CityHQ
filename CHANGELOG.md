@@ -2,6 +2,17 @@
 
 Each version's section is shown in the app before it updates, and on its GitHub release page.
 
+## 1.6.0
+
+- Hosted servers get **Health**: CityHQ's helper, the database, the start order, scripts server.cfg starts that aren't there, and your plan's disk and memory. The PC-only checks (sleep, firewall, router) aren't shown.
+- Hosted servers get **Problems**: the same plain-English explanations as a server on your PC, from your host's live console, with one-click fixes for server.cfg.
+- Hosted servers get **Backups**:
+  - With a panel API key, your host's own backups. Make them, download them, and restore them after a confirm.
+  - With any host, CityHQ's copy of the database and server.cfg, kept on your PC.
+- Hosted servers can **install scripts** from a zip, a folder or GitHub. CityHQ unpacks and reads them on your PC, then sends them to your host. **Remove** moves them aside on your host, and Undo puts them back.
+- The Resources page shows what each script needs on hosted servers too.
+- CityHQ's helper on the server updates to 1.6.0 at its next restart.
+
 ## 1.5.0
 
 - Move to a host: under Settings, CityHQ moves the server on this PC to one you rent (RocketNode and other hosts). It takes every resource, maps and cars included, plus the database and server.cfg.

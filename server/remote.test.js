@@ -33,6 +33,16 @@ function fakePanel() {
     const url = new URL(req.url, 'http://x');
     const send = (status, body, type = 'application/json') => { res.writeHead(status, { 'Content-Type': type }); res.end(typeof body === 'string' ? body : JSON.stringify(body)); };
     if (url.pathname.includes('/html0001/')) return send(200, '<html>not a panel</html>', 'text/html');
+    // The node's signed upload address: no API key, a token instead, like Wings.
+    if (url.pathname === '/upload/file') {
+      const chunks = [];
+      req.on('data', (c) => chunks.push(c));
+      req.on('end', () => {
+        seen.upload = { directory: url.searchParams.get('directory'), token: url.searchParams.get('token'), body: Buffer.concat(chunks) };
+        send(200, '');
+      });
+      return undefined;
+    }
     if (req.headers.authorization !== `Bearer ${KEY}`) return send(401, { errors: [{ detail: 'Unauthenticated.' }] });
     let body = '';
     req.on('data', (c) => { body += c; });
@@ -58,6 +68,13 @@ function fakePanel() {
       }
       if (p === '/api/client/servers/abcd001/files/write') { files.set(url.searchParams.get('file'), body); return send(204, ''); }
       if (p === '/api/client/account') return send(200, { attributes: { username: 'mayor' } });
+      if (p === '/api/client/servers/abcd001/backups' && req.method === 'GET') {
+        return send(200, { data: [{ attributes: { uuid: 'bk-1111-2222', name: 'Nightly', bytes: 2048, is_successful: true, is_locked: false, created_at: '2026-11-12T01:00:00Z', completed_at: '2026-11-12T01:02:00Z' } }] });
+      }
+      if (p === '/api/client/servers/abcd001/backups' && req.method === 'POST') { seen.backup = JSON.parse(body); return send(200, { attributes: { uuid: 'bk-new' } }); }
+      if (p === '/api/client/servers/abcd001/backups/bk-1111-2222/download') return send(200, { object: 'signed_url', attributes: { url: 'https://node.example.net/download/backup?token=x' } });
+      if (p === '/api/client/servers/abcd001/backups/bk-1111-2222/restore') { seen.restore = JSON.parse(body); return send(204, ''); }
+      if (p === '/api/client/servers/abcd001/files/upload') return send(200, { object: 'signed_url', attributes: { url: `http://127.0.0.1:${server.address().port}/upload/file?token=t1` } });
       if (p === '/api/client/servers/abcd001/files/decompress') { seen.decompress = JSON.parse(body); return send(204, ''); }
       if (p === '/api/client/servers/abcd001/databases' && req.method === 'GET') {
         return send(200, { data: [{ attributes: { id: 'db1', name: 's1_city', username: 'u1', host: { address: 'db.example.net', port: 3306 }, connections_from: '%', relationships: { password: { attributes: { password: 'pw1' } } } } }] });
@@ -465,4 +482,50 @@ test('checks before moving: space, an upload already there, the database', () =>
   assert.equal(preflight({ ...base, localFreeBytes: 10 * 1024 ** 3, localZipReady: true }).ok, true, 'unless a zip is ready');
   assert.equal(preflight({ ...base, hostFound: false }).ok, false);
   assert.ok(preflight({ ...base, localMemoryBytes: 7 * 1024 ** 3, hostMemoryLimitBytes: 8 * 1024 ** 3 }).items.some((i) => /run out of memory/.test(i.text)));
+});
+
+// ---------------------------------------------------------------- hosted servers, part 2
+test('panel: the host\'s backups, a download link, a restore, and an upload through the node', async () => {
+  const client = panelClient({ url: panel.url, key: KEY, serverId: 'abcd001' });
+  const [b] = await client.backups.list();
+  assert.equal(b.id, 'bk-1111-2222');
+  assert.equal(b.done, true);
+  assert.equal(b.ok, true);
+  assert.equal(await client.backups.downloadUrl('bk-1111-2222'), 'https://node.example.net/download/backup?token=x');
+  await client.backups.create('CityHQ test');
+  assert.equal(panel.seen.backup.name, 'CityHQ test');
+  await client.backups.restore('bk-1111-2222');
+  assert.deepEqual(panel.seen.restore, { truncate: false }, 'files are put back without wiping new ones first');
+  await client.files.upload('/resources/[added]/x', 'cityhq-install.zip', Buffer.from('PKzip-bytes'));
+  assert.equal(panel.seen.upload.directory, '/resources/[added]/x');
+  assert.equal(panel.seen.upload.token, 't1');
+  assert.ok(panel.seen.upload.body.includes(Buffer.from('PKzip-bytes')), 'the file is in the form');
+  assert.ok(panel.seen.upload.body.includes(Buffer.from('name="files"')), 'under the field the panel expects');
+});
+
+test('a hosted server\'s scripts, from what the running server says (helper meta)', async () => {
+  const { diskFromMeta } = await import('./remote/resources.js');
+  const { disk, system } = diskFromMeta([
+    { name: 'qb-core', path: '/home/container/txData/Q.base/resources/[qb]/qb-core', dependencies: ['oxmysql'], provides: [] },
+    { name: 'my-shop', path: '/home/container/txData/Q.base/resources/[added]/my-shop', dependencies: ['qb-target'] },
+    { name: 'chat', path: '/home/container/alpine/opt/cfx-server/citizen/system_resources/chat' },
+    { name: 'elsewhere', path: '/somewhere/else/x' },
+  ], '/txData/Q.base');
+  assert.deepEqual(disk.map((r) => [r.name, r.dir, r.categories]), [
+    ['qb-core', '/txData/Q.base/resources/[qb]/qb-core', ['[qb]']],
+    ['my-shop', '/txData/Q.base/resources/[added]/my-shop', ['[added]']],
+  ]);
+  assert.deepEqual(system.map((s) => s.name), ['chat']);
+  assert.deepEqual(disk[1].dependencies, ['qb-target']);
+});
+
+test('hosted health: the plan\'s disk and memory, in plain words', async () => {
+  const { limitFinding } = await import('./remote/health.js');
+  const GB = 1024 ** 3;
+  const words = { full: 'full', near: 'near', ok: 'ok' };
+  assert.equal(limitFinding('d', 10 * GB, 100 * GB, 'used', words).status, 'ok');
+  assert.equal(limitFinding('d', 85 * GB, 100 * GB, 'used', words).status, 'warn');
+  assert.equal(limitFinding('d', 99 * GB, 100 * GB, 'used', words).status, 'bad');
+  assert.equal(limitFinding('d', 5 * GB, null, 'used', words), null, 'no limit, no finding');
+  assert.match(limitFinding('d', 10 * GB, 100 * GB, 'used', words).detail, /10\.0 GB of 100\.0 GB used/);
 });

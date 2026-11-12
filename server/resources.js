@@ -109,8 +109,14 @@ export async function listSqlFiles(name) {
   return resource ? findSql(resource.dir) : [];
 }
 
+// A hosted server's resources are known from its helper, and changed through it and the host
+// (remote/runtime.js sets this), instead of this PC's disk.
+let hosted = null;
+export const setHostedResources = (value) => { hosted = value; };
+
 /** Walks resources/, treating [bracket] folders as categories. */
 export async function scanDisk() {
+  if (hosted) return hosted.disk();
   const { dataPath } = serverData();
   const root = path.join(dataPath, 'resources');
   const found = [];
@@ -138,6 +144,7 @@ export const findResourceDir = async (name) => (await scanDisk()).find((r) => r.
 
 /** The resources built into FXServer, which have no folder in resources/. */
 export async function scanSystem(dir = SYSTEM_DIR) {
+  if (hosted && dir === SYSTEM_DIR) return hosted.system();
   let entries = [];
   try { entries = await readdir(dir, { withFileTypes: true }); } catch { return []; }
   const found = [];
@@ -311,6 +318,7 @@ export async function assertCanControl(name) {
 }
 
 export async function resourceAction(name, action) {
+  if (hosted) return hosted.action(name, action);
   if (!['start', 'stop', 'restart', 'ensure'].includes(action)) throw new HttpError(400, 'Invalid action');
   await assertCanControl(name);
   // A resource with gigabytes of game files can take a while to mount.
@@ -343,6 +351,7 @@ export const refreshResources = () => agentRequest('/refresh', { method: 'POST',
 
 /** Switches whether a resource starts with the server, and notes it in the change history. */
 export async function setBoot(name, enabled, { record = true } = {}) {
+  if (hosted) return hosted.setBoot(name, enabled, { record });
   const result = await switchBoot(name, enabled);
   if (record) {
     recordChange({
@@ -480,6 +489,15 @@ async function installFromFolder(root, hintName, { preferHint = false, keepSourc
   const installed = [];
   for (const { dir, name } of planned) {
     setPhase('installing', name);
+    // A hosted server gets the folder through its host; what's in it is read here first.
+    if (hosted) {
+      const meta = parseManifest(await manifestText(dir));
+      const sqlFiles = await findSql(dir);
+      setPhase('installing', `${name} (sending it to your host)`);
+      await hosted.place(dir, name);
+      installed.push({ name, version: meta.version, description: meta.description, dependencies: meta.dependencies, sqlFiles });
+      continue;
+    }
     const dest = path.join(dataPath, 'resources', ADDED_CATEGORY, name);
     await mkdir(path.dirname(dest), { recursive: true });
     if (keepSource) await cp(dir, dest, { recursive: true });
@@ -491,7 +509,7 @@ async function installFromFolder(root, hintName, { preferHint = false, keepSourc
   for (const item of installed) item.missingDependencies = item.dependencies.filter((d) => !available.has(d));
   await refreshResources();
   for (const item of installed) {
-    recordChange({ kind: 'install', title: `Installed ${item.name}`, undo: { type: 'remove', name: item.name }, undoHint: `${item.name} is stopped and moved to Recently removed, where it can be restored.` });
+    recordChange({ kind: 'install', title: `Installed ${item.name}`, undo: { type: 'remove', name: item.name }, undoHint: hosted ? `${item.name} is stopped and moved aside on your host (resources/[cityhq-removed]).` : `${item.name} is stopped and moved to Recently removed, where it can be restored.` });
   }
   return { installed };
 }
@@ -634,6 +652,7 @@ export async function runSql(name, file) {
 export async function removeResource(name) {
   if (!isValidName(name)) throw new HttpError(400, 'Invalid resource name');
   if (neverRemove(name)) throw new HttpError(400, `${name} is required by the server and cannot be removed`);
+  if (hosted) return hosted.remove(name);
   const resource = await findResourceDir(name);
   if (!resource) throw new HttpError(404, 'That resource was not found');
   await agentRequest('/resources/action', { method: 'POST', body: { name, action: 'stop' }, timeoutMs: 15000 }).catch(() => null);

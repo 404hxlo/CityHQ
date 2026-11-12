@@ -59,8 +59,10 @@ export function InstallCheck({ name, open = false }: { name: string; open?: bool
   const checks = report.data?.checks || [];
   const problems = checks.filter((c) => c.status === 'bad' || c.status === 'warn');
   const rest = checks.filter((c) => c.status !== 'bad' && c.status !== 'warn');
-  const summary = !report.data
-    ? 'Checking what it needs'
+  const summary = report.error && !report.data
+    ? 'Not available for this server'
+    : !report.data
+      ? 'Checking what it needs'
     : problems.length ? `${problems.length} thing${problems.length === 1 ? '' : 's'} to sort out` : 'Nothing to sort out';
 
   return (

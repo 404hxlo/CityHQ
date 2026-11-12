@@ -281,6 +281,44 @@ routes['GET /resources'] = function()
     return list
 end
 
+-- What every resource needs and stands in for, from its own manifest, as FXServer read it. A
+-- hosted server's Health and Problems pages use this instead of reading 300 manifests remotely.
+local function metaList(name, key)
+    local out = {}
+    for i = 0, GetNumResourceMetadata(name, key) - 1 do
+        local v = GetResourceMetadata(name, key, i)
+        if v and v ~= '' and v:sub(1, 1) ~= '/' then out[#out + 1] = (v:gsub('%s*[<>=].*$', '')) end
+    end
+    return out
+end
+
+routes['GET /resources/meta'] = function()
+    local list = {}
+    for i = 0, GetNumResources() - 1 do
+        local name = GetResourceByFindIndex(i)
+        if name and name ~= '_cfx_internal' then
+            list[#list + 1] = {
+                name = name,
+                state = GetResourceState(name),
+                path = GetResourcePath(name),
+                version = GetResourceMetadata(name, 'version', 0),
+                description = GetResourceMetadata(name, 'description', 0),
+                author = GetResourceMetadata(name, 'author', 0),
+                dependencies = metaList(name, 'dependency'),
+                provides = metaList(name, 'provide'),
+            }
+        end
+    end
+    return list
+end
+
+-- Whether the server's own database answers (a hosted one often doesn't answer CityHQ directly).
+routes['GET /db-ping'] = function()
+    if GetResourceState('oxmysql') ~= 'started' then error('oxmysql is not running') end
+    local ok = exports.oxmysql:scalar_async('SELECT 1', {})
+    return { ok = ok == 1 }
+end
+
 routes['POST /resources/action'] = function(body)
     local name, action = body.name, body.action
     if not safeResourceName(name) then error('Invalid resource name') end

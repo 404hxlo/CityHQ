@@ -300,8 +300,13 @@ export async function saveFields(scope, rel, changes, etag, { force = false } = 
   return { ...(await readEditable(scope, rel)), backupId, syntaxChecked: check.checked && !check.plain };
 }
 
+// A hosted server's files are kept through the host (remote/runtime.js sets this).
+let hostedKeep = null;
+export const setHostedKeepVersion = (fn) => { hostedKeep = fn; };
+
 /** Saves a copy of a file into its version history, the same one the editor's Backups button shows. */
 export async function keepVersion(scope, rel) {
+  if (hostedKeep) return hostedKeep(scope, rel);
   assertScopePath(scope, rel);
   const base = await scopeBase(scope);
   return backup(scope, rel, resolveInside(base, rel));

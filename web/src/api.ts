@@ -24,6 +24,16 @@ export interface HostedCheck {
   database?: { host: string; port: number; user: string; name: string; hasPassword: boolean } | null;
   problems: { level: 'bad' | 'warn' | 'info'; text: string }[];
 }
+/** A hosted server's backups: the host's own (panel) and CityHQ's database copies on this PC. */
+export interface HostedBackups {
+  kind: 'panel' | 'sftp';
+  host: { id: string; name: string; bytes: number; done: boolean; ok: boolean; locked: boolean; createdAt: number | null; completedAt: number | null }[] | null;
+  limit: number | null;
+  hostError: string | null;
+  local: { id: string; createdAt: number; size: number; parts: string[] }[];
+  canOpenFolder: boolean;
+}
+
 /** Moving the server on this PC to a host. */
 export type MoveLogin = HostedLogin & {
   sftpPassword?: string;
@@ -370,6 +380,14 @@ export const api = {
   welcomeUse: (folder: string, txAdminPort?: number) => request<{ root: string; external: boolean; needsTools: boolean }>('POST', '/api/welcome/use', { folder, txAdminPort }),
   welcomeTools: () => request<DbToolsState>('POST', '/api/welcome/tools'),
   welcomeProgress: () => request<WelcomeProgress>('GET', '/api/welcome/progress'),
+  hostedBackups: () => request<HostedBackups>('GET', '/api/hosted-backups'),
+  createHostBackup: () => request<{ started: boolean }>('POST', '/api/hosted-backups'),
+  hostBackupLink: (id: string) => request<{ url: string }>('GET', `/api/hosted-backups/${encodeURIComponent(id)}/download`),
+  restoreHostBackup: (id: string) => request<{ restoring: boolean }>('POST', `/api/hosted-backups/${encodeURIComponent(id)}/restore`),
+  deleteHostBackup: (id: string) => request<{ deleted: string }>('DELETE', `/api/hosted-backups/${encodeURIComponent(id)}`),
+  createDatabaseBackup: () => request<{ id: string; tables: number | null }>('POST', '/api/hosted-backups/database'),
+  deleteDatabaseBackup: (id: string) => request<{ deleted: string }>('DELETE', `/api/hosted-backups/database/${encodeURIComponent(id)}`),
+  openDatabaseBackups: () => request<{ opened: boolean }>('POST', '/api/hosted-backups/database/open'),
   move: () => request<MoveStatus>('GET', '/api/move'),
   moveCheck: (login: MoveLogin) => request<MoveCheck>('POST', '/api/move/check', login),
   moveStart: (login: MoveLogin) => request<MoveStatus>('POST', '/api/move/start', login),

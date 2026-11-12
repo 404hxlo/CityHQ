@@ -104,6 +104,22 @@ export function panelClient({ url, key, serverId, timeoutMs = 15000 }) {
       mkdir: (root, name) => call('POST', server('/files/create-folder'), { json: { root, name } }),
       remove: (root, files) => call('POST', server('/files/delete'), { json: { root, files } }),
       rename: (root, from, to) => call('PUT', server('/files/rename'), { json: { root, files: [{ from, to }] } }),
+      /**
+       * Uploads one file into a folder through the panel (the same way its file manager does).
+       * Hosts limit the size of these uploads, often to 100 MB.
+       */
+      async upload(dir, name, bytes) {
+        const url = (await call('GET', server('/files/upload')))?.attributes?.url;
+        if (!url) throw new HttpError(502, 'The panel didn\'t give an upload address.');
+        const form = new FormData();
+        form.append('files', new Blob([bytes]), name);
+        let res;
+        try {
+          res = await fetch(`${url}&directory=${encodeURIComponent(dir)}`, { method: 'POST', body: form, signal: AbortSignal.timeout(30 * 60000) });
+        } catch { throw new HttpError(502, 'The upload to your host didn\'t go through. Try again.'); }
+        if (res.status === 413) throw new HttpError(413, 'That\'s bigger than your host lets the panel take in one go. Upload it with WinSCP instead.');
+        if (!res.ok) throw new HttpError(502, `Your host refused the upload (${res.status}).`);
+      },
       /** Unpacks an archive on the host itself, so big uploads don't come back down. */
       decompress: (root, file) => call('POST', server('/files/decompress'), { json: { root, file }, timeout: 15 * 60000 }),
       compress: (root, files) => call('POST', server('/files/compress'), { json: { root, files }, timeout: 15 * 60000 }),

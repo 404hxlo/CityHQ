@@ -251,8 +251,13 @@ async function checkReachable() {
 
 const ORDER = { bad: 0, warn: 1, info: 2, ok: 3 };
 
+// A hosted server has its own list of checks (remote/health.js sets this).
+let hostedChecks = null;
+export const setHostedHealthChecks = (fn) => { hostedChecks = fn; };
+
 /** Every check, problems first. A check that can't run is left out rather than guessed. */
 export async function healthChecks() {
+  if (hostedChecks) return hostedChecks();
   const server = findServerData();
   const [disk, cfg] = server ? await Promise.all([scanDisk(), readCfg(server.cfgPath).catch(() => '')]) : [[], ''];
   const settle = (p) => Promise.resolve(p).then((v) => v, () => null);

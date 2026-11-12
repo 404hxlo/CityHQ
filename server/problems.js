@@ -11,7 +11,7 @@ import { tableInfo } from './db.js';
 import {
   fixedThisBoot, recordFix, runFix, tablesDefining,
 } from './fixes.js';
-import { findServerData, HttpError } from './paths.js';
+import { findServerData, HttpError, REMOTE } from './paths.js';
 import { getProcessState } from './processes.js';
 import {
   assertCanControl, listSqlFiles, liveStates, replacementsOf, scanDisk,
@@ -257,7 +257,9 @@ export async function currentProblems({ fresh = false } = {}) {
   // Once a resource has been removed, its old errors aren't worth reporting.
   const items = explainLogLines(boot >= 0 ? texts.slice(boot) : texts, ctx)
     .filter((item) => !item.resource || ctx.isInstalled(item.resource));
-  await addSqlActions(items, disk);
+  // A hosted server's .sql files aren't on this PC (running them there comes later).
+  if (!REMOTE) await addSqlActions(items, disk);
+  else for (const item of items) { delete item.needsSqlFor; delete item.sqlTable; delete item.sqlColumn; delete item.sqlQuery; }
 
   const known = new Set(items.map((i) => i.id));
   const available = new Set(disk.flatMap((r) => [r.name, ...r.provides]));

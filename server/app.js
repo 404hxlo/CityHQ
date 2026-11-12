@@ -59,6 +59,7 @@ import {
   APP_DIR, APP_PORT, FXSERVER_DIR, GAME_PORT, findServerData, HttpError, LOG_DIR, MANAGED_DB, REMOTE, ROOT, ROOT_FOUND, ROOT_SOURCE, TXADMIN_PORT,
 } from './paths.js';
 import { setHostedBoot } from './remote/resources.js';
+import { restoreOnHost } from './remote/install.js';
 import { registerHostedRoutes } from './remote/routes.js';
 import { startRemote, stopRemote } from './remote/runtime.js';
 import { repairMovedFolder } from './relocate.js';
@@ -171,8 +172,7 @@ function buildApp() {
       dbTools: MANAGED_DB || REMOTE ? null : { ready: dbToolsReady(), progress: dbToolsProgress() },
       // A newer CityHQ, shown at the top of every page. Only on the PC, where it can be installed.
       update: isLocalRequest(req) ? updateNotice() : null,
-      // Finding problems in a hosted server's files comes in a later version.
-      problems: REMOTE ? [] : await currentProblems().catch(() => []),
+      problems: await currentProblems().catch(() => []),
       alerts: unseenAlerts().slice(0, 5),
       schedule: {
         pendingRestart: getPendingRestart(),
@@ -747,6 +747,7 @@ export async function startApp() {
       await setHostedBoot(name, enabled, { record: false });
       return enabled ? `${name} starts with the server again.` : `${name} no longer starts with the server.`;
     });
+    registerUndo('hosted-restore', (undo) => restoreOnHost(undo));
     startStatusPolling();
     mainServer = await listen(appInstance, '127.0.0.1');
     await applyLanSetting();

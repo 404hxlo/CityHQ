@@ -121,6 +121,101 @@ function RestoreDialog({ backup, onClose, onDone }: { backup: ServerBackup; onCl
   );
 }
 
+/** A hosted server's backups: the host's own copies of everything, and CityHQ's database copies. */
+export function HostedBackups() {
+  const { data, error, refresh } = usePoll(api.hostedBackups, 10000);
+  const { busy, run } = useAction();
+  const confirm = useConfirm();
+  if (!data) return error ? <Notice kind="error">{error}</Notice> : <Spinner />;
+  const host = data.host || [];
+  const full = data.limit !== null && host.length >= data.limit;
+
+  const restore = async (id: string, name: string) => {
+    const ok = await confirm({
+      title: `Restore "${name}"?`,
+      body: (
+        <>
+          <p>CityHQ stops the server, then your host puts back every file from this backup. Files changed or added since then are replaced.</p>
+          <p>The database isn't part of your host's backup unless your host says so. Make a database copy below first if you're unsure.</p>
+        </>
+      ),
+      confirm: 'Stop and restore',
+      danger: true,
+    });
+    if (ok && await run(`restore:${id}`, () => api.restoreHostBackup(id), 'Your host is restoring it. Start the server from the Overview page when it\'s done.')) refresh();
+  };
+  const download = async (id: string) => {
+    const r = await run(`dl:${id}`, () => api.hostBackupLink(id));
+    if (r?.url) window.open(r.url, '_blank', 'noreferrer');
+  };
+  const remove = async (id: string, name: string) => {
+    const ok = await confirm({ title: `Delete "${name}"?`, body: <p>Your host deletes this backup. It can't be brought back.</p>, confirm: 'Delete backup', danger: true });
+    if (ok && await run(`rm:${id}`, () => api.deleteHostBackup(id), 'Backup deleted')) refresh();
+  };
+
+  return (
+    <div className="page-stack">
+      <header className="page-head">
+        <div>
+          <h1>Backups</h1>
+          <p className="muted-note">Your host keeps copies of the whole server; CityHQ can also keep a copy of the database and server.cfg on this PC.</p>
+        </div>
+      </header>
+
+      <section className="card">
+        <div className="card-title-row">
+          <h3 className="card-title"><Archive size={16} />Your host's backups</h3>
+          {data.kind === 'panel' && <Button variant="primary" icon={<Save size={15} />} busy={busy === 'host'} disabled={full} onClick={() => run('host', () => api.createHostBackup(), 'Your host is making a backup. It shows here when it\'s done.').then(refresh)}>Back up now</Button>}
+        </div>
+        {data.kind !== 'panel' && <p className="muted-note">Your host's own backups are made in its panel. Connecting with a panel API key lets CityHQ list, make and restore them here.</p>}
+        {data.hostError && <Notice kind="error">{data.hostError}</Notice>}
+        {data.kind === 'panel' && !data.hostError && (
+          <>
+            <p className="muted-note">{data.limit !== null ? `Your plan keeps up to ${data.limit} backup${data.limit === 1 ? '' : 's'}.` : ''}{full ? ' Delete one to make another.' : ''}</p>
+            {host.length === 0 && <Empty icon={<Archive size={28} />} title="No backups yet">Your host hasn't made any backups of this server.</Empty>}
+            <ul className="backup-list">
+              {host.map((b) => (
+                <li key={b.id} className="backup-row">
+                  <div className="backup-main">
+                    <strong>{b.name}</strong>
+                    <span className="muted-note">{b.done ? (b.ok ? `${formatWhen(b.completedAt || b.createdAt || 0)} · ${formatBytes(b.bytes)}` : 'This backup failed') : <><Loader2 size={13} className="spin" /> Being made</>}</span>
+                  </div>
+                  <div className="button-row">
+                    <Button variant="ghost" busy={busy === `dl:${b.id}`} disabled={!b.done || !b.ok} onClick={() => download(b.id)}>Download</Button>
+                    <Button icon={<RotateCcw size={15} />} busy={busy === `restore:${b.id}`} disabled={!b.done || !b.ok} onClick={() => restore(b.id, b.name)}>Restore</Button>
+                    <Button variant="ghost" icon={<Trash2 size={15} />} busy={busy === `rm:${b.id}`} disabled={b.locked} onClick={() => remove(b.id, b.name)} aria-label={`Delete ${b.name}`} />
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </>
+        )}
+      </section>
+
+      <section className="card">
+        <div className="card-title-row">
+          <h3 className="card-title"><Database size={16} />Database copies on this PC</h3>
+          <div className="button-row">
+            {data.canOpenFolder && <Button variant="ghost" icon={<FolderOpen size={16} />} onClick={() => run('open', () => api.openDatabaseBackups())}>Open folder</Button>}
+            <Button icon={<Save size={15} />} busy={busy === 'db'} onClick={() => run('db', () => api.createDatabaseBackup(), (r) => `Database copied${r.tables !== null ? ` (${r.tables} tables)` : ''}`).then(refresh)}>Copy the database</Button>
+          </div>
+        </div>
+        <p className="muted-note">Your players, characters and everything scripts save, plus server.cfg, downloaded to this PC. It needs your host's database to accept connections from outside.</p>
+        {data.local.length === 0 && <p className="muted-note">No copies yet.</p>}
+        <ul className="backup-list">
+          {data.local.map((b) => (
+            <li key={b.id} className="backup-row">
+              <div className="backup-main"><strong>{formatWhen(b.createdAt)}</strong><span className="muted-note">{formatBytes(b.size)} · {b.parts.join(' and ')}</span></div>
+              <Button variant="ghost" icon={<Trash2 size={15} />} busy={busy === `lrm:${b.id}`} onClick={() => run(`lrm:${b.id}`, () => api.deleteDatabaseBackup(b.id), 'Deleted').then(refresh)} aria-label="Delete this copy" />
+            </li>
+          ))}
+        </ul>
+      </section>
+      <ChangeHistory />
+    </div>
+  );
+}
+
 export function Backups() {
   const { data, error, refresh } = usePoll(api.backups, 3000);
   const automation = usePoll(api.automation, 0);

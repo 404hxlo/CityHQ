@@ -7,6 +7,15 @@ import { setHostedControl } from '../control.js';
 import { recordEvent } from '../events.js';
 import { noteHostedCfg } from '../framework.js';
 import { HttpError, REMOTE } from '../paths.js';
+import { setHostedKeepVersion } from '../files.js';
+import { setHostedHealthChecks } from '../health.js';
+import { setHostedResources } from '../resources.js';
+import { keepHostedVersion } from './files.js';
+import { hostedHealthChecks } from './health.js';
+import { placeOnHost, removeFromHost } from './install.js';
+import {
+  hostedDisk, hostedResourceAction, hostedSystem, setHostedBoot,
+} from './resources.js';
 import { closeConnection, connection, saveRemote } from './connection.js';
 import { serverNameOf } from './find.js';
 import {
@@ -71,6 +80,16 @@ export async function startRemote() {
     if (!address) throw NO_ADDRESS;
     return address;
   });
+  setHostedResources({
+    disk: hostedDisk,
+    system: hostedSystem,
+    action: hostedResourceAction,
+    setBoot: setHostedBoot,
+    place: placeOnHost,
+    remove: removeFromHost,
+  });
+  setHostedKeepVersion(keepHostedVersion);
+  setHostedHealthChecks(hostedHealthChecks);
   setHostedControl({
     label: REMOTE.serverName || REMOTE.host || 'Hosted server',
     capabilities: conn ? conn.capabilities : { power: false, stats: false, liveConsole: false },

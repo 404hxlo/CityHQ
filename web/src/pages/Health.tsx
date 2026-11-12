@@ -156,7 +156,7 @@ function Doctor() {
 }
 
 /** Health: checks for beginner traps, and why the server restarted. */
-export function Health() {
+export function Health({ hosted = false }: { hosted?: boolean }) {
   return (
     <div className="page-stack">
       <header className="page-head">
@@ -166,8 +166,9 @@ export function Health() {
         </div>
       </header>
       <Checks />
-      <FriendsCard />
-      <Doctor />
+      {/* The router, firewall and Windows' records are about a server on this PC. */}
+      {!hosted && <FriendsCard />}
+      {!hosted && <Doctor />}
     </div>
   );
 }

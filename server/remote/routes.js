@@ -8,6 +8,9 @@ import {
 } from './files.js';
 import { connection } from './connection.js';
 import { hostedResourceAction, listHostedResources, setHostedBoot } from './resources.js';
+import {
+  createDatabaseBackup, createHostBackup, deleteDatabaseBackup, deleteHostBackup, hostBackupLink, hostedBackups, openDatabaseBackups, restoreHostBackup,
+} from './backups.js';
 import { checkHosted, listPanelServers, useHosted } from './welcome.js';
 import {
   cancelMove, checkMove, finishMove, moveStatus, pauseMove, startMove,
@@ -15,8 +18,8 @@ import {
 
 // Pages that work on files, processes or Windows on this PC, and so not for a hosted server yet.
 const NOT_YET = [
-  /^\/problems/, /^\/health/, /^\/reach/, /^\/profile/, /^\/backups/, /^\/trash/,
-  /^\/resources\/install/, /^\/resources\/[^/]+\/(check|restart-checked|sql-files|sql|activate)/,
+  /^\/health\/doctor/, /^\/reach/, /^\/profile/, /^\/trash/, /^\/backups/,
+  /^\/resources\/[^/]+\/(check|restart-checked|sql-files|sql)/,
   /^\/server\/(start-panel|pin)/, /^\/browse\/search/,
 ];
 
@@ -48,7 +51,7 @@ export function registerHostedRoutes(api, { json, handler, localOnly, relaunchSo
   if (!REMOTE) return;
 
   api.use((req, res, next) => {
-    if (NOT_YET.some((re) => re.test(req.path)) || (req.method === 'DELETE' && /^\/resources\/[^/]+$/.test(req.path))) {
+    if (NOT_YET.some((re) => re.test(req.path))) {
       return res.status(409).json({ error: 'This isn\'t available for hosted servers yet. It\'s coming in a later version of CityHQ.', hostedNotYet: true });
     }
     return next();
@@ -63,6 +66,16 @@ export function registerHostedRoutes(api, { json, handler, localOnly, relaunchSo
     if (conn.command) { await conn.command(command); return { ran: command }; }
     return agentRequest('/command', { method: 'POST', body: { command } });
   }));
+
+  // Backups: the host's own, and CityHQ's copy of the database kept on this PC.
+  api.get('/hosted-backups', handler(() => hostedBackups()));
+  api.post('/hosted-backups', handler(() => createHostBackup()));
+  api.get('/hosted-backups/:id/download', localOnly, handler((req) => hostBackupLink(req.params.id)));
+  api.post('/hosted-backups/:id/restore', handler((req) => restoreHostBackup(req.params.id)));
+  api.delete('/hosted-backups/:id', handler((req) => deleteHostBackup(req.params.id)));
+  api.post('/hosted-backups/database', handler(() => createDatabaseBackup()));
+  api.delete('/hosted-backups/database/:id', handler((req) => deleteDatabaseBackup(req.params.id)));
+  api.post('/hosted-backups/database/open', localOnly, handler(() => openDatabaseBackups()));
 
   // Resources
   api.get('/resources', handler(() => listHostedResources()));

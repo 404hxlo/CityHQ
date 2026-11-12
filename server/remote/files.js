@@ -141,6 +141,12 @@ export async function saveFields(scope, relIn, changes, etag, { force = false } 
   return { ...(await readEditable(scope, relIn)), backupId, syntaxChecked: check.checked && !check.plain };
 }
 
+/** Saves the file as it is now into its version history (before a fix changes it, say). */
+export async function keepHostedVersion(scope, relIn) {
+  const { full } = scopeFile(scope, relIn);
+  return backup(scope, relIn, await readText(full));
+}
+
 export async function listVersions(scope, rel) {
   scopeFile(scope, rel);
   const dir = backupDirFor(scope, rel);

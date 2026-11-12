@@ -36,8 +36,9 @@ The first time, CityHQ asks: **Do you already have a FiveM server?**
 - **It's hosted.** For a server rented from a host such as RocketNode. Connect with your panel's API
   key (Pterodactyl-style panels: **Account**, then **API Credentials**) or with SFTP. CityHQ adds its
   helper to the server, which starts at the server's next restart. Your key stays on your PC, locked
-  with Windows' own protection. Health, Backups, finding problems and installing scripts aren't
-  available for hosted servers yet.
+  with Windows' own protection. Health, Problems, Backups (your host's own, plus a database copy on
+  your PC) and installing scripts work for hosted servers too. A few things stay PC-only: the
+  install check, running .sql files, and the restart explanations.
 
 You can switch to a different server later under **Settings**, then **Change server**. To move a
 server from your PC to a host, use **Settings**, then **Move to a host**: CityHQ uploads every
