@@ -6,6 +6,7 @@ import { parseBoot, readCfg } from './cfg.js';
 import { readConsole } from './console.js';
 import { buildDocIndex, repoFor, withDocLinks } from './docs.js';
 import { explainLogLines, explainMissingDependency } from './explain.js';
+import { frameworkOf } from './framework.js';
 import { tableInfo } from './db.js';
 import {
   fixedThisBoot, recordFix, runFix, tablesDefining,
@@ -141,6 +142,7 @@ function makeContext(disk, cfgText, dataPath) {
   const provided = new Set(disk.flatMap((r) => r.provides));
   const toFolder = (r) => path.relative(dataPath, r.dir).replaceAll('\\', '/');
   return {
+    framework: frameworkOf(cfgText, dataPath),
     folderOf: (name) => (byName.has(name) ? toFolder(byName.get(name)) : null),
     isInstalled: (name) => byName.has(name) || lower.has(String(name).toLowerCase()) || provided.has(name),
     resolveName(prefix) {

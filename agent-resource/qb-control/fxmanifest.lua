@@ -5,7 +5,7 @@ lua54 'yes'
 name 'qb-control'
 description 'Local API used by the CityHQ app. Only answers this PC, with a secret token.'
 author 'CityHQ'
-version '1.3.0'
+version '1.4.0'
 
 server_script 'server.lua'
 client_script 'client.lua'

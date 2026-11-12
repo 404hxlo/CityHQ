@@ -25,11 +25,12 @@ import {
   awakeStatus, refreshAwake, startAwakeWatch, stopAwakeWatch,
 } from './awake.js';
 import { desktop } from './desktop.js';
+import { currentFramework, serverFramework } from './framework.js';
 import {
   listEvents, markSeen, recordEvent, unseenAlerts,
 } from './events.js';
 import {
-  parseAdmins, removeAdmin, ROLES, setAdmin, VALID_IDENTIFIER,
+  parseAdmins, removeAdmin, rolesFor, setAdmin, VALID_IDENTIFIER,
 } from './admins.js';
 import { readCfg, writeCfg } from './cfg.js';
 import { knownPlayers, nameFor } from './people.js';
@@ -160,6 +161,7 @@ function buildApp() {
       rootSource: ROOT_SOURCE,
       // Shown on "Finish setting up", so someone can tell it's the server they meant.
       root: isLocalRequest(req) ? ROOT : null,
+      framework: currentFramework(),
       dbTools: MANAGED_DB ? null : { ready: dbToolsReady(), progress: dbToolsProgress() },
       // A newer CityHQ, shown at the top of every page. Only on the PC, where it can be installed.
       update: isLocalRequest(req) ? updateNotice() : null,
@@ -243,7 +245,7 @@ function buildApp() {
     return dbToolsState();
   }));
   api.get('/welcome/progress', localOnly, handler(() => ({ tools: dbToolsState(), newServer: newServerJob() })));
-  api.post('/welcome/new', localOnly, json, handler((req) => startNewServer(req.body?.folder)));
+  api.post('/welcome/new', localOnly, json, handler((req) => startNewServer(req.body?.folder, req.body?.framework)));
   api.post('/welcome/relaunch', localOnly, handler(() => ({ relaunching: relaunchSoon() })));
   api.post('/welcome/forget', localOnly, handler(async () => {
     if (ROOT_SOURCE !== 'saved') throw new HttpError(409, 'This copy of CityHQ is installed inside its server folder, so it always manages that one.');
@@ -530,10 +532,12 @@ function buildApp() {
   /** Gives a player a role (or none), live too, and notes it in the history with the way back. */
   const changeAdmin = async (identifier, role, name, { record = true } = {}) => {
     const cfgPath = serverCfg();
-    const before = parseAdmins(await readCfg(cfgPath)).find((a) => a.identifier === identifier) || null;
+    const { framework } = serverFramework();
+    const ROLES = rolesFor(framework);
+    const before = parseAdmins(await readCfg(cfgPath), framework).find((a) => a.identifier === identifier) || null;
     let result;
     if (role) {
-      const { text, removed } = setAdmin(await readCfg(cfgPath), identifier, role, name);
+      const { text, removed } = setAdmin(await readCfg(cfgPath), identifier, role, name, framework);
       await writeCfg(cfgPath, text);
       const live = await applyLive([
         ...removed.map((principal) => ({ identifier, role: principal, remove: true })),
@@ -541,7 +545,7 @@ function buildApp() {
       ]);
       result = { saved: true, live };
     } else {
-      const { text, removed } = removeAdmin(await readCfg(cfgPath), identifier);
+      const { text, removed } = removeAdmin(await readCfg(cfgPath), identifier, framework);
       if (!removed.length) throw new HttpError(404, 'That player is not an admin');
       await writeCfg(cfgPath, text);
       result = { removed: removed.length, live: await applyLive(removed.map((principal) => ({ identifier, role: principal, remove: true }))) };
@@ -560,13 +564,15 @@ function buildApp() {
   };
   api.get('/known-players', handler(async () => (await knownPlayers()).slice(0, 500)));
   api.get('/admins', handler(async () => {
-    const admins = parseAdmins(await readCfg(serverCfg()));
+    const { framework } = serverFramework();
+    const admins = parseAdmins(await readCfg(serverCfg()), framework);
     let players = [];
     let playersError = null;
     try { players = await knownPlayers(); } catch { playersError = 'The player list could not be read from the database. Is the database running?'; }
     return {
       admins: admins.map((a) => ({ ...a, name: nameFor(a.identifier, players) })),
-      roles: ROLES,
+      roles: rolesFor(framework),
+      framework,
       players: players.slice(0, 500),
       playersError,
     };
@@ -574,7 +580,8 @@ function buildApp() {
   api.post('/admins', json, handler(async (req) => {
     const { identifier, role, name } = req.body || {};
     if (!VALID_IDENTIFIER.test(identifier || '')) throw new HttpError(400, 'Choose a player first');
-    if (!ROLES[role]) throw new HttpError(400, 'Choose Owner, Admin or Moderator');
+    const roles = rolesFor(serverFramework().framework);
+    if (!roles[role]) throw new HttpError(400, `Choose ${Object.values(roles).map((r) => r.label).join(' or ')}`);
     return changeAdmin(identifier, role, name);
   }));
   api.delete('/admins/:identifier', handler(async (req) => {
@@ -601,7 +608,7 @@ function buildApp() {
   });
   registerUndo('admin', async ({ identifier, role, name }) => {
     await changeAdmin(identifier, role, name);
-    return role ? `${name} is ${ROLES[role]?.label || role} again.` : `${name} is no longer an admin.`;
+    return role ? `${name} is ${rolesFor(serverFramework().framework)[role]?.label || role} again.` : `${name} is no longer an admin.`;
   });
   api.get('/history', handler(() => listChanges()));
   api.post('/history/:id/undo', handler((req) => undoChange(req.params.id)));

@@ -5,7 +5,7 @@ import {
   useCallback, useEffect, useRef, useState, type ReactNode,
 } from 'react';
 import {
-  api, type NewServerJob, type ServerCandidate, type WelcomeInfo,
+  api, FRAMEWORK_NAME, type Framework, type NewServerJob, type ServerCandidate, type WelcomeInfo,
 } from '../api';
 import { ReportButton } from '../Report';
 import { Term } from '../Term';
@@ -59,7 +59,7 @@ function CandidateCard({ c, onPick }: { c: ServerCandidate; onPick: () => void }
           <strong className="candidate-path">{c.root}</strong>
           <span className="muted-note">
             {c.dataPath ? `Game port ${c.gamePort} · txAdmin ${c.txAdminPort}` : 'txAdmin not set up yet'}
-            {c.qbcore ? ' · QBCore' : ''}
+            {c.framework ? ` · ${FRAMEWORK_NAME[c.framework]}` : ''}
             {bad ? ` · ${bad} problem${bad === 1 ? '' : 's'}` : warn ? ` · ${warn} thing${warn === 1 ? '' : 's'} to check` : ''}
           </span>
         </div>
@@ -213,6 +213,7 @@ function Connecting({ needsTools, onRestart }: { needsTools: boolean; onRestart:
 /** Building a new server: where it goes, then setup's steps as they happen. */
 function NewServer({ info, onBack, onBuilt }: { info: WelcomeInfo; onBack: () => void; onBuilt: () => void }) {
   const [folder, setFolder] = useState(info.suggestedNewFolder);
+  const [framework, setFramework] = useState<Framework>('qbcore');
   const [job, setJob] = useState<NewServerJob | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -227,7 +228,7 @@ function NewServer({ info, onBack, onBuilt }: { info: WelcomeInfo; onBack: () =>
 
   const start = async () => {
     setError(null);
-    try { setJob(await api.welcomeNew(folder.trim())); } catch (err) { setError((err as Error).message); }
+    try { setJob(await api.welcomeNew(folder.trim(), framework)); } catch (err) { setError((err as Error).message); }
   };
 
   const heading = job ? [...job.lines].reverse().find((l) => l.startsWith('== '))?.slice(3) : null;
@@ -239,7 +240,7 @@ function NewServer({ info, onBack, onBuilt }: { info: WelcomeInfo; onBack: () =>
         <pre className="setup-log" aria-live="polite">{job.lines.slice(-14).join('\n')}</pre>
         {job.ok && (
           <>
-            <p className="muted-note">Next, CityHQ starts again on {job.root} and opens txAdmin, where you create your account and choose the QBCore recipe.</p>
+            <p className="muted-note">Next, CityHQ starts again on {job.root} and opens txAdmin, where you create your account and choose the {FRAMEWORK_NAME[framework]} recipe.</p>
             <div className="welcome-actions"><Button variant="primary" onClick={onBuilt}>Continue</Button></div>
           </>
         )}
@@ -259,7 +260,19 @@ function NewServer({ info, onBack, onBuilt }: { info: WelcomeInfo; onBack: () =>
   return (
     <section className="welcome-card">
       <button type="button" className="link-plain welcome-back" onClick={onBack}><ArrowLeft size={15} />Back</button>
-      <h2>Make a new QBCore server</h2>
+      <h2>Make a new server</h2>
+      <span className="input-label" id="new-framework">Which framework?</span>
+      <div className="segmented" role="group" aria-labelledby="new-framework">
+        {(['qbcore', 'qbox'] as const).map((f) => (
+          <button key={f} type="button" className={framework === f ? 'active' : ''} aria-pressed={framework === f} onClick={() => setFramework(f)}>{FRAMEWORK_NAME[f]}</button>
+        ))}
+      </div>
+      <p className="muted-note">
+        {framework === 'qbcore'
+          ? <><Term id="qbcore">QBCore</Term> is the original of the two, and more scripts are made for it.</>
+          : <><Term id="qbox">Qbox</Term> is a newer fork of QBCore, built around ox_lib and ox_inventory. It runs most QBCore scripts too.</>}
+        {' '}You pick the matching recipe in txAdmin afterwards.
+      </p>
       <p className="muted-note">
         CityHQ downloads FiveM's server (from fivem.net) and a private database (MariaDB, checked against its published checksum) into one new
         folder. That's about 200 MB, and the server needs about 4 GB of space as it grows. Nothing is installed into Windows, and other servers on
@@ -320,10 +333,10 @@ export function Welcome({ local }: { local: boolean }) {
           <button type="button" className="choice" onClick={() => setStep({ kind: 'new' })}>
             <Hammer size={26} />
             <strong>No, make me one</strong>
-            <span>CityHQ builds a new QBCore server in one folder, with its own database, then walks you through txAdmin's setup.</span>
+            <span>CityHQ builds a new QBCore or Qbox server in one folder, with its own database, then walks you through txAdmin's setup.</span>
           </button>
         </div>
-        <p className="muted-note welcome-db-note"><Database size={14} />CityHQ is made for QBCore servers that run with txAdmin.</p>
+        <p className="muted-note welcome-db-note"><Database size={14} />CityHQ is made for QBCore and Qbox servers that run with txAdmin.</p>
       </section>
     );
   } else if (step.kind === 'find') {
@@ -344,7 +357,7 @@ export function Welcome({ local }: { local: boolean }) {
         <img src="/logo.svg" alt="" width={56} height={56} />
         <div>
           <h1>Welcome to CityHQ</h1>
-          <p className="muted-note">Headquarters for your QBCore roleplay city. Let's connect it to your server.</p>
+          <p className="muted-note">Headquarters for your QBCore or Qbox roleplay city. Let's connect it to your server.</p>
         </div>
       </header>
       {body}

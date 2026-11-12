@@ -37,7 +37,7 @@ export function Learn() {
         <ol>
           <li><Term id="txadmin">txAdmin</Term> starts <Term id="fxserver">FXServer</Term>, the server program, and restarts it if it stops answering.</li>
           <li>FXServer reads <Term id="servercfg">server.cfg</Term>: your <Term id="licensekey">license key</Term>, player slots, admins, and which <Term id="resource">resources</Term> to start with <Term id="ensure">ensure</Term> lines.</li>
-          <li>Resources load in the order server.cfg lists them. <Term id="qbcore">QBCore</Term> (qb-core) is the <Term id="framework">framework</Term> most of yours build on, so it starts early.</li>
+          <li>Resources load in the order server.cfg lists them. Your <Term id="framework">framework</Term>, <Term id="qbcore">QBCore</Term> (qb-core) or <Term id="qbox">Qbox</Term> (qbx_core), is what most of them build on, so it starts early.</li>
           <li>Everything players do is saved in the <Term id="database">database</Term>, which runs alongside the server.</li>
           <li>CityHQ watches all of this, explains problems, and keeps backups and a history of changes so you can always go back.</li>
         </ol>

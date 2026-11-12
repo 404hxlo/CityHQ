@@ -4,7 +4,7 @@ import {
 } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import {
-  api, type Dashboard, type HistoryPoint, type Overview as OverviewData, type UpcomingItem,
+  api, frameworkName, type Dashboard, type HistoryPoint, type Overview as OverviewData, type UpcomingItem,
 } from '../api';
 import { LineChart } from '../Chart';
 import { openPlayer } from '../nav';
@@ -47,8 +47,11 @@ function CopyRow({ text }: { text: string }) {
   );
 }
 
+// The Qbox recipe's name in txAdmin's Popular Recipes list.
+const QBOX_RECIPE = 'Qbox';
+
 /**
- * A server whose txAdmin hasn't deployed QBCore yet (a new one, or one never finished): start
+ * A server whose txAdmin hasn't deployed QBCore or Qbox yet (a new one, or one never finished): start
  * txAdmin, show the PIN it asks for, and say exactly what to choose in its setup.
  */
 function FinishTxAdmin({ data, local }: { data: OverviewData; local: boolean }) {
@@ -83,7 +86,7 @@ function FinishTxAdmin({ data, local }: { data: OverviewData; local: boolean }) 
           {data.rootSource === 'saved' && <Button variant="ghost" busy={busy === 'forget'} onClick={changeServer}>Not your server? Choose another</Button>}
         </div>
       )}
-      <p className="muted-note">txAdmin is FiveM's own server panel. It downloads QBCore and sets up the database the first time. This takes about 10 minutes, once.</p>
+      <p className="muted-note">txAdmin is FiveM's own server panel. It downloads {frameworkName(data.framework)} and sets up the database the first time. This takes about 10 minutes, once.</p>
       <ol className="finish-steps">
         <li>
           <strong>{up ? 'txAdmin is running.' : 'Start txAdmin.'}</strong>
@@ -95,7 +98,7 @@ function FinishTxAdmin({ data, local }: { data: OverviewData; local: boolean }) 
           {pin.data?.pin && <div className="pin-box">{pin.data.pin}</div>}
           <span className="muted-note">Then link your Cfx.re account and create a txAdmin password.</span>
         </li>
-        <li><strong>Choose Popular Recipes, then QBCore Framework.</strong> Paste your license key from <a href="https://portal.cfx.re" target="_blank" rel="noreferrer">portal.cfx.re</a> when it asks.</li>
+        <li><strong>Choose Popular Recipes, then {data.framework === 'qbox' ? QBOX_RECIPE : 'QBCore Framework'}.</strong> Paste your license key from <a href="https://portal.cfx.re" target="_blank" rel="noreferrer">portal.cfx.re</a> when it asks.</li>
         {data.databasePort
           ? <li><strong>For the database, enter:</strong> host <code>127.0.0.1</code>, port <code>{data.databasePort}</code>, user <code>root</code>, and leave the password empty.</li>
           : <li><strong>For the database,</strong> enter your own database's host, port, user and password (for XAMPP: <code>localhost</code>, <code>3306</code>, <code>root</code>, no password).</li>}
@@ -341,7 +344,7 @@ export function Overview({ data, error, refresh, local, goTo }: Props) {
       {error && <Notice kind="error">{error}</Notice>}
       {!data.processes.database && !canStart && (
         <Notice kind="error">
-          The database is not running, so QBCore cannot save anything.
+          The database is not running, so {frameworkName(data.framework)} cannot save anything.
           {data.databaseManaged === false ? ' Start your database (for example MySQL in XAMPP\'s control panel).' : ' Restart the server to bring it back.'}
         </Notice>
       )}

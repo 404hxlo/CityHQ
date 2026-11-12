@@ -20,8 +20,9 @@ import {
 import { sqlFilesCreating, stateProblems } from './problems.js';
 import { awakeMode } from './awake.js';
 import {
-  duplicateFindings, missingStartFindings, powercfgSeconds, sacState, startOrderFindings,
+  duplicateFindings, missingStartFindings, otherFrameworkSql, powercfgSeconds, sacState, startOrderFindings,
 } from './health.js';
+import { frameworkOf, qbxBridgeOff } from './framework.js';
 import {
   adminRestarts, bootSegments, explainRestart, lastActivity, wholePause,
 } from './doctor.js';
@@ -48,7 +49,7 @@ import {
 } from './welcome.js';
 import { checksumFor } from './dbtools.js';
 import {
-  parseAdmins, removeAdmin, setAdmin, VALID_IDENTIFIER,
+  parseAdmins, removeAdmin, rolesFor, setAdmin, VALID_IDENTIFIER,
 } from './admins.js';
 import { groupPlayers, parseBatch } from './people.js';
 import {
@@ -389,9 +390,100 @@ test('welcome: a usual existing server (FXServer and txData side by side, XAMPP 
     assert.equal(r.txAdminPort, 40121, 'read from the start script');
     assert.deepEqual(r.database, { host: 'localhost', port: 3306, user: 'root', name: 'qbcore', hasPassword: false, managed: false });
     assert.equal(r.qbcore, true);
+    assert.equal(r.framework, 'qbcore');
     assert.equal(r.cityhqMade, false);
     assert.deepEqual(r.problems, []);
   }
+});
+
+const QBX_CFG = [
+  'endpoint_add_tcp "0.0.0.0:30120"',
+  'endpoint_add_udp "0.0.0.0:30120"',
+  'set mysql_connection_string "mysql://root@localhost:3306/qbox_ab12?charset=utf8mb4"',
+  'setr qbx:enableBridge "true"',
+  'ensure ox_lib',
+  'ensure qbx_core',
+  'ensure [ox]',
+  'ensure [qbx]',
+].join('\n');
+
+test('welcome: a Qbox server made by txAdmin\'s recipe is supported, with no warning', () => {
+  const r = inspectServerFolder('C:\\FXServer', fakeDisk({
+    'C:\\FXServer\\server\\FXServer.exe': '',
+    'C:\\FXServer\\txData\\default\\config.json': JSON.stringify({ server: { dataPath: 'C:/FXServer/txData/Qbox_1A2B3C.base/', cfgPath: 'server.cfg' } }),
+    'C:\\FXServer\\txData\\Qbox_1A2B3C.base\\server.cfg': QBX_CFG,
+  }));
+  assert.equal(r.framework, 'qbox');
+  assert.equal(r.qbcore, true, 'older app screens still treat it as supported');
+  assert.deepEqual(r.problems, []);
+  const off = inspectServerFolder('C:\\FXServer', fakeDisk({
+    'C:\\FXServer\\server\\FXServer.exe': '',
+    'C:\\FXServer\\txData\\default\\config.json': JSON.stringify({ server: { dataPath: 'C:/FXServer/txData/Q.base/' } }),
+    'C:\\FXServer\\txData\\Q.base\\server.cfg': QBX_CFG.replace('"true"', '"false"'),
+  }));
+  assert.ok(off.problems.some((p) => /turns off Qbox's QBCore bridge/.test(p.text)));
+});
+
+test('framework: read from start lines first, then the usual folders', () => {
+  assert.equal(frameworkOf(QBX_CFG, null), 'qbox');
+  assert.equal(frameworkOf('ensure qb-core\nensure [qb]', null), 'qbcore');
+  assert.equal(frameworkOf('ensure es_extended', null), null);
+  const there = (set) => (p) => set.has(p);
+  assert.equal(frameworkOf('ensure [qbx]\nensure [ox]', 'C:\\s', there(new Set(['C:\\s\\resources\\[qbx]\\qbx_core']))), 'qbox', 'a cfg that only starts folders');
+  assert.equal(frameworkOf('ensure [qb]', 'C:\\s', there(new Set(['C:\\s\\resources\\[qb]\\qb-core']))), 'qbcore');
+  assert.equal(frameworkOf('# ensure qbx_core\nensure qb-core', null), 'qbcore', 'commented-out lines don\'t count');
+  assert.equal(qbxBridgeOff(QBX_CFG), false);
+  assert.equal(qbxBridgeOff('setr qbx:enableBridge "false"'), true, 'the recipe\'s spelling, read without minding case');
+  assert.equal(qbxBridgeOff('set qbx:enablebridge false'), true);
+  assert.equal(qbxBridgeOff(''), false, 'on unless turned off');
+});
+
+test('install check on a Qbox server: Qbox scripts fit, QBCore ones run through the bridge', () => {
+  const qbxScript = { manifest: "shared_scripts { '@ox_lib/init.lua', '@qbx_core/modules/lib.lua' }", configs: [], folders: [] };
+  assert.equal(frameworkFit(qbxScript, 'qbcore').status, 'bad', 'on QBCore a Qbox-only script is still flagged');
+  assert.equal(frameworkFit(qbxScript, 'qbox').status, 'ok');
+  assert.equal(frameworkFit({ manifest: '', configs: [{ file: 'config.lua', text: "Config.Framework = 'qbx'" }], folders: [] }, 'qbox').status, 'ok');
+  const qbConfig = { manifest: '', configs: [{ file: 'config.lua', text: "Config.Framework = 'qb' -- 'qb', 'qbx' or 'esx'" }], folders: [] };
+  assert.equal(frameworkFit(qbConfig, 'qbox').status, 'ok');
+  assert.match(frameworkFit(qbConfig, 'qbox').detail, /QBCore bridge/);
+  assert.equal(frameworkFit(qbConfig, 'qbox', true).status, 'bad', 'not when the bridge is off');
+  assert.equal(frameworkFit({ manifest: '', configs: [], folders: [{ parent: 'bridge', name: 'qbx' }] }, 'qbox').status, 'ok');
+  assert.equal(frameworkFit({ manifest: '', configs: [], folders: [{ parent: 'bridge', name: 'qb' }] }, 'qbox').status, 'ok');
+  assert.equal(frameworkFit({ manifest: "shared_script '@qb-core/shared/locale.lua'", configs: [], folders: [] }, 'qbox').status, 'warn', 'Qbox has no qb-core folder to load files from');
+  assert.equal(frameworkFit({ manifest: "shared_script '@es_extended/imports.lua'", configs: [], folders: [] }, 'qbox').status, 'bad');
+  assert.match(frameworkFit({ manifest: '', configs: [{ file: 'config.lua', text: 'Config.Framework = "esx"' }], folders: [] }, 'qbox').detail, /runs Qbox/);
+});
+
+test('table check: Qbox servers keep their qbx .sql files, QBCore servers skip them', () => {
+  assert.equal(otherFrameworkSql('qbx_vehicles.sql', 'qbcore'), true);
+  assert.equal(otherFrameworkSql('qbx_vehicles.sql', 'qbox'), false);
+  assert.equal(otherFrameworkSql('sql/esx.sql', 'qbox'), true);
+  assert.equal(otherFrameworkSql('install/qb.sql', 'qbox'), false);
+});
+
+test('admins on Qbox: the recipe\'s groups, with no owner level', () => {
+  const cfg = [
+    'add_ace group.admin command allow',
+    'add_principal group.admin group.mod',
+    'add_principal identifier.license:abcdef0123456789 group.admin # Alex',
+    'add_principal identifier.discord:123456 group.mod',
+  ].join('\n');
+  assert.deepEqual(parseAdmins(cfg, 'qbox').map((a) => [a.identifier, a.role]), [['license:abcdef0123456789', 'admin'], ['discord:123456', 'mod']]);
+  assert.deepEqual(parseAdmins(cfg).map((a) => a.role), ['full'], 'QBCore reads the same lines as before');
+  const { text, removed } = setAdmin(cfg, 'discord:123456', 'admin', 'Sam', 'qbox');
+  assert.deepEqual(removed, ['group.mod']);
+  assert.ok(text.includes('add_principal identifier.discord:123456 group.admin # Sam'));
+  assert.throws(() => setAdmin(cfg, 'discord:123456', 'god', 'Sam', 'qbox'), /Admin or Moderator/);
+  assert.equal(rolesFor('qbox').god, undefined);
+  assert.equal(rolesFor('qbcore').god.principal, 'qbcore.god');
+});
+
+test('problems on Qbox: files from qb-core and a missing core object get Qbox advice', () => {
+  const ctx = { framework: 'qbox', isInstalled: (n) => ['qb-core', 'qbx_core', 'my-shop'].includes(n), resolveName: () => null, folderOf: () => null, cfgLineOf: () => null };
+  const [load] = explainLogLines(['[ script:my-shop] Failed to load script @qb-core/shared/locale.lua.'], ctx);
+  assert.match(load.title, /Qbox doesn't have/);
+  const [nil] = explainLogLines(["[script:my-shop] SCRIPT ERROR: @my-shop/server.lua:3: attempt to index a nil value (global 'QBCore')"], ctx);
+  assert.match(nil.fix.join(' '), /qbx_core/);
 });
 
 test('welcome: parts apart, txAdmin 7 settings, and plain-English problems', () => {
@@ -409,7 +501,8 @@ test('welcome: parts apart, txAdmin 7 settings, and plain-English problems', () 
   assert.equal(r.database.hasPassword, true);
   assert.equal(JSON.stringify(r).includes('secret'), false, 'the database password never leaves the PC\'s server side');
   assert.ok(r.problems.some((p) => /no endpoint_add_tcp line/.test(p.text)));
-  assert.ok(r.problems.some((p) => /doesn't look like a QBCore server/.test(p.text)));
+  assert.ok(r.problems.some((p) => /doesn't look like a QBCore or Qbox server/.test(p.text)));
+  assert.equal(r.framework, null);
 
   const fresh = inspectServerFolder('C:\\New', fakeDisk({ 'C:\\New\\server\\FXServer.exe': '' }));
   assert.equal(fresh.found, true);

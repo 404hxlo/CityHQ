@@ -59,10 +59,14 @@ function WorldCard({ online }: { online: boolean }) {
           </button>
         ))}
       </div>
-      <label className="switch-line">
-        <Toggle checked={data.dynamicWeather} onChange={(v) => change('dyn', { dynamicWeather: v }, v ? 'Weather changes on its own again' : 'Weather stays as it is')} label="Change weather on its own" />
-        <span>Let the weather change on its own every few minutes</span>
-      </label>
+      {data.dynamicWeatherToggle === false
+        ? <p className="muted-note">{data.script || 'Your weather script'} changes the weather on its own schedule, so weather you pick here lasts until its next change.</p>
+        : (
+          <label className="switch-line">
+            <Toggle checked={data.dynamicWeather} onChange={(v) => change('dyn', { dynamicWeather: v }, v ? 'Weather changes on its own again' : 'Weather stays as it is')} label="Change weather on its own" />
+            <span>Let the weather change on its own every few minutes</span>
+          </label>
+        )}
 
       <div className="time-row">
         <div className="clock-face" aria-label={`In-game time ${pad(data.hour)}:${pad(data.minute)}`}>{pad(data.hour)}:{pad(data.minute)}</div>

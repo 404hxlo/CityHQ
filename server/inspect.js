@@ -1,11 +1,12 @@
 // The install check: reads one script before (or after) it runs and says, in plain words, what it
-// needs to work on this QBCore server, with a fix where one is safe.
+// needs to work on this QBCore or Qbox server, with a fix where one is safe.
 import { existsSync } from 'node:fs';
 import { readdir, readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { findInstallSource } from './catalog.js';
 import { parseBoot, readCfg } from './cfg.js';
 import { repoFor } from './docs.js';
+import { frameworkOf, qbxBridgeOff } from './framework.js';
 import { startOrderFindings, tableFindings } from './health.js';
 import { HttpError } from './paths.js';
 import { docsFor } from './problems.js';
@@ -49,38 +50,64 @@ async function folderSize(dir) {
 
 /**
  * Which framework a script is written for, from what its manifest loads and what its config is set
- * to. Scripts with a bridge for several frameworks count as fine.
+ * to, compared with the server's own (QBCore or Qbox). Scripts with a bridge for several frameworks
+ * count as fine. Qbox runs QBCore scripts through its QBCore bridge unless server.cfg turns it off.
  */
-export function frameworkFit({ manifest, configs, folders }) {
-  const imports = FRAMEWORK_IMPORTS.filter((f) => f.re.test(manifest)).map((f) => f.name);
+export function frameworkFit({ manifest, configs, folders }, server = 'qbcore', bridgeOff = false) {
+  const qbox = server === 'qbox';
+  const fw = qbox ? 'Qbox' : 'QBCore';
+  const imports = FRAMEWORK_IMPORTS.filter((f) => f.re.test(manifest) && !(qbox && f.name === 'Qbox')).map((f) => f.name);
   const loadsQb = /@qb-core\//i.test(manifest);
-  const bridges = folders.filter((f) => /^(bridge|bridges|framework|frameworks|modules\/framework)$/i.test(f.parent) && /^(qb|qbcore|qb-core)$/i.test(f.name));
+  const loadsQbx = qbox && /@qbx_core\//i.test(manifest);
+  const bridgeFolder = (f) => /^(bridge|bridges|framework|frameworks|modules\/framework)$/i.test(f.parent);
+  const qbBridges = folders.filter((f) => bridgeFolder(f) && /^(qb|qbcore|qb-core)$/i.test(f.name));
+  const qbxBridges = qbox ? folders.filter((f) => bridgeFolder(f) && /^(qbx|qbox|qbx_core)$/i.test(f.name)) : [];
+  const viaBridge = (label, detail, openFile) => (bridgeOff
+    ? item('framework', 'bad', `${label}, and Qbox's QBCore bridge is turned off`, `${detail} Qbox only runs QBCore scripts through its QBCore bridge, and server.cfg turns that off (qbx:enableBridge).`, {
+      steps: ['Set qbx:enableBridge to "true" in server.cfg, or look for a Qbox version of this script.'], ...(openFile ? { openFile } : {}),
+    })
+    : item('framework', 'ok', `${label}, which Qbox runs`, `${detail} Qbox runs QBCore scripts through its built-in QBCore bridge. If the script has a Qbox ("qbx") option, that one fits better.`, openFile ? { openFile } : {}));
+
   for (const { file, text } of configs) {
     const lines = text.split(/\r?\n/);
     for (let i = 0; i < lines.length; i++) {
       const m = lines[i].match(/^\s*[\w.]*Framework\s*=\s*['"]([\w-]+)['"]/i);
       if (!m) continue;
+      const openFile = { file, line: i + 1, label: `Open ${file} at line ${i + 1}` };
+      if (qbox && /^(qbx|qbox|qbx_core)$/i.test(m[1])) return item('framework', 'ok', 'It\'s set up for Qbox', `Its config says Framework = "${m[1]}".`);
       if (OTHER_FRAMEWORK_VALUE.test(m[1])) {
-        return item('framework', 'bad', `It's set to the ${m[1]} framework`, `Its config says Framework = "${m[1]}", but this server runs QBCore, so most of it won't work.`, {
-          steps: [`Open ${file} at line ${i + 1} and change it to QBCore. The comment next to it usually lists the exact word to use, often "qb" or "qbcore".`],
-          openFile: { file, line: i + 1, label: `Open ${file} at line ${i + 1}` },
+        return item('framework', 'bad', `It's set to the ${m[1]} framework`, `Its config says Framework = "${m[1]}", but this server runs ${fw}, so most of it won't work.`, {
+          steps: [`Open ${file} at line ${i + 1} and change it to ${fw}. The comment next to it usually lists the exact word to use, often ${qbox ? '"qbx", or "qb" (which Qbox also runs)' : '"qb" or "qbcore"'}.`],
+          openFile,
         });
       }
-      if (QB_FRAMEWORK_VALUE.test(m[1])) return item('framework', 'ok', 'It\'s set up for QBCore', `Its config says Framework = "${m[1]}".`);
+      if (QB_FRAMEWORK_VALUE.test(m[1])) {
+        if (qbox && !/^(auto|autodetect)$/i.test(m[1])) return viaBridge('It\'s set up for QBCore', `Its config says Framework = "${m[1]}".`, openFile);
+        return item('framework', 'ok', `It's set up for ${fw}`, `Its config says Framework = "${m[1]}".`);
+      }
       if (/^standalone$/i.test(m[1])) {
-        return item('framework', 'info', 'It runs standalone', `Its config says Framework = "${m[1]}", so it runs without a framework, which works on QBCore. If the comment next to it lists a QBCore option, that links it to QBCore's jobs, money and items.`, {
-          openFile: { file, line: i + 1, label: `Open ${file} at line ${i + 1}` },
-        });
+        return item('framework', 'info', 'It runs standalone', `Its config says Framework = "${m[1]}", so it runs without a framework, which works on ${fw}. If the comment next to it lists a ${fw} option, that links it to ${fw}'s jobs, money and items.`, { openFile });
       }
     }
   }
-  if (imports.length && !loadsQb && !bridges.length) {
-    return item('framework', 'bad', `It's made for ${imports.join(' and ')}, not QBCore`, `It loads files from ${imports.join(' and ')}, which this server doesn't have, so it will fail or only partly work.`, {
-      steps: ['Look for a QBCore version from the same author, or one that says it supports QBCore.', 'If it has a framework setting, set it to QBCore.'],
+  const fits = loadsQbx || qbxBridges.length || (!qbox && (loadsQb || qbBridges.length));
+  if (imports.length && !fits && !loadsQb && !qbBridges.length) {
+    return item('framework', 'bad', `It's made for ${imports.join(' and ')}, not ${fw}`, `It loads files from ${imports.join(' and ')}, which this server doesn't have, so it will fail or only partly work.`, {
+      steps: [`Look for a ${fw} version from the same author, or one that says it supports ${fw}.`, `If it has a framework setting, set it to ${fw}.`],
     });
   }
-  if (loadsQb || bridges.length) return item('framework', 'ok', 'It works with QBCore', loadsQb ? 'It loads QBCore directly.' : 'It has a QBCore bridge built in.');
-  if (imports.length) return item('framework', 'warn', `It also loads ${imports.join(' and ')} files`, `It may support QBCore too, but loads ${imports.join(' and ')} files that this server doesn't have. That's often harmless, but check it works in game.`);
+  if (fits) {
+    const detail = loadsQbx ? 'It loads Qbox directly.' : qbxBridges.length ? 'It has a Qbox bridge built in.' : loadsQb ? 'It loads QBCore directly.' : 'It has a QBCore bridge built in.';
+    return item('framework', 'ok', `It works with ${fw}`, detail);
+  }
+  if (qbox && qbBridges.length) return viaBridge('It\'s made for QBCore', 'It has a QBCore bridge built in.');
+  if (qbox && loadsQb) {
+    if (bridgeOff) return viaBridge('It\'s made for QBCore', 'It loads QBCore directly.');
+    return item('framework', 'warn', 'It loads files from qb-core\'s folder', 'Qbox runs most QBCore scripts, but a script that loads files straight from qb-core (such as @qb-core/shared/locale.lua) can fail to start, because Qbox has no qb-core folder.', {
+      steps: ['Look for a Qbox version from the same author.', 'If you keep it, check on the Resources page that it starts.'],
+    });
+  }
+  if (imports.length) return item('framework', 'warn', `It also loads ${imports.join(' and ')} files`, `It may support ${fw} too, but loads ${imports.join(' and ')} files that this server doesn't have. That's often harmless, but check it works in game.`);
   return item('framework', 'info', 'No framework needed, or none could be found', 'It doesn\'t say which framework it uses, which is normal for maps, cars and standalone scripts.');
 }
 
@@ -90,7 +117,7 @@ export async function inspectResource(name) {
   const disk = await scanDisk();
   const resource = disk.find((r) => r.name === name);
   if (!resource) throw new HttpError(404, 'That resource was not found');
-  const { cfgPath } = serverData();
+  const { cfgPath, dataPath } = serverData();
   const cfg = await readCfg(cfgPath);
   const [system, live, { docs, links }] = await Promise.all([scanSystem(), liveStates(), docsFor(name).catch(() => ({ docs: null, links: [] }))]);
   const checks = [];
@@ -106,9 +133,8 @@ export async function inspectResource(name) {
   for (const parent of ['bridge', 'bridges', 'framework', 'frameworks']) {
     try { for (const e of await readdir(path.join(resource.dir, parent), { withFileTypes: true })) if (e.isDirectory()) folders.push({ parent, name: e.name }); } catch { /* none */ }
   }
-  const fit = frameworkFit({ manifest, configs, folders });
+  const fit = frameworkFit({ manifest, configs, folders }, frameworkOf(cfg, dataPath) || 'qbcore', qbxBridgeOff(cfg));
   if (fit.openFile) {
-    const { dataPath } = serverData();
     const folder = path.relative(dataPath, resource.dir).replaceAll('\\', '/');
     fit.openFile = { path: `${folder}/${fit.openFile.file}`, line: fit.openFile.line, label: fit.openFile.label };
   }

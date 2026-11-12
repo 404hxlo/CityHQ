@@ -2,6 +2,15 @@
 
 Each version's section is shown in the app before it updates, and on its GitHub release page.
 
+## 1.3.0
+
+- CityHQ now works with Qbox servers as well as QBCore. It recognises a Qbox server when you connect it, and "Make me a new server" lets you choose QBCore or Qbox.
+- On Qbox, the player tools use Qbox's own scripts: money, jobs, gangs, ox_inventory items, revive (qbx_medical), jail (xt-prison), weather (Renewed-Weathersync), cars with keys, and Qbox's admin groups.
+- The install check and problem tips know Qbox: Qbox scripts count as a fit, QBCore scripts run through Qbox's QBCore bridge, and links go to Qbox's documentation.
+- Servers that use ox_inventory with QBCore can now give and remove items from CityHQ.
+- Buttons for things a server can't do, such as jail without a jail script, are hidden instead of failing.
+- CityHQ's helper inside the server updates at its next restart.
+
 ## 1.2.1
 
 - Report a problem, under Settings and on the Welcome screen: describe what went wrong, check the report, then open it on GitHub or copy it. CityHQ's version, the kind of setup and the last lines of its log can go with it, with license keys, passwords, player IDs, IP addresses and your Windows user name taken out. Nothing is sent until you choose to.

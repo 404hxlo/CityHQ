@@ -9,7 +9,11 @@ local REASON = 'CityHQ'
 -- smuggle anything extra into a server command.
 local VALID_ID = '^(license2?):(%x+)$'
 local OTHER_ID = '^(fivem|discord|steam|xbl|live):(%w+)$'
-local ROLES = { ['qbcore.god'] = true, ['qbcore.admin'] = true, ['qbcore.mod'] = true, ['group.admin'] = true }
+-- QBCore's roles, and the groups Qbox's txAdmin recipe sets up (group.admin, group.mod, group.support).
+local ROLES = {
+    ['qbcore.god'] = true, ['qbcore.admin'] = true, ['qbcore.mod'] = true,
+    ['group.admin'] = true, ['group.mod'] = true, ['group.support'] = true,
+}
 
 -- Where players can be sent. Taken from QBCore's own spawn and job settings.
 local PLACES = {
@@ -37,10 +41,70 @@ local function loadToken()
 end
 local TOKEN = loadToken()
 
+-- ---------------------------------------------------------------- the framework
+-- QBCore, or Qbox (qbx_core). Qbox runs QBCore scripts through a bridge that can be turned off, so
+-- on Qbox everything here uses Qbox's own exports and the scripts its txAdmin recipe installs.
+local function running(name) return GetResourceState(name) == 'started' end
+
+local function framework()
+    if running('qbx_core') then return 'qbox' end
+    if running('qb-core') then return 'qbcore' end
+    return nil
+end
+
+local QBX = exports.qbx_core
+
+-- The QBCore core object; on Qbox, a small table with the same few calls, made from Qbox's exports.
 local function core()
-    if GetResourceState('qb-core') ~= 'started' then return nil end
+    local fw = framework()
+    if fw == 'qbox' then
+        return {
+            qbox = true,
+            Functions = {
+                GetPlayer = function(src) return QBX:GetPlayer(src) end,
+                GetQBPlayers = function() return QBX:GetQBPlayers() or {} end,
+            },
+            Player = { Save = function(src) return QBX:Save(src) end },
+        }
+    end
+    if fw ~= 'qbcore' then return nil end
     local ok, obj = pcall(function() return exports['qb-core']:GetCoreObject() end)
     return ok and obj or nil
+end
+
+-- A notification in the corner of a player's screen (-1 for everyone).
+local function notifyPlayer(target, message, ms)
+    if framework() == 'qbox' then
+        TriggerClientEvent('ox_lib:notify', target, { description = message, type = 'inform', duration = ms })
+    else
+        TriggerClientEvent('QBCore:Notify', target, message, 'primary', ms)
+    end
+end
+
+-- Scripts that differ between servers, and whether this one has them.
+local function reviveScript()
+    if running('qbx_medical') then return 'qbx_medical' end
+    if running('qb-ambulancejob') then return 'qb-ambulancejob' end
+    -- Older QBCore servers without qb-ambulancejob still listened for the same event.
+    if framework() == 'qbcore' then return 'qbcore' end
+end
+
+local function jailScript()
+    if running('xt-prison') then return 'xt-prison' end
+    if running('qb-prison') then return 'qb-prison' end
+end
+
+-- Renewed-Weathersync also answers to the name qb-weathersync, so it's checked first.
+local function weatherScript()
+    if running('Renewed-Weathersync') then return 'Renewed-Weathersync' end
+    if running('qb-weathersync') then return 'qb-weathersync' end
+end
+
+local function revive(src)
+    local script = reviveScript()
+    if script == 'qbx_medical' then return exports.qbx_medical:Revive(src) end
+    if not script then error('No revive script is running (qb-ambulancejob or qbx_medical)') end
+    TriggerClientEvent('hospital:client:Revive', src)
 end
 
 local function safeResourceName(name)
@@ -68,9 +132,13 @@ local function onlinePlayer(id)
     return src
 end
 
+local function noFramework()
+    error('Neither qb-core nor qbx_core is running')
+end
+
 local function qbPlayer(src)
     local QB = core()
-    if not QB then error('qb-core is not running') end
+    if not QB then noFramework() end
     local player = QB.Functions.GetPlayer(src)
     if not player then error('That player has not chosen a character yet') end
     return QB, player
@@ -156,6 +224,7 @@ routes['GET /status'] = function()
         version = GetConvar('version', ''),
         onesync = GetConvar('onesync', 'off'),
         qbcore = core() ~= nil,
+        framework = framework(),
         resourcesStarted = started,
         resourcesTotal = total,
     }
@@ -214,7 +283,7 @@ routes['POST /announce'] = function(body)
     TriggerClientEvent('chat:addMessage', -1, {
         color = { 255, 138, 61 }, multiline = true, args = { 'Server', message },
     })
-    TriggerClientEvent('QBCore:Notify', -1, message, 'primary', 10000)
+    notifyPlayer(-1, message, 10000)
     return { sent = true, players = #GetPlayers() }
 end
 
@@ -242,12 +311,14 @@ end
 routes['POST /players/inventory'] = function(body)
     local src = onlinePlayer(body.id)
     local _, player = qbPlayer(src)
+    -- ox_inventory keeps items itself (with count instead of amount); the others in PlayerData.
+    local source = running('ox_inventory') and exports.ox_inventory:GetInventoryItems(src) or player.PlayerData.items
     local items = {}
-    for _, item in pairs(player.PlayerData.items or {}) do
+    for _, item in pairs(source or {}) do
         if type(item) == 'table' and item.name then
             items[#items + 1] = {
                 name = item.name, label = item.label or item.name,
-                amount = item.amount or 1, slot = item.slot,
+                amount = item.amount or item.count or 1, slot = item.slot,
             }
         end
     end
@@ -285,31 +356,55 @@ function playerActions.setMoney(src, body)
     local amount = wholeNumber(body.amount, 0, 2000000000)
     if not kind or player.PlayerData.money[kind] == nil then error('Unknown money type') end
     if not amount then error('Enter an amount of 0 or more') end
-    if not player.Functions.SetMoney(kind, amount, REASON) then error('QBCore refused that amount') end
+    local ok
+    if framework() == 'qbox' then ok = QBX:SetMoney(src, kind, amount, REASON) else ok = player.Functions.SetMoney(kind, amount, REASON) end
+    if not ok then error('The server refused that amount') end
     return ('%s set to %d'):format(kind, amount)
+end
+
+-- Jobs and gangs by name, each with its grades.
+local function jobsAndGangs(QB)
+    if QB.qbox then return QBX:GetJobs() or {}, QBX:GetGangs() or {} end
+    return QB.Shared.Jobs or {}, QB.Shared.Gangs or {}
 end
 
 function playerActions.setJob(src, body)
     local QB, player = qbPlayer(src)
     local job, grade = text(body.job, 60), wholeNumber(body.grade, 0, 100) or 0
-    if not job or not QB.Shared.Jobs[job] then error('Unknown job') end
-    if not player.Functions.SetJob(job, grade) then error('QBCore refused that job or grade') end
+    local jobs = jobsAndGangs(QB)
+    if not job or not jobs[job] then error('Unknown job') end
+    local ok
+    if QB.qbox then ok = QBX:SetJob(src, job, grade) else ok = player.Functions.SetJob(job, grade) end
+    if not ok then error('The server refused that job or grade') end
     return 'Job updated'
 end
 
 function playerActions.setGang(src, body)
     local QB, player = qbPlayer(src)
     local gang, grade = text(body.gang, 60), wholeNumber(body.grade, 0, 100) or 0
-    if not gang or not QB.Shared.Gangs[gang] then error('Unknown gang') end
-    if not player.Functions.SetGang(gang, grade) then error('QBCore refused that gang or grade') end
+    local _, gangs = jobsAndGangs(QB)
+    if not gang or not gangs[gang] then error('Unknown gang') end
+    local ok
+    if QB.qbox then ok = QBX:SetGang(src, gang, grade) else ok = player.Functions.SetGang(gang, grade) end
+    if not ok then error('The server refused that gang or grade') end
     return 'Gang updated'
 end
 
--- Servers can swap qb-inventory for tgiann-inventory, which takes the same basic item calls.
-local INVENTORIES = { 'tgiann-inventory', 'qb-inventory' }
+-- Every item the server knows, by name. ox_inventory keeps its own list; QBCore's is in qb-core.
+local function itemList(QB)
+    if running('ox_inventory') then
+        local ok, items = pcall(function() return exports.ox_inventory:Items() end)
+        if ok and type(items) == 'table' then return items end
+    end
+    return (QB and not QB.qbox and QB.Shared.Items) or {}
+end
+
+-- Servers can swap qb-inventory for tgiann-inventory (the same basic item calls) or ox_inventory,
+-- which Qbox always uses.
+local INVENTORIES = { 'ox_inventory', 'tgiann-inventory', 'qb-inventory' }
 local function inventoryResource()
     for _, name in ipairs(INVENTORIES) do
-        if GetResourceState(name) == 'started' then return name end
+        if running(name) then return name end
     end
 end
 
@@ -317,12 +412,14 @@ local function changeItem(src, body, adding)
     local QB = qbPlayer(src)
     local item = text(body.item, 60)
     local amount = wholeNumber(body.amount, 1, 100000)
-    if not item or not QB.Shared.Items[item] then error('Unknown item') end
+    if not item or not itemList(QB)[item] then error('Unknown item') end
     if not amount then error('Enter an amount of 1 or more') end
     local inv = inventoryResource()
-    if not inv then error('No inventory script is running (tgiann-inventory or qb-inventory)') end
+    if not inv then error('No inventory script is running (ox_inventory, tgiann-inventory or qb-inventory)') end
     local ok
-    if inv == 'tgiann-inventory' then
+    if inv == 'ox_inventory' then
+        if adding then ok = exports.ox_inventory:AddItem(src, item, amount) else ok = exports.ox_inventory:RemoveItem(src, item, amount) end
+    elseif inv == 'tgiann-inventory' then
         if adding then ok = exports[inv]:AddItem(src, item, amount) else ok = exports[inv]:RemoveItem(src, item, amount) end
     elseif adding then
         ok = exports[inv]:AddItem(src, item, amount, false, false, REASON)
@@ -349,20 +446,22 @@ end
 
 function playerActions.revive(src)
     qbPlayer(src)
-    TriggerClientEvent('hospital:client:Revive', src)
+    revive(src)
     return 'Player revived'
 end
 
 function playerActions.notify(src, body)
     local message = text(body.message, 200)
     if not message or message == '' then error('Type a message first') end
-    TriggerClientEvent('QBCore:Notify', src, message, 'primary', 10000)
+    notifyPlayer(src, message, 10000)
     return 'Message sent'
 end
 
 function playerActions.heal(src)
     TriggerClientEvent(RES .. ':client:heal', src)
-    if GetResourceState('qb-ambulancejob') == 'started' then
+    if running('qbx_medical') then
+        exports.qbx_medical:Heal(src)
+    elseif running('qb-ambulancejob') then
         TriggerClientEvent('hospital:client:HealInjuries', src, 'full')
     end
     return 'Player healed'
@@ -390,34 +489,85 @@ function playerActions.teleport(src, body)
         local target = onlinePlayer(body.toPlayer)
         if target == src then error('Choose a different player to send them to') end
         local coords = GetEntityCoords(GetPlayerPed(tostring(target)))
-        TriggerClientEvent('QBCore:Command:TeleportToPlayer', src, coords)
+        if framework() == 'qbox' then
+            TriggerClientEvent(RES .. ':client:teleport', src, coords.x, coords.y, coords.z)
+        else
+            TriggerClientEvent('QBCore:Command:TeleportToPlayer', src, coords)
+        end
         return ('Sent to %s'):format(GetPlayerName(tostring(target)) or 'that player')
     end
     local place = PLACES[body.place]
     if not place then error('Choose where to send them') end
-    TriggerClientEvent('QBCore:Command:TeleportToCoords', src, place.x, place.y, place.z, place.h)
+    if framework() == 'qbox' then
+        TriggerClientEvent(RES .. ':client:teleport', src, place.x, place.y, place.z, place.h)
+    else
+        TriggerClientEvent('QBCore:Command:TeleportToCoords', src, place.x, place.y, place.z, place.h)
+    end
     return 'Sent to ' .. place.label
 end
 
 function playerActions.jail(src, body)
     qbPlayer(src)
-    if GetResourceState('qb-prison') ~= 'started' then error('qb-prison is not running') end
+    local script = jailScript()
+    if not script then error('No jail script is running (qb-prison or xt-prison)') end
     local months = wholeNumber(body.months, 1, 600)
     if not months then error('Choose from 1 to 600 months') end
-    TriggerClientEvent('prison:client:Enter', src, months)
+    -- A jail "month" is one real minute in both scripts.
+    if script == 'xt-prison' then
+        local state = Player(src).state
+        if state and (state.jailTime or 0) > 0 then
+            exports['xt-prison']:SetJailTime(src, months)
+        else
+            -- xt-prison takes someone to jail from their own game, through an ox_lib callback (the
+            -- same one its /jail command uses). The reply goes to an event nobody listens to.
+            TriggerClientEvent('__ox_cb_xt-prison:client:enterJail', src, RES, 'cityhq', months)
+        end
+    else
+        TriggerClientEvent('prison:client:Enter', src, months)
+    end
     return ('Sent to jail for %d months'):format(months)
 end
 
 function playerActions.unjail(src)
     qbPlayer(src)
-    TriggerClientEvent('prison:client:UnjailPerson', src)
+    local script = jailScript()
+    if not script then error('No jail script is running (qb-prison or xt-prison)') end
+    if script == 'xt-prison' then
+        exports['xt-prison']:SetJailTime(src, 0)
+        TriggerClientEvent('__ox_cb_xt-prison:client:exitJail', src, RES, 'cityhq', true)
+    else
+        TriggerClientEvent('prison:client:UnjailPerson', src)
+    end
     return 'Released from jail'
+end
+
+-- On Qbox: made on the server, the player put in the driver's seat, then keys and a full tank.
+local function spawnQboxCar(src, model)
+    local info = QBX:GetVehiclesByName(model)
+    if not info then error('Unknown car') end
+    local ped = GetPlayerPed(tostring(src))
+    local old = GetVehiclePedIsIn(ped, false)
+    if old ~= 0 then QBX:DeleteVehicle(old) end
+    local coords = GetEntityCoords(ped)
+    local vehicle = CreateVehicleServerSetter(joaat(info.model or model), info.type or 'automobile', coords.x, coords.y, coords.z, GetEntityHeading(ped))
+    local waited = 0
+    while not DoesEntityExist(vehicle) and waited < 5000 do Wait(50); waited = waited + 50 end
+    if not DoesEntityExist(vehicle) then error('The car could not be made') end
+    SetPedIntoVehicle(ped, vehicle, -1)
+    Entity(vehicle).state:set('fuel', 100.0, true)
+    if running('qbx_vehiclekeys') then
+        pcall(function() exports.qbx_vehiclekeys:GiveKeys(src, vehicle, true) end)
+    end
 end
 
 function playerActions.spawnCar(src, body)
     local model = text(body.model, 40)
     if not model or not model:match('^[%w_]+$') then error('Choose a car') end
-    TriggerClientEvent('QBCore:Command:SpawnVehicle', src, model:lower())
+    if framework() == 'qbox' then
+        spawnQboxCar(src, model:lower())
+    else
+        TriggerClientEvent('QBCore:Command:SpawnVehicle', src, model:lower())
+    end
     return 'Car spawned with keys and a full tank'
 end
 
@@ -432,7 +582,13 @@ function playerActions.refuel(src)
 end
 
 function playerActions.deleteCar(src)
-    TriggerClientEvent('QBCore:Command:DeleteVehicle', src)
+    if framework() == 'qbox' then
+        local vehicle = GetVehiclePedIsIn(GetPlayerPed(tostring(src)), false)
+        if vehicle == 0 then error('They need to be in the car') end
+        QBX:DeleteVehicle(vehicle)
+    else
+        TriggerClientEvent('QBCore:Command:DeleteVehicle', src)
+    end
     return 'Car removed'
 end
 
@@ -444,7 +600,7 @@ end
 
 routes['GET /shared'] = function()
     local QB = core()
-    if not QB then error('qb-core is not running') end
+    if not QB then noFramework() end
     local function grouped(source)
         local list = {}
         for name, data in pairs(source or {}) do
@@ -459,15 +615,26 @@ routes['GET /shared'] = function()
         return list
     end
     local items = {}
-    for name, data in pairs(QB.Shared.Items or {}) do
-        items[#items + 1] = { name = name, label = data.label or name }
+    for name, data in pairs(itemList(QB)) do
+        if type(data) == 'table' then items[#items + 1] = { name = name, label = data.label or name } end
     end
     table.sort(items, function(a, b) return a.label < b.label end)
     local moneyTypes = {}
-    for name in pairs(QB.Config.Money.MoneyTypes or {}) do moneyTypes[#moneyTypes + 1] = name end
+    if QB.qbox then
+        -- Qbox's money settings aren't readable from other scripts; a player's wallet shows the kinds.
+        local kinds = { cash = true, bank = true, crypto = true }
+        for _, player in pairs(QB.Functions.GetQBPlayers()) do
+            for name in pairs(player.PlayerData and player.PlayerData.money or {}) do kinds[name] = true end
+            break
+        end
+        for name in pairs(kinds) do moneyTypes[#moneyTypes + 1] = name end
+    else
+        for name in pairs(QB.Config.Money.MoneyTypes or {}) do moneyTypes[#moneyTypes + 1] = name end
+    end
     table.sort(moneyTypes)
     local vehicles = {}
-    for model, data in pairs(QB.Shared.Vehicles or {}) do
+    local vehicleList = QB.qbox and (QBX:GetVehiclesByName() or {}) or QB.Shared.Vehicles or {}
+    for model, data in pairs(vehicleList) do
         if type(data) == 'table' then
             vehicles[#vehicles + 1] = {
                 model = data.model or model, name = data.name or model,
@@ -478,15 +645,32 @@ routes['GET /shared'] = function()
     table.sort(vehicles, function(a, b) return ((a.brand or '') .. a.name) < ((b.brand or '') .. b.name) end)
     local places = {}
     for _, key in ipairs(PLACE_ORDER) do places[#places + 1] = { key = key, label = PLACES[key].label } end
+    local jobs, gangs = jobsAndGangs(QB)
     return {
-        jobs = grouped(QB.Shared.Jobs), gangs = grouped(QB.Shared.Gangs), items = items, moneyTypes = moneyTypes,
+        jobs = grouped(jobs), gangs = grouped(gangs), items = items, moneyTypes = moneyTypes,
         vehicles = vehicles, places = places,
+        framework = framework(),
+        -- Tools that need a script this server may not have; the app hides the ones it can't use.
+        features = {
+            revive = reviveScript() ~= nil,
+            jail = jailScript() ~= nil,
+            weather = weatherScript() ~= nil,
+            dynamicWeather = weatherScript() == 'qb-weathersync',
+            items = inventoryResource() ~= nil,
+        },
     }
 end
 
 -- ---------------------------------------------------------------- the world
+-- Every weather type GTA has.
+local GTA_WEATHER = {}
+for _, name in ipairs({ 'EXTRASUNNY', 'CLEAR', 'NEUTRAL', 'SMOG', 'FOGGY', 'OVERCAST', 'CLOUDS', 'CLEARING', 'RAIN', 'THUNDER', 'SNOW', 'BLIZZARD', 'SNOWLIGHT', 'XMAS', 'HALLOWEEN', 'RAIN_HALLOWEEN', 'SNOW_HALLOWEEN' }) do
+    GTA_WEATHER[name] = true
+end
+
+-- Renewed-Weathersync (Qbox's recipe) answers qb-weathersync's calls too, except dynamic weather.
 local function weatherSync()
-    if GetResourceState('qb-weathersync') ~= 'started' then error('qb-weathersync is not running') end
+    if not weatherScript() then error('No weather script is running (qb-weathersync or Renewed-Weathersync)') end
     return exports['qb-weathersync']
 end
 
@@ -498,6 +682,9 @@ routes['GET /world'] = function()
         blackout = ws:getBlackoutState() == true,
         timeFrozen = ws:getTimeFreezeState() == true,
         dynamicWeather = ws:getDynamicWeather() == true,
+        -- Renewed-Weathersync keeps its own schedule: a weather set here lasts until its next change.
+        dynamicWeatherToggle = weatherScript() == 'qb-weathersync',
+        script = weatherScript(),
         hour = tonumber(hour), minute = tonumber(minute),
     }
 end
@@ -506,7 +693,10 @@ routes['POST /world'] = function(body)
     local ws = weatherSync()
     if body.weather ~= nil then
         local weather = text(body.weather, 20)
-        if not weather or not ws:setWeather(weather) then error('Unknown weather') end
+        if not weather or not GTA_WEATHER[weather:upper()] then error('Unknown weather') end
+        -- Renewed-Weathersync doesn't answer whether it worked; qb-weathersync does.
+        local ok = ws:setWeather(weather:upper())
+        if weatherScript() == 'qb-weathersync' and not ok then error('Unknown weather') end
     end
     if body.hour ~= nil then
         local hour, minute = wholeNumber(body.hour, 0, 23), wholeNumber(body.minute or 0, 0, 59)
@@ -515,7 +705,13 @@ routes['POST /world'] = function(body)
     end
     if body.blackout ~= nil then ws:setBlackout(body.blackout == true) end
     if body.timeFrozen ~= nil then ws:setTimeFreeze(body.timeFrozen == true) end
-    if body.dynamicWeather ~= nil then ws:setDynamicWeather(body.dynamicWeather == true) end
+    if body.dynamicWeather ~= nil then
+        if weatherScript() == 'qb-weathersync' then
+            ws:setDynamicWeather(body.dynamicWeather == true)
+        elseif body.dynamicWeather == true then
+            error(weatherScript() .. ' changes the weather on its own schedule, which can\'t be turned on or off from here')
+        end
+    end
     return routes['GET /world']()
 end
 
@@ -531,11 +727,11 @@ end
 
 routes['POST /events/revive-all'] = function()
     local QB = core()
-    if not QB then error('qb-core is not running') end
+    if not QB then noFramework() end
+    if not reviveScript() then error('No revive script is running (qb-ambulancejob or qbx_medical)') end
     local revived = 0
     for src in pairs(QB.Functions.GetQBPlayers()) do
-        TriggerClientEvent('hospital:client:Revive', src)
-        revived = revived + 1
+        if pcall(revive, src) then revived = revived + 1 end
     end
     return { revived = revived }
 end
@@ -562,7 +758,7 @@ routes['POST /events/clear-vehicles'] = function(body)
     TriggerClientEvent(RES .. ':client:banner', -1, 'Clearing the streets', 'Empty cars will be removed in', seconds, true)
     SetTimeout(seconds * 1000, function()
         local removed = clearEmptyVehicles()
-        TriggerClientEvent('QBCore:Notify', -1, ('%d empty cars were cleared from the streets'):format(removed), 'primary', 7000)
+        notifyPlayer(-1, ('%d empty cars were cleared from the streets'):format(removed), 7000)
     end)
     return { scheduled = seconds }
 end

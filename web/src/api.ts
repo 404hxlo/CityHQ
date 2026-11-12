@@ -97,13 +97,15 @@ export interface Overview {
   rootSource?: 'folder' | 'saved' | 'env' | null;
   /** The server folder CityHQ manages (only sent to the PC itself). */
   root?: string | null;
+  /** The server's framework, or the one chosen for a new server; null when it isn't known. */
+  framework?: Framework | null;
   /** CityHQ's database tools, for someone's own database: null when the server's own are used. */
   dbTools?: { ready: boolean; progress: { step: string; mb: number | null } | null } | null;
   /** A newer CityHQ that can be installed (only sent to the PC itself). */
   update?: { version: string } | null;
   status: null | {
     uptimeSec: number; players: number; maxClients: number; gameBuild: string; version: string;
-    onesync: string; qbcore: boolean; resourcesStarted: number; resourcesTotal: number;
+    onesync: string; qbcore: boolean; framework?: Framework | null; resourcesStarted: number; resourcesTotal: number;
   };
   stats: { cpuPct: number | null; memBytes: number | null; sysCpuPct: number | null; sysMemUsed: number; sysMemTotal: number };
   history: HistoryPoint[];
@@ -177,6 +179,9 @@ export interface VehicleModel { model: string; name: string; brand?: string; cat
 export interface Shared {
   jobs: Group[]; gangs: Group[]; items: { name: string; label: string }[]; moneyTypes: string[];
   vehicles?: VehicleModel[]; places?: { key: string; label: string }[];
+  framework?: Framework | null;
+  /** Tools that need a script the server may not have (missing from older helpers: assume yes). */
+  features?: { revive: boolean; jail: boolean; weather: boolean; dynamicWeather: boolean; items: boolean };
 }
 
 export interface SeriesPoint { t: number; v: number | null }
@@ -191,14 +196,20 @@ export interface Dashboard {
   schedule: { restarts: string[]; backup: string | null };
   greetingName: string;
 }
-export interface World { weather: string; blackout: boolean; timeFrozen: boolean; dynamicWeather: boolean; hour: number; minute: number }
+export interface World {
+  weather: string; blackout: boolean; timeFrozen: boolean; dynamicWeather: boolean; hour: number; minute: number;
+  /** False when the weather script keeps its own schedule (Renewed-Weathersync); missing from older helpers. */
+  dynamicWeatherToggle?: boolean; script?: string;
+}
 export interface KnownPlayer { license: string; name: string; characters: { citizenid: string; name: string }[]; lastSeen: number; ids: string[] }
 export interface Whitelist { enabled: boolean; entries: { id: string; name: string }[]; live: { enabled: boolean } | null; applied?: boolean }
 export type AdminRole = 'god' | 'admin' | 'mod';
 export interface AdminEntry { identifier: string; principal: string; role: AdminRole | 'full'; label: string; line: number; name: string | null }
 export interface AdminsResponse {
   admins: AdminEntry[];
-  roles: Record<AdminRole, { principal: string; label: string; help: string }>;
+  /** QBCore has all three roles; Qbox has no owner level (god). */
+  roles: Partial<Record<AdminRole, { principal: string; label: string; help: string }>>;
+  framework?: Framework | null;
   players: KnownPlayer[];
   playersError: string | null;
 }
@@ -217,11 +228,17 @@ export interface Settings {
 /** One server found on this PC, or the folder someone picked, as the Welcome screen reads it. */
 export interface ServerCandidate {
   folder: string; found: boolean; root: string; fxserverDir: string | null; txDataDir: string | null; profile: string;
-  dataPath: string | null; cfgPath: string | null; gamePort: number; txAdminPort: number; qbcore: boolean; cityhqMade: boolean;
+  dataPath: string | null; cfgPath: string | null; gamePort: number; txAdminPort: number; qbcore: boolean; framework: Framework | null; cityhqMade: boolean;
   database: { host: string; port: number; user: string; name: string; hasPassword: boolean; managed: boolean } | null;
   problems: { level: 'bad' | 'warn' | 'info'; text: string }[];
   txAdminRunning?: boolean; databaseUp?: boolean;
 }
+/** The roleplay framework a server runs. Qbox is a QBCore fork that also runs QBCore scripts. */
+export type Framework = 'qbcore' | 'qbox';
+export const FRAMEWORK_NAME: Record<Framework, string> = { qbcore: 'QBCore', qbox: 'Qbox' };
+/** "Qbox" or "QBCore"; QBCore when it isn't known. */
+export const frameworkName = (f?: Framework | null) => FRAMEWORK_NAME[f ?? 'qbcore'];
+
 export interface WelcomeInfo { folderFound: boolean; rootSource: string | null; root: string | null; desktop: boolean; suggestedNewFolder: string }
 export interface NewServerJob { running: boolean; root: string; lines: string[]; ok: boolean | null; error: string | null; startedAt: number }
 export interface DbToolsState { ready: boolean; running: boolean; progress: { step: string; mb: number | null } | null; error: string | null }
@@ -292,7 +309,7 @@ export const api = {
   welcomeUse: (folder: string, txAdminPort?: number) => request<{ root: string; external: boolean; needsTools: boolean }>('POST', '/api/welcome/use', { folder, txAdminPort }),
   welcomeTools: () => request<DbToolsState>('POST', '/api/welcome/tools'),
   welcomeProgress: () => request<WelcomeProgress>('GET', '/api/welcome/progress'),
-  welcomeNew: (folder: string) => request<NewServerJob>('POST', '/api/welcome/new', { folder }),
+  welcomeNew: (folder: string, framework: Framework) => request<NewServerJob>('POST', '/api/welcome/new', { folder, framework }),
   welcomeRelaunch: () => request<{ relaunching: boolean }>('POST', '/api/welcome/relaunch'),
   welcomeForget: () => request<{ relaunching: boolean }>('POST', '/api/welcome/forget'),
   startPanel: () => request<{ started?: boolean; alreadyRunning?: boolean }>('POST', '/api/server/start-panel'),

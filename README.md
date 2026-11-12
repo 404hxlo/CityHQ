@@ -1,9 +1,9 @@
 # CityHQ
 
-**Headquarters for your QBCore roleplay city.** Start it, watch it, fix it and back it up from one place.
+**Headquarters for your QBCore or Qbox roleplay city.** Start it, watch it, fix it and back it up from one place.
 
-CityHQ is a Windows app for running a QBCore FiveM server without touching config files or the
-command line. It works with the server you already have, or builds you a new one. It sits on top
+CityHQ is a Windows app for running a QBCore or Qbox FiveM server without touching config files or
+the command line. It works with the server you already have, or builds you a new one. It sits on top
 of txAdmin and works from the desktop, or from a phone on the same Wi-Fi.
 
 Website: <https://404hxlo.github.io/CityHQ/>
@@ -29,16 +29,16 @@ The first time, CityHQ asks: **Do you already have a FiveM server?**
   MariaDB). It points out anything missing, in plain English. When you connect, it adds its small
   helper script (`qb-control`) and a few marked lines to `server.cfg`, and downloads the official
   MariaDB tools once (for backups). Nothing else in your server changes.
-- **No, make me one.** CityHQ builds a new QBCore server in one folder: FiveM's server and a
-  private database that only your PC can reach. Then it starts txAdmin, shows its PIN, and tells you
-  exactly what to choose (Popular Recipes, then QBCore Framework).
+- **No, make me one.** You choose QBCore or Qbox, and CityHQ builds a new server in one folder:
+  FiveM's server and a private database that only your PC can reach. Then it starts txAdmin, shows
+  its PIN, and tells you exactly which recipe to choose.
 
 You can switch to a different server later under **Settings**, then **Change server**.
 
 ## What you need
 
 - Windows 10 or 11, 64-bit
-- A QBCore server run with txAdmin, or about 4 GB of free space for a new one
+- A QBCore or Qbox server run with txAdmin, or about 4 GB of free space for a new one
 - For a new server, a free FiveM license key from <https://portal.cfx.re> (txAdmin asks for it)
 - **Smart App Control turned off.** It blocks an unsigned file inside FiveM's own server, so no
   FiveM server can start while it is on. Check it under Windows Security, then App & browser
@@ -117,5 +117,5 @@ in the formal sense.
 
 ## Not affiliated
 
-This is an independent project. It is not made or endorsed by Cfx.re, Rockstar Games, txAdmin
-or the QBCore Framework.
+This is an independent project. It is not made or endorsed by Cfx.re, Rockstar Games, txAdmin,
+the QBCore Framework or the Qbox Project.

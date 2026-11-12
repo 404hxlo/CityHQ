@@ -85,7 +85,7 @@ function PlayerTools({ player, others, shared, busy, action }: {
           </select>
           <Button busy={busy === 'tp'} disabled={!target} onClick={send}>Send</Button>
         </div>
-        {hasCharacter && (
+        {hasCharacter && shared?.features?.jail !== false && (
           <>
             <label className="input-label" htmlFor="jail-months"><Lock size={14} />Jail (each month is one real minute)</label>
             <div className="input-row">
@@ -251,7 +251,8 @@ function PlayerDetail({ player, others, shared, onClose, reload }: { player: Pla
 
           <section className="card">
             <h3 className="card-title"><PackagePlus size={16} />Items</h3>
-            <div className="input-row wrap">
+            {shared?.features?.items === false && <Notice kind="info">No inventory script is running (ox_inventory, tgiann-inventory or qb-inventory), so items can't be given or removed from here.</Notice>}
+            <div className="input-row wrap" hidden={shared?.features?.items === false}>
               <input className="input" list="qb-items" placeholder="Search for an item" aria-label="Item" value={item} onChange={(e) => setItem(e.target.value)} />
               <datalist id="qb-items">
                 {(shared?.items || []).map((i) => <option key={i.name} value={i.label}>{i.name}</option>)}
@@ -292,7 +293,7 @@ function PlayerDetail({ player, others, shared, onClose, reload }: { player: Pla
       </section>
 
       <footer className="drawer-foot button-row">
-        {hasCharacter && <Button icon={<HeartPulse size={15} />} busy={busy === 'revive'} onClick={() => action('revive', 'revive')}>Revive</Button>}
+        {hasCharacter && shared?.features?.revive !== false && <Button icon={<HeartPulse size={15} />} busy={busy === 'revive'} onClick={() => action('revive', 'revive')}>Revive</Button>}
         <Button icon={<LogOut size={15} />} busy={busy === 'kick'} onClick={kick}>Kick</Button>
         <Button variant="danger" icon={<Gavel size={15} />} onClick={() => setBanOpen(true)}>Ban</Button>
       </footer>

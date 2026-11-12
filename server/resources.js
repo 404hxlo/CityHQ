@@ -16,6 +16,7 @@ import {
   readConvar, removeBootLine, setConvar, writeCfg,
 } from './cfg.js';
 import { clientArgs, clientEnv, dbClient } from './dbtools.js';
+import { serverFramework } from './framework.js';
 import {
   findServerData, FXSERVER_DIR, HttpError, resolveInside, STATE_DIR, TMP_DIR, TRASH_DIR,
 } from './paths.js';
@@ -27,13 +28,18 @@ const TAR = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'tar.
 const DISABLED_FILE = path.join(STATE_DIR, 'disabled.json');
 const DISABLED_CATEGORY = '[disabled]';
 const ADDED_CATEGORY = '[added]';
-const NEVER_REMOVE = new Set(['qb-core', 'oxmysql', 'qb-control', 'monitor']);
+const NEVER_REMOVE = new Set(['qb-core', 'qbx_core', 'oxmysql', 'qb-control', 'monitor']);
+// On Qbox these are part of the framework itself: qbx_core won't start without them.
+const QBOX_CORE = new Set(['ox_lib', 'ox_inventory']);
+const isQboxCore = (name) => QBOX_CORE.has(name) && serverFramework().framework === 'qbox';
+const neverRemove = (name) => NEVER_REMOVE.has(name) || isQboxCore(name);
+const warnOnStop = (name) => WARN_ON_STOP.has(name) || isQboxCore(name);
 const NEVER_STOP = new Set(['qb-control', 'monitor']);
 const LOCKED_REASON = {
   'qb-control': 'CityHQ uses qb-control to talk to the server, so it has to stay on.',
   monitor: 'monitor is txAdmin, which runs the server, so it has to stay on.',
 };
-const WARN_ON_STOP = new Set(['qb-core', 'oxmysql', 'sessionmanager', 'spawnmanager', 'mapmanager', 'chat']);
+const WARN_ON_STOP = new Set(['qb-core', 'qbx_core', 'oxmysql', 'sessionmanager', 'spawnmanager', 'mapmanager', 'chat']);
 // Resources that ship inside FXServer itself (chat, txAdmin's monitor, yarn, webpack).
 const SYSTEM_DIR = path.join(FXSERVER_DIR, 'citizen', 'system_resources');
 export const BUILT_IN_CATEGORY = 'Built into FiveM';
@@ -175,7 +181,7 @@ export function builtInItems({ system, diskNames, cfg, live, dependents = new Ma
       dependents: dependents.get(s.name) || [],
       canStop: !NEVER_STOP.has(s.name),
       canRemove: false,
-      warnOnStop: WARN_ON_STOP.has(s.name),
+      warnOnStop: warnOnStop(s.name),
       hasEasyConfig: false,
       builtIn: true,
       setting: key ? { key, on: settingOn } : null,
@@ -277,8 +283,8 @@ export async function listResources() {
       installable: missingDeps.map(findInstallSource).filter(Boolean),
       dependents: dependents.get(r.name) || [],
       canStop: !NEVER_STOP.has(r.name),
-      canRemove: !NEVER_REMOVE.has(r.name),
-      warnOnStop: WARN_ON_STOP.has(r.name),
+      canRemove: !neverRemove(r.name),
+      warnOnStop: warnOnStop(r.name),
       hasEasyConfig: hasEasyConfig(r),
       builtIn: false,
       setting: null,
@@ -627,7 +633,7 @@ export async function runSql(name, file) {
 /** Moves a resource to the app's trash so it can be brought back. */
 export async function removeResource(name) {
   if (!isValidName(name)) throw new HttpError(400, 'Invalid resource name');
-  if (NEVER_REMOVE.has(name)) throw new HttpError(400, `${name} is required by the server and cannot be removed`);
+  if (neverRemove(name)) throw new HttpError(400, `${name} is required by the server and cannot be removed`);
   const resource = await findResourceDir(name);
   if (!resource) throw new HttpError(404, 'That resource was not found');
   await agentRequest('/resources/action', { method: 'POST', body: { name, action: 'stop' }, timeoutMs: 15000 }).catch(() => null);

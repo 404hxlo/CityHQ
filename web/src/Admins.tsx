@@ -85,12 +85,16 @@ export function AdminsCard() {
                 <Button variant="ghost" onClick={() => setChosen(null)}>Change</Button>
               </div>
               <div className="role-choices" role="radiogroup" aria-label="Role">
-                {ROLE_ORDER.map((r) => (
-                  <button key={r} role="radio" aria-checked={role === r} className={`role-choice${role === r ? ' active' : ''}`} onClick={() => setRole(r)}>
-                    <strong>{r === 'god' && <Crown size={13} />}{data.roles[r].label}</strong>
-                    <span>{data.roles[r].help}</span>
-                  </button>
-                ))}
+                {ROLE_ORDER.map((r) => {
+                  const info = data.roles[r];
+                  if (!info) return null;
+                  return (
+                    <button key={r} role="radio" aria-checked={role === r} className={`role-choice${role === r ? ' active' : ''}`} onClick={() => setRole(r)}>
+                      <strong>{r === 'god' && <Crown size={13} />}{info.label}</strong>
+                      <span>{info.help}</span>
+                    </button>
+                  );
+                })}
               </div>
               <div className="button-row">
                 <Button variant="primary" icon={<ShieldCheck size={15} />} busy={busy === 'add'} onClick={add}>Make {labels[role]}</Button>

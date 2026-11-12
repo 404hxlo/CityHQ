@@ -94,9 +94,27 @@ local function currentVehicle()
     return vehicle ~= 0 and DoesEntityExist(vehicle) and vehicle or nil
 end
 
+-- Qbox shows notifications through ox_lib; QBCore through its own event.
 local function notify(message, kind)
-    TriggerEvent('QBCore:Notify', message, kind or 'primary', 5000)
+    if GetResourceState('qbx_core') == 'started' then
+        TriggerEvent('ox_lib:notify', { description = message, type = kind or 'inform', duration = 5000 })
+    else
+        TriggerEvent('QBCore:Notify', message, kind or 'primary', 5000)
+    end
 end
+
+-- Qbox has no teleport event of its own for other scripts, so CityHQ moves the player itself.
+RegisterNetEvent(RES .. ':client:teleport', function(x, y, z, heading)
+    x, y, z = tonumber(x), tonumber(y), tonumber(z)
+    if not x or not y or not z then return end
+    local ped = PlayerPedId()
+    DoScreenFadeOut(300)
+    while not IsScreenFadedOut() do Wait(10) end
+    SetPedCoordsKeepVehicle(ped, x, y, z)
+    if tonumber(heading) then SetEntityHeading(ped, tonumber(heading)) end
+    Wait(300)
+    DoScreenFadeIn(300)
+end)
 
 RegisterNetEvent(RES .. ':client:fixVehicle', function()
     local vehicle = currentVehicle()

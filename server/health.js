@@ -11,6 +11,7 @@ import { parseBoot, readCfg } from './cfg.js';
 import { serverLogTail } from './doctor.js';
 import { dbRun, VALID_TABLE } from './db.js';
 import { columnsOf, createStatementFor, stripSqlComments } from './fixes.js';
+import { serverFramework } from './framework.js';
 import { findServerData, MANAGED_DB, ROOT } from './paths.js';
 import { liveStates, listSqlFiles, scanDisk } from './resources.js';
 import { listingStatus } from './reach.js';
@@ -19,6 +20,10 @@ import { getSettings } from './settings.js';
 const exec = promisify(execFile);
 const GB = 1024 ** 3;
 const OTHER_FRAMEWORK_SQL = /(^|[\\/_.-])(esx|vrp|qbx|qbox|ox[_-]?core|nd[_-]?core)([\\/_.-]|$)/i;
+const NOT_QBOX_SQL = /(^|[\\/_.-])(esx|vrp|ox[_-]?core|nd[_-]?core)([\\/_.-]|$)/i;
+
+/** .sql files written for a framework this server doesn't run, which the table check skips. */
+export const otherFrameworkSql = (file, framework) => (framework === 'qbox' ? NOT_QBOX_SQL : OTHER_FRAMEWORK_SQL).test(file);
 
 const finding = (id, status, title, detail, extra = {}) => ({ id, status, title, detail, steps: [], ...extra });
 
@@ -174,8 +179,9 @@ async function checkTables(disk, cfg) {
 /** The same check for any list of scripts, such as one that was just installed. */
 export async function tableFindings(resources) {
   const wanted = [];
+  const { framework } = serverFramework();
   for (const r of resources) {
-    const files = (await listSqlFiles(r.name).catch(() => [])).filter((f) => !OTHER_FRAMEWORK_SQL.test(f));
+    const files = (await listSqlFiles(r.name).catch(() => [])).filter((f) => !otherFrameworkSql(f, framework));
     for (const file of files) {
       const text = stripSqlComments(await readFile(path.join(r.dir, file), 'utf8').catch(() => ''));
       for (const m of text.matchAll(/CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?[`"]?(\w+)[`"]?\s*\(/gi)) {

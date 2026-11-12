@@ -3,9 +3,9 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>CityHQ: a Windows app for running a QBCore server</title>
-<meta name="description" content="CityHQ is a free Windows app that runs a QBCore FiveM server: it starts txAdmin, explains errors in plain words, fixes what it safely can, backs everything up, and can undo every change it makes.">
-<meta property="og:title" content="CityHQ: a Windows app for running a QBCore server">
+<title>CityHQ: a Windows app for running a QBCore or Qbox server</title>
+<meta name="description" content="CityHQ is a free Windows app that runs a QBCore or Qbox FiveM server: it starts txAdmin, explains errors in plain words, fixes what it safely can, backs everything up, and can undo every change it makes.">
+<meta property="og:title" content="CityHQ: a Windows app for running a QBCore or Qbox server">
 <meta property="og:description" content="Free. Explains what broke and how to fix it, checks the setup, backs up every night, and undoes every change it makes.">
 <meta property="og:type" content="website">
 <meta property="og:image" content="img/overview.jpg">
@@ -152,7 +152,7 @@ footer p { margin: 0; max-width: 38em; }
 
 <main id="main">
   <div class="opening col">
-    <h1>CityHQ runs your QBCore server, and tells you what's wrong with it in plain words.</h1>
+    <h1>CityHQ runs your QBCore or Qbox server, and tells you what's wrong with it in plain words.</h1>
     <p>It's a free Windows app. It starts txAdmin, watches the console, fixes what it safely can and backs everything up. <mark>Every change it makes can be undone.</mark></p>
     <div class="get">
       <a class="button" href="https://github.com/404hxlo/CityHQ/releases/latest/download/CityHQ-windows.zip">
@@ -247,7 +247,7 @@ footer p { margin: 0; max-width: 38em; }
       <ol class="does" style="counter-reset: does 4">
         <li>
           <h3>Looks after your scripts</h3>
-          <p>Add one from a zip, a folder or a GitHub link. Before it goes live, an install check says whether it works with QBCore, what it needs and which database tables it creates. Settings files open as simple forms, and every save keeps a copy of the file as it was.</p>
+          <p>Add one from a zip, a folder or a GitHub link. Before it goes live, an install check says whether it works with your framework, what it needs and which database tables it creates. Settings files open as simple forms, and every save keeps a copy of the file as it was.</p>
         </li>
       </ol>
     </div>
@@ -260,7 +260,7 @@ footer p { margin: 0; max-width: 38em; }
       <span class="pin" style="left: 70%; top: 56%"><span>2</span></span>
     </div>
     <ol class="notes">
-      <li><b>1</b><span>The install check: does it fit QBCore, and what does it need?</span></li>
+      <li><b>1</b><span>The install check: does it fit your server, and what does it need?</span></li>
       <li><b>2</b><span><code>config.lua</code> as plain settings, no code.</span></li>
     </ol>
     <p class="caption"><strong>Fig. 4</strong> One script, opened from the Resources page.</p>
@@ -294,7 +294,7 @@ footer p { margin: 0; max-width: 38em; }
     <div class="col">
       <h2>What it doesn't do (yet)</h2>
       <ul class="not">
-        <li><strong>Other frameworks.</strong> It's made for QBCore. ESX and Qbox aren't supported yet.</li>
+        <li><strong>ESX and other frameworks.</strong> It's made for QBCore and Qbox. ESX isn't supported yet.</li>
         <li><strong>Linux, or game hosts with only a web panel.</strong> CityHQ runs on the Windows PC or Windows server where FXServer runs. A rented Windows VPS you can log in to is fine.</li>
         <li><strong>Replace txAdmin.</strong> txAdmin still runs the game. If you close CityHQ, the server keeps going.</li>
         <li><strong>Come signed.</strong> It isn't code-signed yet, so Windows warns you the first time you open it.</li>
@@ -344,7 +344,7 @@ footer p { margin: 0; max-width: 38em; }
 
 <footer>
   <div class="wide">
-    <p>CityHQ is an independent project, not made or endorsed by Cfx.re, Rockstar Games, txAdmin or the QBCore Framework.</p>
+    <p>CityHQ is an independent project, not made or endorsed by Cfx.re, Rockstar Games, txAdmin, the QBCore Framework or the Qbox Project.</p>
     <nav aria-label="Footer">
       <a href="https://github.com/404hxlo/CityHQ/blob/main/CHANGELOG.md">What's new</a>
       <a href="https://github.com/404hxlo/CityHQ/releases">All versions</a>

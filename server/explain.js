@@ -13,6 +13,8 @@ export const DOCS = {
   setup: { kind: 'doc', label: 'FiveM docs: setting up txAdmin', url: 'https://docs.fivem.net/docs/server-manual/setting-up-a-server-txadmin/' },
   qbcore: { kind: 'doc', label: 'QBCore documentation', url: 'https://qbcore.org/docs/' },
   coreObject: { kind: 'doc', label: 'QBCore docs: getting the core object', url: 'https://qbcore.org/docs/qb-core/core-object' },
+  qbox: { kind: 'doc', label: 'Qbox documentation', url: 'https://docs.qbox.re/' },
+  qboxConvert: { kind: 'doc', label: 'Qbox docs: converting QBCore scripts', url: 'https://docs.qbox.re/migrating/converting-resources' },
   oxmysql: { kind: 'doc', label: 'oxmysql documentation', url: 'https://overextended.dev/docs/oxmysql' },
   oxlib: { kind: 'doc', label: 'ox_lib documentation', url: 'https://overextended.dev/docs/ox_lib' },
   mariadb: { kind: 'doc', label: 'MariaDB error reference', url: 'https://mariadb.com/docs/server/reference/error-codes' },
@@ -41,10 +43,22 @@ export function luaPlain(message = '') {
   return 'The code on this line could not be understood.';
 }
 
-function runtimeHint(message = '', resource = '') {
+function runtimeHint(message = '', resource = '', framework = null) {
   const m = String(message);
   let match = m.match(/attempt to index a nil value \((?:global|field|local|upvalue) '([\w.]+)'\)/);
   if (match && /^QBCore$/i.test(match[1])) {
+    if (framework === 'qbox') {
+      return {
+        what: `${resource} used QBCore before it was available. On Qbox, QBCore scripts get it from Qbox's QBCore bridge.`,
+        fix: [
+          `Check that qbx_core is running and starts before ${resource}.`,
+          'Check that server.cfg doesn\'t turn the bridge off: qbx:enableBridge must not be "false".',
+          'Near the top of the script, look for: local QBCore = exports[\'qb-core\']:GetCoreObject(). Qbox answers to that name too.',
+        ],
+        links: [DOCS.qboxConvert, DOCS.qbox],
+        terms: 'qbox attempt to index nil QBCore',
+      };
+    }
     return {
       what: `${resource} used QBCore before it was available.`,
       fix: [
@@ -67,9 +81,11 @@ function runtimeHint(message = '', resource = '') {
   match = m.match(/attempt to call a nil value \((?:global|field|method|local|upvalue) '([\w.]+)'\)/);
   if (match) {
     return {
-      what: `It called a function named "${match[1]}" that doesn't exist. The resource is usually written for a different version of QBCore, or something it depends on is missing.`,
-      fix: ['Check the resource\'s install notes for what it requires.', 'Update the resource, or qb-core if it is older than the resource expects.', 'If you edited the file recently, check the spelling of that name.'],
-      links: [DOCS.qbcore, DOCS.lua],
+      what: framework === 'qbox'
+        ? `It called a function named "${match[1]}" that doesn't exist. The resource may be written for QBCore and use something Qbox's QBCore bridge doesn't offer, or something it depends on is missing.`
+        : `It called a function named "${match[1]}" that doesn't exist. The resource is usually written for a different version of QBCore, or something it depends on is missing.`,
+      fix: ['Check the resource\'s install notes for what it requires.', framework === 'qbox' ? 'Look for a Qbox version of the resource, or update it and qbx_core.' : 'Update the resource, or qb-core if it is older than the resource expects.', 'If you edited the file recently, check the spelling of that name.'],
+      links: [framework === 'qbox' ? DOCS.qboxConvert : DOCS.qbcore, DOCS.lua],
       terms: 'attempt to call a nil value',
     };
   }
@@ -166,6 +182,21 @@ const RULES = [
       const [, needed, file] = m;
       const owner = nearbyLoadingResource(lines, i) || ctx.currentResource || null;
       const name = owner || 'A resource';
+      // On Qbox, qb-core is only a name qbx_core answers to: there is no qb-core folder to load files from.
+      if (needed.toLowerCase() === 'qb-core' && ctx.framework === 'qbox') {
+        return finish(raw, {
+          key: `load-import:${owner}:${needed}`,
+          resource: owner,
+          title: `${name} loads a file from qb-core, which Qbox doesn't have`,
+          what: `It asks for qb-core's ${file}. Qbox runs most QBCore scripts through its QBCore bridge, but it has no qb-core folder, so files loaded straight from qb-core aren't there.`,
+          fix: [
+            `Look for a Qbox version of ${name}, or a framework setting in its config that you can set to qbx.`,
+            `If the line is qb-core's shared/locale.lua, Qbox's guide for converting scripts shows what to use instead.`,
+          ],
+          actions: [owner ? openFile(ctx, owner, 'fxmanifest.lua', null, 'Open its fxmanifest.lua') : null],
+          links: [DOCS.qboxConvert, DOCS.manifest, forum(`${name} qbox`)],
+        });
+      }
       if (ctx.isInstalled(needed)) {
         return finish(raw, {
           key: `load-import:${owner}:${needed}:${file}`,
@@ -178,20 +209,21 @@ const RULES = [
         });
       }
       const framework = FRAMEWORKS[needed.toLowerCase()];
+      const fw = ctx.framework === 'qbox' ? 'Qbox' : 'QBCore';
       if (framework) {
         return finish(raw, {
           key: `load-import:${owner}:${needed}`,
           severity: 'warning',
           resource: owner,
           title: `${name} asks for a file from ${framework}, which you don't use`,
-          what: `Your server runs QBCore, but ${name} also tries to load ${framework}'s ${file}. If ${name} supports QBCore, this can be harmless and the rest still runs. Anything that really needs ${framework} won't work.`,
+          what: `Your server runs ${fw}, but ${name} also tries to load ${framework}'s ${file}. If ${name} supports ${fw}, this can be harmless and the rest still runs. Anything that really needs ${framework} won't work.`,
           fix: [
-            `Check ${name}'s config for a framework setting, and make sure it allows QBCore.`,
+            `Check ${name}'s config for a framework setting, and make sure it allows ${fw}.`,
             `If it works in game, you can remove the warning: open fxmanifest.lua and put -- in front of the @${needed} line.`,
-            `If it doesn't work, ask the author for a QBCore version.`,
+            `If it doesn't work, ask the author for a ${fw} version.`,
           ],
           actions: [owner ? openFile(ctx, owner, 'fxmanifest.lua', null, 'Open its fxmanifest.lua') : null],
-          links: [DOCS.manifest, DOCS.qbcore, video(`${framework} script on qbcore server`), forum(`${framework} to qbcore`)],
+          links: [DOCS.manifest, ctx.framework === 'qbox' ? DOCS.qbox : DOCS.qbcore, video(`${framework} script on ${fw.toLowerCase()} server`), forum(`${framework} to ${fw.toLowerCase()}`)],
         });
       }
       return finish(raw, {
@@ -408,7 +440,7 @@ const RULES = [
     test: /SCRIPT ERROR: @([\w.-]+)\/(\S+?):(\d+): (.*)$/,
     build(m, { ctx, raw }) {
       const [, resource, file, line, message] = m;
-      const hint = runtimeHint(message, resource);
+      const hint = runtimeHint(message, resource, ctx.framework);
       return finish(raw, {
         key: `script-error:${resource}:${file}:${line}`,
         resource,

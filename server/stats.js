@@ -3,6 +3,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { parseAdmins } from './admins.js';
+import { serverFramework } from './framework.js';
 import { agentRequest } from './agent.js';
 import { readCfg } from './cfg.js';
 import { isSecondary } from './desktop.js';
@@ -104,7 +105,7 @@ export async function pushWhitelist() {
   const ids = new Set((whitelist.entries || []).map((e) => e.id));
   const server = findServerData();
   if (server) {
-    try { for (const admin of parseAdmins(await readCfg(server.cfgPath))) ids.add(admin.identifier); } catch { /* no cfg yet */ }
+    try { for (const admin of parseAdmins(await readCfg(server.cfgPath), serverFramework().framework)) ids.add(admin.identifier); } catch { /* no cfg yet */ }
   }
   return agentRequest('/whitelist', { method: 'POST', body: { enabled: whitelist.enabled, ids: [...ids] } });
 }

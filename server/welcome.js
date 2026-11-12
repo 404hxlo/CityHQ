@@ -6,9 +6,10 @@ import { mkdir, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import {
-  connectionStringOf, gamePortOf, parseConnection, parseBoot,
+  connectionStringOf, gamePortOf, parseConnection,
 } from './cfg.js';
 import { isSecondary } from './desktop.js';
+import { frameworkOf, qbxBridgeOff } from './framework.js';
 import {
   APP_DIR, APP_PORT, CONFIG_NAME, findServerData, HOME_DIR, HttpError, POINTER_FILE, portOr, readConfig,
 } from './paths.js';
@@ -105,7 +106,7 @@ export function inspectServerFolder(picked, io = fs) {
     }
     else {
       dataPath = null;
-      problems.push(problem('warn', 'txAdmin is there, but no server has been deployed with it yet. Finish txAdmin\'s setup (choose the QBCore recipe), then CityHQ can manage it.'));
+      problems.push(problem('warn', 'txAdmin is there, but no server has been deployed with it yet. Finish txAdmin\'s setup (choose the QBCore or Qbox recipe), then CityHQ can manage it.'));
     }
   }
 
@@ -127,10 +128,11 @@ export function inspectServerFolder(picked, io = fs) {
   if (cfgPath && !database) problems.push(problem('bad', 'server.cfg has no mysql_connection_string line, so scripts (and CityHQ) can\'t reach the database. Add the one your database setup gave you.'));
   else if (database && !database.name) problems.push(problem('bad', 'The mysql_connection_string in server.cfg doesn\'t name a database.'));
 
-  // CityHQ is made for QBCore; other frameworks mostly work for starting and stopping only.
-  const boot = cfg ? parseBoot(cfg) : null;
-  const qbcore = Boolean(boot && (boot.names.has('qb-core') || (dataPath && io.exists(path.join(dataPath, 'resources', '[qb]', 'qb-core')))));
-  if (cfgPath && !qbcore) problems.push(problem('warn', 'This doesn\'t look like a QBCore server. Starting, stopping, files and backups work, but the player tools are made for QBCore.'));
+  // CityHQ is made for QBCore and Qbox; other frameworks mostly work for starting and stopping only.
+  const framework = cfgPath ? frameworkOf(cfg, dataPath, (p) => io.exists(p)) : null;
+  const qbcore = framework !== null;
+  if (cfgPath && !framework) problems.push(problem('warn', 'This doesn\'t look like a QBCore or Qbox server. Starting, stopping, files and backups work, but the player tools are made for QBCore and Qbox.'));
+  if (framework === 'qbox' && qbxBridgeOff(cfg)) problems.push(problem('warn', 'server.cfg turns off Qbox\'s QBCore bridge (qbx:enableBridge), so scripts written for QBCore won\'t work. CityHQ\'s own tools still do.'));
 
   return {
     folder: dir,
@@ -145,6 +147,7 @@ export function inspectServerFolder(picked, io = fs) {
     txAdminPort,
     database,
     qbcore,
+    framework,
     cityhqMade,
     problems,
   };
@@ -267,8 +270,9 @@ export const newServerJob = () => job && { ...job, lines: job.lines.slice(-200) 
  * Runs setup into a new folder (FiveM's server, a private database and free ports), streaming its
  * steps for the screen. Setup itself refuses folders that aren't new or empty.
  */
-export function startNewServer(folder) {
+export function startNewServer(folder, framework = 'qbcore') {
   if (job?.running) throw new HttpError(409, 'A new server is already being set up.');
+  if (framework !== 'qbcore' && framework !== 'qbox') throw new HttpError(400, 'Choose QBCore or Qbox.');
   if (typeof folder !== 'string' || !/^[A-Za-z]:\\[^\s"]+$/.test(folder.trim())) {
     throw new HttpError(400, 'Choose a folder on this PC with no spaces in its path, such as C:\\QBCore-Server.');
   }
@@ -297,6 +301,8 @@ export function startNewServer(folder) {
       return;
     }
     try {
+      // Remembered so "Finish setting up" names the right txAdmin recipe.
+      await replaceFile(path.join(root, CONFIG_NAME), `${JSON.stringify({ ...readConfig(root), framework }, null, 2)}\n`);
       await mkdir(HOME_DIR, { recursive: true });
       await writeFile(POINTER_FILE, JSON.stringify({ serverRoot: root, chosenAt: new Date().toISOString() }, null, 2));
     } catch (err) { job.ok = false; job.error = err.message; }

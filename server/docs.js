@@ -1,7 +1,8 @@
 // Finds a script's own documentation, so problem tips link to the author's instructions rather than
 // to searches. Sources, best first: a docs link inside the error itself, links in the script's own
 // files (fxmanifest, readme, config comments), the author's docs site learned from their other
-// scripts, and QBCore's page for qb- scripts (checked once to exist, then remembered).
+// scripts, and QBCore's page for qb- scripts or Qbox's for qbx_ ones (checked once to exist, then
+// remembered).
 import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { STATE_DIR } from './paths.js';
@@ -21,6 +22,8 @@ const KNOWN_PAGES = {
 const FILES = ['fxmanifest.lua', '__resource.lua', 'config.lua', 'shared/config.lua', 'config/config.lua', 'configs/config.lua', 'shared/sh_config.lua'];
 const QB_PAGE = (name) => `https://qbcore.org/docs/qbcore-resources/${name}`;
 export const QB_HOME = 'https://qbcore.org/docs/';
+const QBX_PAGE = (name) => `https://docs.qbox.re/resources/${name}`;
+const QBX_HOME = 'https://docs.qbox.re/';
 const CHECKED_FILE = path.join(STATE_DIR, 'doc-links.json');
 const RECHECK_MS = 30 * 24 * 3600 * 1000;
 
@@ -196,7 +199,7 @@ export async function buildDocIndex(disk, { fetcher = fetch, cache = fileLinkCac
       continue;
     }
     const prefix = prefixOf(r.name);
-    if (prefix && prefix !== 'qb' && prefix.length >= 2 && !sites.has(prefix)) {
+    if (prefix && prefix !== 'qb' && prefix !== 'qbx' && prefix.length >= 2 && !sites.has(prefix)) {
       for (const [site, count] of allSites) if (siteWord(site).startsWith(prefix)) note(prefix, site, count);
     }
     if (prefix === 'qb') {
@@ -204,6 +207,13 @@ export async function buildDocIndex(disk, { fetcher = fetch, cache = fileLinkCac
       index.set(r.name, ok
         ? { url: QB_PAGE(r.name), label: `${r.name} documentation (QBCore)`, source: 'qbcore' }
         : { url: QB_HOME, label: 'QBCore documentation', source: 'qbcore' });
+      continue;
+    }
+    if (prefix === 'qbx') {
+      const ok = await exists(QBX_PAGE(r.name));
+      index.set(r.name, ok
+        ? { url: QBX_PAGE(r.name), label: `${r.name} documentation (Qbox)`, source: 'qbox' }
+        : { url: QBX_HOME, label: 'Qbox documentation', source: 'qbox' });
       continue;
     }
     const candidates = prefix && sites.get(prefix);
