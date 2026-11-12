@@ -10,8 +10,10 @@ import os from 'node:os';
 import path from 'node:path';
 import { after, test } from 'node:test';
 import ssh2 from 'ssh2';
-import { describeHosted, findHostedServer, hostPath } from './remote/find.js';
-import { helperAddress } from './remote/helper.js';
+import {
+  describeHosted, findHostedServer, hostPath, serverNameOf,
+} from './remote/find.js';
+import { helperAddress, joinLinkOf } from './remote/helper.js';
 import { panelBase, panelClient, panelConsole, serverSummary } from './remote/panel.js';
 import { categoriesOf } from './remote/resources.js';
 import { remotePath, sftpClient } from './remote/sftp.js';
@@ -217,6 +219,21 @@ test('the helper\'s address is only ever a Cfx.re HTTPS address', () => {
   assert.equal(helperAddress('https://x.users.cfx.re.evil.com'), null);
   assert.equal(helperAddress('https://x.users.cfx.re:8443'), null);
   assert.equal(helperAddress(''), null);
+});
+
+test('joining a hosted server: Cfx.re\'s join link from the helper\'s address', () => {
+  assert.equal(joinLinkOf('https://harbor-abc123.users.cfx.re'), 'cfx.re/join/abc123');
+  assert.equal(joinLinkOf('https://my-big-city-x9y8z7.users.cfx.re'), 'cfx.re/join/x9y8z7');
+  assert.equal(joinLinkOf('https://abc123.users.cfx.re'), 'cfx.re/join/abc123');
+  assert.equal(joinLinkOf(null), null);
+});
+
+test('a hosted server\'s own name: txAdmin\'s setting, then server.cfg', async () => {
+  const files = memoryFiles({ '/txData/default/config.json': JSON.stringify({ general: { serverName: 'Harbor Town' } }) });
+  assert.equal(await serverNameOf(files, { txProfile: '/txData/default', cfgText: '' }), 'Harbor Town');
+  assert.equal(await serverNameOf(memoryFiles({}), { txProfile: null, cfgText: 'sets sv_projectName "^1Pine ^7Valley"' }), 'Pine Valley');
+  assert.equal(await serverNameOf(memoryFiles({}), { txProfile: null, cfgText: 'sv_hostname "Coastline | Serious"' }), 'Coastline | Serious');
+  assert.equal(await serverNameOf(memoryFiles({}), { txProfile: null, cfgText: 'ensure x' }), null);
 });
 
 test('resources on a host: categories from where the server says they are', () => {

@@ -168,7 +168,8 @@ async function backupTick(now) {
 
 export function nextBackupTime() {
   const { backups } = getSettings();
-  if (!backups.enabled) return null;
+  // CityHQ doesn't back up hosted servers yet, so nothing is coming up.
+  if (!backups.enabled || REMOTE) return null;
   return nextOccurrence([backups.time], new Date());
 }
 

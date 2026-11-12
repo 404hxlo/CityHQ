@@ -2,6 +2,13 @@
 
 Each version's section is shown in the app before it updates, and on its GitHub release page.
 
+## 1.4.1
+
+- Hosted servers: the join address is your server's Cfx.re join link (or your host's address), not "localhost".
+- Hosted servers connected over SFTP show their own name instead of the SFTP address.
+- Hosted servers no longer show a nightly backup under Coming up, since CityHQ doesn't back them up yet.
+- When a hosted server's helper isn't answering yet, CityHQ says to restart the server from your host's panel.
+
 ## 1.4.0
 
 - CityHQ can now run a server you rent from a host, such as RocketNode. On the Welcome screen (or Settings, Change server) choose "It's hosted", then connect with your panel's API key or with SFTP.

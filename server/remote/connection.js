@@ -94,6 +94,14 @@ function sftpConnection(remote, password, onHostKey) {
 
 let current = null;
 
+/** Saves what CityHQ knows about the hosted server (never its secret) for the next start. */
+export function saveRemote() {
+  try {
+    const file = path.join(path.dirname(STATE_DIR), 'qbcontrol.json');
+    replaceFileSync(file, `${JSON.stringify({ remote: REMOTE }, null, 2)}\n`);
+  } catch { /* remembered for this run */ }
+}
+
 /** The running app's connection to its hosted server (made on first use). */
 export function connection() {
   if (!REMOTE) throw new HttpError(409, 'This CityHQ manages a server on this PC');
@@ -103,10 +111,7 @@ export function connection() {
       onHostKey: (fingerprint) => {
         if (REMOTE.hostKey) return;
         REMOTE.hostKey = fingerprint;
-        try {
-          const file = path.join(path.dirname(STATE_DIR), 'qbcontrol.json');
-          replaceFileSync(file, `${JSON.stringify({ remote: REMOTE }, null, 2)}\n`);
-        } catch { /* remembered for this run */ }
+        saveRemote();
       },
     });
   }

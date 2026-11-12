@@ -67,4 +67,16 @@ export async function readHelperAddress(conn, dataPath, { fresh = false } = {}) 
 
 export function forgetHelperAddress() { cached = { address: null, at: 0 }; }
 
+/**
+ * How players join: Cfx.re's join link for the server (cfx.re/join/<code>, from its address
+ * <name>-<code>.users.cfx.re), which works whatever the host's own address is.
+ */
+export function joinLinkOf(address) {
+  const code = String(address || '').match(/^https:\/\/[a-z0-9-]*?-?([a-z0-9]{4,8})\.users\.cfx\.re$/i)?.[1];
+  return code ? `cfx.re/join/${code.toLowerCase()}` : null;
+}
+
+/** The last address read, without asking the host again. */
+export const lastHelperAddress = () => cached.address;
+
 export const NO_ADDRESS = new HttpError(503, 'CityHQ\'s helper hasn\'t answered from your hosted server yet. It starts when the server restarts; if it has, the server may not have a Cfx.re address yet (it needs a license key and a minute after starting).');

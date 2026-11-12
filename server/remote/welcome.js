@@ -6,7 +6,7 @@ import path from 'node:path';
 import { HttpError, POINTER_FILE, REMOTE_HOME } from '../paths.js';
 import { replaceFileSync } from '../retry.js';
 import { makeConnection } from './connection.js';
-import { describeHosted, findHostedServer } from './find.js';
+import { describeHosted, findHostedServer, serverNameOf } from './find.js';
 import { installRemoteHelper } from './helper.js';
 import { looksLikeKey, panelBase, panelClient } from './panel.js';
 import { canKeepSecrets, saveSecret } from './secret.js';
@@ -54,6 +54,8 @@ async function inspect(body) {
     }
     const found = await findHostedServer(conn.files);
     const report = describeHosted(found, { address: summary?.address || null });
+    // The panel knows the name it was given; over SFTP, the server's own settings say it.
+    const ownName = found ? await serverNameOf(conn.files, found) : null;
     if (remote.type === 'sftp' && found?.txProfile && await conn.files.exists(`${found.txProfile}/logs/fxserver.log`)) {
       remote.logPath = `${found.txProfile}/logs/fxserver.log`;
     }
@@ -61,7 +63,7 @@ async function inspect(body) {
       report.problems.push({ level: 'info', text: 'Without your host\'s panel API, CityHQ can\'t start or stop the server, and the console shows only once txAdmin has written its log.' });
     }
     return {
-      remote: { ...remote, hostKey, serverName: summary?.name || remote.host, address: summary?.address || null },
+      remote: { ...remote, hostKey, serverName: summary?.name || ownName || remote.host, address: summary?.address || null },
       secret, found, report, conn,
     };
   } catch (err) {

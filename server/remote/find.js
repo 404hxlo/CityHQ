@@ -61,6 +61,24 @@ export async function findHostedServer(files) {
   return null;
 }
 
+const plainName = (text) => String(text || '').replace(/\^\d/g, '').replace(/\s+/g, ' ').trim().slice(0, 80) || null;
+
+/**
+ * The server's own name: txAdmin's setting, then server.cfg's project name or listing name.
+ * Null when neither says.
+ */
+export async function serverNameOf(files, { txProfile, cfgText }) {
+  if (txProfile) {
+    const text = await tryRead(files, `${txProfile}/config.json`);
+    try {
+      const name = plainName(JSON.parse(text || '{}')?.general?.serverName);
+      if (name) return name;
+    } catch { /* fall back to server.cfg */ }
+  }
+  const cfg = String(cfgText || '');
+  return plainName(readConvar(cfg, 'sv_projectName') || readCommand(cfg, 'sv_hostname') || readConvar(cfg, 'sv_hostname'));
+}
+
 /** What the Welcome screen shows about a hosted server before connecting. */
 export function describeHosted(found, { address } = {}) {
   const problems = [];

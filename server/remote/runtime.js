@@ -7,15 +7,29 @@ import { setHostedControl } from '../control.js';
 import { recordEvent } from '../events.js';
 import { noteHostedCfg } from '../framework.js';
 import { HttpError, REMOTE } from '../paths.js';
-import { closeConnection, connection } from './connection.js';
+import { closeConnection, connection, saveRemote } from './connection.js';
+import { serverNameOf } from './find.js';
 import {
-  helperState, installRemoteHelper, NO_ADDRESS, readHelperAddress,
+  helperState, installRemoteHelper, joinLinkOf, lastHelperAddress, NO_ADDRESS, readHelperAddress,
 } from './helper.js';
 
 let problem = null;
 
 /** Why the hosted server can't be reached at all (a key that can't be unlocked, say), or null. */
 export const hostedProblem = () => problem;
+
+/**
+ * What players type after F8 "connect": the Cfx.re join link once the helper has said its address,
+ * otherwise the address the panel gives, otherwise (SFTP only) the host's name with the game port,
+ * which is right for most hosts. Null when CityHQ can't tell.
+ */
+function joinAddress() {
+  const link = joinLinkOf(lastHelperAddress());
+  if (link) return { text: link, sure: true };
+  if (REMOTE.address?.ip) return { text: `${REMOTE.address.ip}:${REMOTE.address.port}`, sure: true };
+  if (REMOTE.type === 'sftp' && REMOTE.host) return { text: `${REMOTE.host}:${REMOTE.gamePort || 30120}`, sure: false };
+  return null;
+}
 
 export function describeHosted() {
   return {
@@ -24,6 +38,7 @@ export function describeHosted() {
     panelUrl: REMOTE.type === 'panel' ? REMOTE.panelUrl : null,
     host: REMOTE.type === 'sftp' ? REMOTE.host : null,
     address: REMOTE.address || null,
+    join: joinAddress(),
     capabilities: problem ? { power: false, stats: false, liveConsole: false } : connection().capabilities,
     problem,
   };
@@ -68,8 +83,15 @@ export async function startRemote() {
   });
   if (!conn) return;
 
-  // What the server runs (QBCore or Qbox) is read from server.cfg once now.
-  conn.files.read(REMOTE.cfgPath).then(noteHostedCfg).catch(() => {});
+  // What the server runs (QBCore or Qbox) is read from server.cfg once now. A server connected
+  // over SFTP by an earlier version was named after the SFTP address: give it its own name.
+  conn.files.read(REMOTE.cfgPath).then(async (cfgText) => {
+    noteHostedCfg(cfgText);
+    if (REMOTE.type === 'sftp' && (!REMOTE.serverName || REMOTE.serverName === REMOTE.host)) {
+      const name = await serverNameOf(conn.files, { txProfile: REMOTE.txProfile, cfgText });
+      if (name) { REMOTE.serverName = name; saveRemote(); }
+    }
+  }).catch(() => {});
   // A newer CityHQ brings a newer helper: put it in place now; it loads at the next restart.
   try {
     const state = await helperState(conn, REMOTE.dataPath);

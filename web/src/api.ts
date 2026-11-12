@@ -7,6 +7,8 @@ export interface HostedInfo {
   panelUrl: string | null;
   host: string | null;
   address: { ip: string; port: number } | null;
+  /** What players type after "connect"; sure is false when it's CityHQ's best guess. */
+  join: { text: string; sure: boolean } | null;
   capabilities: { power: boolean; stats: boolean; liveConsole: boolean };
   /** Why it can't be reached at all, such as a key that can't be unlocked on this Windows account. */
   problem: string | null;

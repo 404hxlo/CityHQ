@@ -478,7 +478,7 @@ function buildApp() {
       ...statsView(),
       upcoming: upcoming.slice(0, 6),
       history,
-      schedule: { restarts: s.restarts.enabled ? s.restarts.times : [], backup: s.backups.enabled ? s.backups.time : null },
+      schedule: { restarts: s.restarts.enabled ? s.restarts.times : [], backup: s.backups.enabled && !REMOTE ? s.backups.time : null },
       greetingName: s.greetingName,
     };
   }));

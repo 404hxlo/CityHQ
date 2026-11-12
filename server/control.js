@@ -91,7 +91,7 @@ function hostedOverview() {
     state,
     message: action?.message || null,
     deployed: true,
-    serverName: hosted.label,
+    serverName: hosted.describe().label,
     gamePort: GAME_PORT,
     txAdminPort: null,
     helperOutdated: Boolean(liveStatus && liveStatus.agentVersion !== installedAgentVersion()),

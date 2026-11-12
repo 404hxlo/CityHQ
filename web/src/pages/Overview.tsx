@@ -263,7 +263,8 @@ export function Overview({ data, error, refresh, local, goTo }: Props) {
   // but not start or stop it.
   const canPower = !hosted || hosted.capabilities.power;
   const canStart = canPower && (state === 'stopped' || state === 'panel-only');
-  const connectAddress = hosted?.address ? `${hosted.address.ip}:${hosted.address.port}` : `localhost:${data.gamePort}`;
+  // A hosted server's join address comes from the host or Cfx.re, never this PC.
+  const connectAddress = hosted ? hosted.join?.text || null : `localhost:${data.gamePort}`;
   const d: Dashboard | null = dash.data;
   const name = d?.greetingName || '';
 
@@ -303,7 +304,7 @@ export function Overview({ data, error, refresh, local, goTo }: Props) {
     stopped: 'The server is off. Start it whenever you are ready.',
     'panel-only': 'txAdmin is running, but the game server is off.',
     unreachable: hosted?.capabilities.power === false
-      ? 'CityHQ can\'t reach the server right now. It may be off: start it from your host\'s panel.'
+      ? 'CityHQ\'s helper isn\'t answering yet. It starts when the server restarts: restart it from your host\'s panel when nobody is on. If it\'s already been restarted, the server may be off.'
       : 'CityHQ can\'t reach your host right now.',
   }[state];
 
@@ -343,10 +344,12 @@ export function Overview({ data, error, refresh, local, goTo }: Props) {
           </div>
         </div>
         <HeroArt />
-        <div className="hero-connect">
-          <span>Join in FiveM with F8</span>
-          <CopyRow text={`connect ${connectAddress}`} />
-        </div>
+        {connectAddress && (
+          <div className="hero-connect">
+            <span>{hosted?.join && !hosted.join.sure ? 'Join in FiveM with F8 (or use the address your host shows)' : 'Join in FiveM with F8'}</span>
+            <CopyRow text={`connect ${connectAddress}`} />
+          </div>
+        )}
       </section>
 
       {error && <Notice kind="error">{error}</Notice>}
@@ -434,7 +437,7 @@ export function Overview({ data, error, refresh, local, goTo }: Props) {
             <button className="link-plain small" onClick={() => goTo('players')}>View all</button>
           </div>
           {!online && <p className="muted-note">The server is off, so nobody can be in the city.</p>}
-          {online && players.data && players.data.length === 0 && <p className="muted-note">Nobody is online. Join with <code>connect {connectAddress}</code> in FiveM.</p>}
+          {online && players.data && players.data.length === 0 && <p className="muted-note">Nobody is online.{connectAddress && <> Join with <code>connect {connectAddress}</code> in FiveM.</>}</p>}
           {online && players.data && players.data.length > 0 && (
             <div className="table-wrap">
               <table className="dash-table">
@@ -554,7 +557,7 @@ export function Overview({ data, error, refresh, local, goTo }: Props) {
 
       {local && (
         <div className="link-row">
-          <a className="btn btn-default" href={`fivem://connect/${connectAddress}`} target="_blank" rel="noreferrer"><Gamepad2 size={16} /><span>Open in FiveM</span></a>
+          {connectAddress && <a className="btn btn-default" href={`fivem://connect/${connectAddress}`} target="_blank" rel="noreferrer"><Gamepad2 size={16} /><span>Open in FiveM</span></a>}
           {!hosted && <a className="btn btn-ghost" href={`http://localhost:${data.txAdminPort}`} target="_blank" rel="noreferrer"><ExternalLink size={16} /><span>Open txAdmin</span></a>}
           {hosted?.panelUrl && <a className="btn btn-ghost" href={hosted.panelUrl} target="_blank" rel="noreferrer"><ExternalLink size={16} /><span>Open your host's panel</span></a>}
         </div>
