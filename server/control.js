@@ -48,6 +48,8 @@ let hosted = null;
 let hostedStats = null;
 const hostedHistory = [];
 export const setHostedControl = (value) => { hosted = value; };
+/** How long the hosted server has been running, as its panel last said; null when off or not known. */
+export const hostedUptimeMs = () => (hostedStats?.state === 'running' ? hostedStats.uptimeMs ?? null : null);
 
 async function pollHosted() {
   if (hosted.capabilities.stats) {

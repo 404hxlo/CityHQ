@@ -26,17 +26,20 @@ export function connectionLine({
 
 /**
  * The server.cfg for the host: all of yours, with the host's own lines for where the server
- * listens and its license key, and the host's database. That includes CityHQ's own section, which
- * holds scripts installed or switched on in CityHQ, admins, and settings changed there.
+ * listens, and the host's database. That includes CityHQ's own section, which holds scripts
+ * installed or switched on in CityHQ, admins, and settings changed there. Your license key stays:
+ * since October 2026 a server's name and place in FiveM's list belong to its key (set on the
+ * Cfx.re Portal), and paid scripts need it too. The host's key is used only when yours isn't in
+ * server.cfg.
  */
 export function mergeCfgForHost(localCfg, hostCfg, db, { when = new Date() } = {}) {
   const local = withoutBom(localCfg);
   const eol = local.includes('\r\n') ? '\r\n' : '\n';
   const hostLines = withoutBom(hostCfg).split(/\r?\n/);
   const hostEndpoints = hostLines.filter((l) => ENDPOINT.test(l));
-  const hostLicense = hostLines.filter((l) => LICENSE.test(l));
-  // Where the server listens and its key belong to the host: theirs replace yours.
-  const lines = local.split(/\r?\n/).filter((l) => !ENDPOINT.test(l) && !LICENSE.test(l));
+  const hostLicense = keyOf(local) ? [] : hostLines.filter((l) => LICENSE.test(l));
+  // Where the server listens belongs to the host: theirs replace yours.
+  const lines = local.split(/\r?\n/).filter((l) => !ENDPOINT.test(l));
   const head = [
     `# Moved here from your PC by CityHQ on ${when.toISOString().slice(0, 10)}. The host's own lines come first.`,
     ...hostEndpoints,
@@ -46,6 +49,27 @@ export function mergeCfgForHost(localCfg, hostCfg, db, { when = new Date() } = {
   let text = [...head, ...lines].join(eol);
   if (db) text = setConvar(text, 'mysql_connection_string', quoted(connectionLine(db)));
   return text.replace(/(\r?\n){3,}/g, `${eol}${eol}`);
+}
+
+/** The license key a server.cfg sets (its last such line counts), or null. Only ever compared. */
+export function keyOf(text) {
+  const line = withoutBom(text).split(/\r?\n/).filter((l) => LICENSE.test(l)).at(-1);
+  return line ? splitComment(line)[0].trim().split(/\s+/).at(-1).replace(/^["']|["']$/g, '') || null : null;
+}
+
+/**
+ * target with source's license key line in place of its own (where its first one was, or after
+ * the lines where the server listens), or without any when source has none.
+ */
+export function withLicenseOf(source, target) {
+  const text = withoutBom(target);
+  const eol = text.includes('\r\n') ? '\r\n' : '\n';
+  const wanted = withoutBom(source).split(/\r?\n/).filter((l) => LICENSE.test(l)).at(-1)?.trim() || null;
+  const lines = text.split(/\r?\n/);
+  const first = lines.findIndex((l) => LICENSE.test(l));
+  const kept = lines.filter((l) => !LICENSE.test(l));
+  if (wanted) kept.splice(first !== -1 ? first : kept.findLastIndex((l) => ENDPOINT.test(l)) + 1, 0, wanted);
+  return kept.join(eol);
 }
 
 const BOOT_LINE = /^(?:ensure|start|restart)\s+["']?([^"'\s]+)["']?$/i;
@@ -193,6 +217,10 @@ export function preflight(f) {
   if (f.hostMemoryLimitBytes && f.localMemoryBytes && f.localMemoryBytes > f.hostMemoryLimitBytes * 0.8) {
     add('warn', `Your server uses about ${gb(f.localMemoryBytes)} of memory here, and your host's plan allows ${gb(f.hostMemoryLimitBytes)}. It may run out of memory there.`);
   }
-  add('warn', 'Your host\'s license key must come from the same Cfx.re account as this one, or paid (escrow) scripts won\'t load there.');
+  if (keyOf(f.localCfg)) {
+    add('ok', 'Your server keeps its license key, so its name and place in FiveM\'s server list come along, and so do your paid scripts. Don\'t run the server on this PC at the same time as the one on your host.');
+  } else {
+    add('warn', 'server.cfg on this PC has no license key, so your host\'s is used. Give that key your server\'s details on the Cfx.re Portal, or FiveM won\'t list the server. Paid scripts only load with a key from the Cfx.re account that bought them.');
+  }
   return { ok: !items.some((i) => i.level === 'bad'), items };
 }

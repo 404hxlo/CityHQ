@@ -2,6 +2,13 @@
 
 Each version's section is shown in the app before it updates, and on its GitHub release page.
 
+## 1.8.5
+
+- **Move to a host:** your server keeps its license key. Since October 2026, a server's name and its place in FiveM's server list belong to its key, set on the Cfx.re Portal. A move that switched to your host's key left the server under FiveM's default name and off the list. Your host's key is now used only if server.cfg on your PC has none.
+- If you moved your server with an earlier version and it isn't on FiveM's list, **Things to fix** on Home offers **Use your PC server's license key**. CityHQ copies the key from your PC itself, so you never handle it. A copy of server.cfg is saved first, and you can undo it.
+- **Hosted servers:** CityHQ asks FiveM's server list every few minutes whether it has your server. While it doesn't, Home shows your host's direct address, which always works, instead of the cfx.re link, which only opens for a listed server.
+- When your server has been up for 10 minutes and still isn't listed, **Things to fix** explains why and how to fill in its details on the Cfx.re Portal.
+
 ## 1.8.4
 
 - **Move to a host:** the move now brings all of server.cfg. Before, it left out CityHQ's own section of it, which holds scripts you installed or switched on in CityHQ, admins added on the Admins page, and settings CityHQ added, such as player slots.

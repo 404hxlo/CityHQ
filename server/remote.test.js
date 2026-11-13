@@ -20,11 +20,14 @@ import {
 import { categoriesOf } from './remote/resources.js';
 import { remotePath, sftpClient } from './remote/sftp.js';
 import {
-  databaseNameFor, describeLeftOut, execFiles, linesLeftOut, mergeCfgForHost, preflight,
+  databaseNameFor, describeLeftOut, execFiles, keyOf, linesLeftOut, mergeCfgForHost, preflight, withLicenseOf,
 } from './move/plan.js';
 import {
-  findMovedFrom, leftOutProblem, leftOutSource, rememberMovedFrom, restoreLeftOut,
+  findMovedFrom, leftOutProblem, leftOutSource, pcLicenseAction, rememberMovedFrom, restoreLeftOut, usePcLicense,
 } from './move/leftout.js';
+import {
+  askList, directAddressOf, joinCodeOf, listedNow, LISTING_GRACE_MS, listingSettled, notListedProblem,
+} from './remote/listing.js';
 import {
   addToManagedBlock, BLOCK_START, ensureManagedBlock, managedLines, removeFromManagedBlock,
 } from './cfg.js';
@@ -448,7 +451,7 @@ test('sftp: a big upload cut off halfway continues from the last safe point, and
   } finally { c.close(); }
 });
 
-test('the host\'s server.cfg: all of yours, CityHQ\'s section too, with the host\'s ports, key and database', () => {
+test('the host\'s server.cfg: all of yours, your key and CityHQ\'s section too, with the host\'s ports and database', () => {
   const local = [
     'endpoint_add_tcp "0.0.0.0:30229"',
     'endpoint_add_udp "0.0.0.0:30229"',
@@ -468,8 +471,9 @@ test('the host\'s server.cfg: all of yours, CityHQ\'s section too, with the host
   const out = mergeCfgForHost(local, host, { host: 'db.example.net', port: 3306, username: 'u@2', password: 'p:w', name: 's1_city' }, { when: new Date('2026-11-12T00:00:00Z') });
   assert.match(out, /endpoint_add_tcp "0\.0\.0\.0:30123"/);
   assert.doesNotMatch(out, /30229/);
-  assert.match(out, /cfxk_HOSTKEY_xyz/);
-  assert.doesNotMatch(out, /LOCALKEY/);
+  // The key stays yours: the server's name and list entry (Cfx.re Portal) and paid scripts go with it.
+  assert.match(out, /^sv_licenseKey "cfxk_LOCALKEY_abc"$/m);
+  assert.doesNotMatch(out, /HOSTKEY/);
   assert.match(out, /set mysql_connection_string "mysql:\/\/u%402:p%3Aw@db\.example\.net:3306\/s1_city\?charset=utf8mb4"/);
   assert.match(out, /sv_hostname "Harbor Town"/);
   assert.match(out, /exec permissions\.cfg/);
@@ -482,8 +486,10 @@ test('the host\'s server.cfg: all of yours, CityHQ\'s section too, with the host
   assert.doesNotMatch(marked, /\uFEFF/);
   assert.match(marked, /^endpoint_add_tcp "0\.0\.0\.0:30123"$/m);
   assert.match(marked, /^sv_hostname "Harbor Town"$/m);
-  // A host whose key lives in txAdmin: no key line on either side afterwards.
-  assert.doesNotMatch(mergeCfgForHost(local, 'endpoint_add_tcp "0.0.0.0:30123"', null), /sv_licenseKey/);
+  // Without a key on the PC, the host's is used; with neither, there's none.
+  const keyless = local.replace(/^sv_licenseKey .*\n/m, '');
+  assert.match(mergeCfgForHost(keyless, host, null), /^sv_licenseKey "cfxk_HOSTKEY_xyz"$/m);
+  assert.doesNotMatch(mergeCfgForHost(keyless, 'endpoint_add_tcp "0.0.0.0:30123"', null), /sv_licenseKey/);
   assert.deepEqual(execFiles('exec permissions.cfg\nexec "voice.cfg" # chat\nexec resources/[qb]/x.cfg\nexec ../secret.cfg\nexec @qb-core/a.cfg\n# exec old.cfg'), ['permissions.cfg', 'voice.cfg']);
   assert.equal(databaseNameFor('Midnight-Society DB'), 'midnight_society_db');
 });
@@ -617,6 +623,104 @@ test('an earlier move\'s server on this PC is found, and what it left out is put
   }
 });
 
+test('the license key: read only to compare, and swapped in place', () => {
+  const pc = 'endpoint_add_tcp "0.0.0.0:30229"\r\nsv_licenseKey "cfxk_PCKEY_abc" # from the Portal\r\nensure qb-core\r\n';
+  const host = 'endpoint_add_tcp "0.0.0.0:30123"\nendpoint_add_udp "0.0.0.0:30123"\nset sv_licenseKey cfxk_HOSTKEY_xyz\nsv_hostname "x"\n';
+  assert.equal(keyOf(pc), 'cfxk_PCKEY_abc');
+  assert.equal(keyOf(host), 'cfxk_HOSTKEY_xyz');
+  assert.equal(keyOf('ensure qb-core\n# sv_licenseKey "cfxk_OLD"'), null, 'a line switched off with # doesn\'t count');
+  // In place of the host's own line, as the PC has it.
+  const swapped = withLicenseOf(pc, host);
+  assert.equal(swapped, 'endpoint_add_tcp "0.0.0.0:30123"\nendpoint_add_udp "0.0.0.0:30123"\nsv_licenseKey "cfxk_PCKEY_abc" # from the Portal\nsv_hostname "x"\n');
+  // A host that keeps its key in its panel: the line goes after where the server listens.
+  assert.equal(withLicenseOf(pc, 'endpoint_add_tcp "0.0.0.0:30123"\nensure qb-core'), 'endpoint_add_tcp "0.0.0.0:30123"\nsv_licenseKey "cfxk_PCKEY_abc" # from the Portal\nensure qb-core');
+  // Undone from the copy kept before: the host's own line again, or none.
+  assert.equal(withLicenseOf(host, swapped), host);
+  assert.equal(withLicenseOf('ensure qb-core', swapped), 'endpoint_add_tcp "0.0.0.0:30123"\nendpoint_add_udp "0.0.0.0:30123"\nsv_hostname "x"\n');
+});
+
+test('a server moved before 1.8.5 can use the license key it had on the PC, chosen once', async () => {
+  const base = mkdtempSync(path.join(os.tmpdir(), 'cityhq-key-'));
+  try {
+    const root = path.join(base, 'Harbor-Town');
+    mkdirSync(path.join(root, 'server-data'), { recursive: true });
+    const cfgPath = path.join(root, 'server-data', 'server.cfg');
+    writeFileSync(cfgPath, 'sv_licenseKey "cfxk_PCKEY_abc"\nensure qb-core\n');
+    const remote = { type: 'panel', panelUrl: 'https://panel.example.net', serverId: 'abcd001' };
+    // Moved by 1.8.4: CityHQ's lines came along, the key didn't.
+    const stateDir = path.join(base, 'hosted', '.qbcontrol');
+    mkdirSync(stateDir, { recursive: true });
+    writeFileSync(path.join(stateDir, 'moved-from.json'), JSON.stringify({ root, cfgPath, keptCityHqLines: true }));
+    const options = { remote, stateDir, find: () => { throw new Error('searched'); } };
+    const hostCfg = 'endpoint_add_tcp "0.0.0.0:30123"\nsv_licenseKey "cfxk_HOSTKEY_xyz"\nensure qb-core\n';
+    const action = await pcLicenseAction(hostCfg, options);
+    assert.equal(action.fix.type, 'use-pc-license');
+    assert.doesNotMatch(JSON.stringify(action), /cfxk_/, 'the key itself never goes to the screen');
+    assert.equal(await pcLicenseAction(withLicenseOf(readFileSync(cfgPath, 'utf8'), hostCfg), options), null, 'nothing when the keys match');
+
+    let text = hostCfg;
+    const changeCfg = async (mutate) => {
+      const next = mutate(text);
+      if (next === text) return null;
+      text = next;
+      return '1700000000000';
+    };
+    const done = await usePcLicense(changeCfg, options);
+    assert.equal(keyOf(text), 'cfxk_PCKEY_abc');
+    assert.deepEqual(done.undo, { type: 'license-line', versionId: '1700000000000' });
+    assert.doesNotMatch(JSON.stringify(done), /cfxk_/, 'nor into the list of fixes');
+    assert.equal(await pcLicenseAction(hostCfg, options), null, 'chosen once, not offered again, even after an undo');
+    // A move by 1.8.5 or later kept the key, so it's never offered.
+    rememberMovedFrom(path.join(base, 'newer'), { root, cfgPath });
+    assert.equal(await pcLicenseAction(hostCfg, { remote, stateDir: path.join(base, 'newer', '.qbcontrol') }), null);
+  } finally {
+    rmSync(base, { recursive: true, force: true });
+  }
+});
+
+test('FiveM\'s server list: asked every few minutes, and a server missing from it explained', async () => {
+  assert.equal(joinCodeOf('cfx.re/join/Ab12cd'), 'ab12cd');
+  assert.equal(joinCodeOf('203.0.113.7:30120'), null);
+  assert.equal(directAddressOf({ address: { ip: '203.0.113.7', port: 30123 } }), '203.0.113.7:30123');
+  assert.equal(directAddressOf({ address: null }), null);
+  assert.equal(await askList('ab12cd', async () => ({ status: 404, ok: false })), false);
+  assert.equal(await askList('ab12cd', async () => ({ status: 200, ok: true })), true);
+  assert.equal(await askList('ab12cd', async () => ({ status: 503, ok: false })), null, 'a hiccup isn\'t an answer');
+  assert.equal(await askList('ab12cd', async () => { throw new Error('offline'); }), null);
+
+  const asked = [];
+  const fakeFetch = async (url) => {
+    asked.push(url);
+    return asked.length === 1 ? { status: 404, ok: false } : { status: 200, ok: true };
+  };
+  const link = 'cfx.re/join/zz9yy8';
+  const t = 1_800_000_000_000;
+  // Not known at first: the answer arrives in the background, and isn't asked for on every look.
+  assert.equal(listedNow(link, { now: t, fetchImpl: fakeFetch }), null);
+  await listingSettled();
+  assert.equal(listedNow(link, { now: t + 1000, fetchImpl: fakeFetch }), false);
+  assert.equal(asked.length, 1);
+  assert.match(asked[0], /\/api\/servers\/single\/zz9yy8$/);
+
+  // Things to fix: only once the server has been up long enough for the list to have it.
+  const key = { kind: 'fix', label: 'Use your PC server\'s license key', confirm: 'x', fix: { type: 'use-pc-license' } };
+  assert.equal(notListedProblem({ link, direct: '203.0.113.7:30123', uptimeMs: 60_000, now: t + 2000, fetchImpl: fakeFetch }), null);
+  const problem = notListedProblem({ link, direct: '203.0.113.7:30123', uptimeMs: LISTING_GRACE_MS, keyAction: key, now: t + 2000, fetchImpl: fakeFetch });
+  assert.equal(problem.id, 'not-listed');
+  assert.match(problem.what, /connect 203\.0\.113\.7:30123/);
+  assert.deepEqual(problem.actions, [key]);
+  assert.match(problem.fix[0], /different license key/);
+  assert.match(notListedProblem({ link, uptimeMs: LISTING_GRACE_MS, now: t + 2000, fetchImpl: fakeFetch }).fix[0], /^Sign in at the Cfx\.re Portal/);
+  // Without the panel's uptime, it counts from when CityHQ first saw it missing.
+  assert.equal(notListedProblem({ link, uptimeMs: null, now: t + 2000, fetchImpl: fakeFetch }), null);
+  assert.equal(notListedProblem({ link, uptimeMs: null, now: t + LISTING_GRACE_MS, fetchImpl: fakeFetch })?.id, 'not-listed');
+  // That look came minutes after the last check, so the list was asked again: listed now.
+  await listingSettled();
+  assert.equal(asked.length, 2);
+  assert.equal(listedNow(link, { now: t + LISTING_GRACE_MS + 1, fetchImpl: fakeFetch }), true);
+  assert.equal(notListedProblem({ link, uptimeMs: LISTING_GRACE_MS, now: t + LISTING_GRACE_MS + 2, fetchImpl: fakeFetch }), null);
+});
+
 test('checks before moving: space, an upload already there, the database', () => {
   const base = { localCfg: 'x', hostFound: true, resourcesBytes: 34 * 1024 ** 3, localFreeBytes: 500 * 1024 ** 3, database: { name: 's1_city', host: 'db', port: 3306, reachable: true, tables: 0 } };
   assert.equal(preflight({ ...base, hostDiskLimitBytes: 145 * 1024 ** 3, hostDiskUsedBytes: 1024 ** 3 }).ok, true);
@@ -629,6 +733,9 @@ test('checks before moving: space, an upload already there, the database', () =>
   assert.equal(preflight({ ...base, localFreeBytes: 10 * 1024 ** 3, localZipReady: true }).ok, true, 'unless a zip is ready');
   assert.equal(preflight({ ...base, hostFound: false }).ok, false);
   assert.ok(preflight({ ...base, localMemoryBytes: 7 * 1024 ** 3, hostMemoryLimitBytes: 8 * 1024 ** 3 }).items.some((i) => /run out of memory/.test(i.text)));
+  // The license key goes along; without one on the PC, the host's needs its Portal details.
+  assert.ok(preflight({ ...base, localCfg: 'sv_licenseKey "cfxk_PCKEY_abc"' }).items.some((i) => i.level === 'ok' && /keeps its license key/.test(i.text)));
+  assert.ok(preflight(base).items.some((i) => i.level === 'warn' && /no license key/.test(i.text)));
 });
 
 // ---------------------------------------------------------------- hosted servers, part 2

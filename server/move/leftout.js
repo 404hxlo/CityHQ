@@ -11,7 +11,9 @@ import {
 } from '../paths.js';
 import { replaceFileSync } from '../retry.js';
 import { searchStarts, SKIP_FOLDERS } from '../welcome.js';
-import { describeLeftOut, linesLeftOut } from './plan.js';
+import {
+  describeLeftOut, keyOf, linesLeftOut, withLicenseOf,
+} from './plan.js';
 
 const FILE = 'moved-from.json';
 
@@ -25,9 +27,14 @@ function writeState(stateDir, value) {
   } catch { /* looked into again at the next start */ }
 }
 
-/** Kept when a move switches over: where the server came from. Moves since 1.8.4 keep CityHQ's lines. */
+/**
+ * Kept when a move switches over: where the server came from. Moves since 1.8.4 keep CityHQ's
+ * lines, and since 1.8.5 the license key too.
+ */
 export function rememberMovedFrom(hostedRoot, { root, cfgPath }) {
-  writeState(path.join(hostedRoot, '.qbcontrol'), { root, cfgPath, at: Date.now(), keptCityHqLines: true });
+  writeState(path.join(hostedRoot, '.qbcontrol'), {
+    root, cfgPath, at: Date.now(), keptCityHqLines: true, keptLicenseKey: true,
+  });
 }
 
 const sameTarget = (t, remote) => Boolean(t && remote && t.type === remote.type && (t.type === 'panel'
@@ -69,16 +76,15 @@ export async function findMovedFrom(remote, { starts = searchStarts(), maxDepth 
 const searches = new Map();
 
 /**
- * Where this hosted server was moved from, when that move may have left lines out; otherwise
- * null. The first time, the folder is looked for in the background, so a later check has the
- * answer (wait: true waits for it instead).
+ * Where this hosted server was moved from (its folder on this PC and its server.cfg), or null when
+ * it wasn't, or that isn't known yet. The first time, the folder is looked for in the background,
+ * so a later check has the answer (wait: true waits for it instead).
  */
-export async function leftOutSource({
+export async function movedFromSource({
   remote = REMOTE, stateDir = STATE_DIR, find = findMovedFrom, wait = false,
 } = {}) {
   if (!remote) return null;
   const known = readState(stateDir);
-  if (known?.keptCityHqLines || known?.restoredAt) return null;
   if (known?.cfgPath) return known;
   if (known?.searched) return null;
   if (!searches.has(stateDir)) {
@@ -88,13 +94,21 @@ export async function leftOutSource({
   }
   if (!wait) return null;
   await searches.get(stateDir);
-  return leftOutSource({ remote, stateDir, find });
+  return movedFromSource({ remote, stateDir, find });
 }
+
+/** The same, when that move may have left lines out of server.cfg that haven't been put back. */
+export async function leftOutSource(options = {}) {
+  const known = readState(options.stateDir || STATE_DIR);
+  if (known?.keptCityHqLines || known?.restoredAt) return null;
+  return movedFromSource(options);
+}
+
+const readPcCfg = async (from) => (from ? readFile(from.cfgPath, 'utf8').catch(() => null) : null);
 
 /** For Things to fix: what an earlier move left out, with a button that puts it back. */
 export async function leftOutProblem(hostCfg, options = {}) {
-  const from = await leftOutSource(options);
-  const pcCfg = from ? await readFile(from.cfgPath, 'utf8').catch(() => null) : null;
+  const pcCfg = await readPcCfg(await leftOutSource(options));
   if (pcCfg === null) return null;
   const lines = linesLeftOut(pcCfg, hostCfg);
   if (!lines.length) return null;
@@ -126,8 +140,7 @@ export async function leftOutProblem(hostCfg, options = {}) {
  * shown again afterwards, even after an undo, which counts as choosing to leave them out.
  */
 export async function restoreLeftOut(changeCfg, options = {}) {
-  const from = await leftOutSource(options);
-  const pcCfg = from ? await readFile(from.cfgPath, 'utf8').catch(() => null) : null;
+  const pcCfg = await readPcCfg(await leftOutSource(options));
   if (pcCfg === null) throw new HttpError(409, 'CityHQ can\'t read server.cfg of your server on this PC any more, so it can\'t tell what to put back.');
   let added = [];
   const versionId = await changeCfg((cfg) => {
@@ -142,5 +155,40 @@ export async function restoreLeftOut(changeCfg, options = {}) {
     message: `Added ${describeLeftOut(added)} to server.cfg on your host. Restart the server to use ${one ? 'it' : 'them'}.`,
     versionId,
     undo: { type: 'remove-lines', lines: added },
+  };
+}
+
+/**
+ * A server moved here before 1.8.5 runs with the host's license key, not the one it had on the PC,
+ * and since October 2026 the name and list entry belong to the key. The button that uses the PC's
+ * key instead, when the two differ and it hasn't been chosen either way yet; otherwise null.
+ */
+export async function pcLicenseAction(hostCfg, options = {}) {
+  const known = readState(options.stateDir || STATE_DIR);
+  if (known?.keptLicenseKey || known?.keyChosenAt) return null;
+  const pcCfg = await readPcCfg(await movedFromSource(options));
+  const pcKey = pcCfg === null ? null : keyOf(pcCfg);
+  if (!pcKey || pcKey === keyOf(hostCfg)) return null;
+  return {
+    kind: 'fix',
+    label: 'Use your PC server\'s license key',
+    confirm: 'Your server on your PC ran with a different license key, and the name and list entry you set up on the Cfx.re Portal belong to that key. CityHQ copies its line from server.cfg on your PC into server.cfg on your host, in place of the one there. Don\'t run the server on your PC at the same time. A copy of server.cfg is saved first, and you can undo this. It takes effect when the server restarts.',
+    fix: { type: 'use-pc-license' },
+  };
+}
+
+/** Puts the PC's license key line into server.cfg on the host, through changeCfg (which keeps a copy first). */
+export async function usePcLicense(changeCfg, options = {}) {
+  const stateDir = options.stateDir || STATE_DIR;
+  const pcCfg = await readPcCfg(await movedFromSource(options));
+  if (pcCfg === null || !keyOf(pcCfg)) throw new HttpError(409, 'CityHQ can\'t read the license key in server.cfg of your server on this PC any more.');
+  const versionId = await changeCfg((cfg) => withLicenseOf(pcCfg, cfg));
+  // Chosen now, so the button doesn't come back, even after an undo.
+  writeState(stateDir, { ...(readState(stateDir) || {}), keyChosenAt: Date.now() });
+  if (!versionId) return { message: 'server.cfg on your host already uses the license key from your PC.', versionId: null, undo: null };
+  return {
+    message: 'server.cfg on your host now uses the license key from your PC. Restart the server to use it. FiveM\'s server list can take a few minutes to show it after that.',
+    versionId,
+    undo: { type: 'license-line', versionId },
   };
 }

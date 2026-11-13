@@ -11,8 +11,11 @@ import { tableInfo } from './db.js';
 import {
   fixedThisBoot, recordFix, runFix, tablesDefining,
 } from './fixes.js';
-import { leftOutProblem } from './move/leftout.js';
+import { hostedUptimeMs } from './control.js';
+import { leftOutProblem, pcLicenseAction } from './move/leftout.js';
 import { findServerData, HttpError, REMOTE } from './paths.js';
+import { joinLinkOf, lastHelperAddress } from './remote/helper.js';
+import { directAddressOf, listedNow, notListedProblem } from './remote/listing.js';
 import { getProcessState } from './processes.js';
 import {
   assertCanControl, listSqlFiles, liveStates, replacementsOf, scanDisk,
@@ -277,10 +280,17 @@ export async function currentProblems({ fresh = false } = {}) {
   addRepoInstalls(items, links);
   for (const item of items) item.links = withDocLinks(item, index);
   // A server moved here before 1.8.4: what that move left out of server.cfg. (Not when the host's
-  // server.cfg couldn't be read, which would make every line look missing.)
+  // server.cfg couldn't be read, which would make every line look missing or every key different.)
   if (REMOTE && cfgText) {
     const leftOut = await leftOutProblem(cfgText).catch(() => null);
     if (leftOut) items.push(leftOut);
+    // Running, but not on FiveM's server list (so its join link doesn't open either).
+    const link = joinLinkOf(lastHelperAddress());
+    if (link && listedNow(link) === false) {
+      const keyAction = await pcLicenseAction(cfgText).catch(() => null);
+      const notListed = notListedProblem({ link, direct: directAddressOf(REMOTE), uptimeMs: hostedUptimeMs(), keyAction });
+      if (notListed) items.push(notListed);
+    }
   }
 
   // A fix made during this boot hides its problem; the log line itself stays until a restart.

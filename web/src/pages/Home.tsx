@@ -327,11 +327,14 @@ function ServerBlock({ data, local, mode, onStart }: { data: OverviewData; local
   const hosted = data.hosted || null;
   const canPower = !hosted || hosted.capabilities.power;
   const join = hosted ? hosted.join?.text || null : `localhost:${data.gamePort}`;
+  // A hosted server can be found by name only while FiveM's list has it.
+  const listed = hosted ? hosted.join?.listed ?? null : true;
   const state = data.state;
   if (state === 'online') {
     return (
       <Block className="blk-ok" icon={<CheckCircle2 size={16} />} title="Your server is online" right={data.status ? <span>up {formatUptime(data.status.uptimeSec)}</span> : null}>
-        {join && <p>Players join with <code>connect {join}</code> in FiveM's F8 console{hosted ? '' : ', or by searching for your server\'s name'}.</p>}
+        {join && <p>Players join with <code>connect {join}</code> in FiveM's F8 console{listed ? ', or by searching for your server\'s name' : ''}.</p>}
+        {listed === false && <p className="muted-note">FiveM's server list doesn't have it right now, so searching won't find it and its cfx.re link won't open.{join !== hosted?.join?.link ? ' This address works anyway.' : ''}</p>}
         <div className="blk-actions">
           {join && <CopyButton text={`connect ${join}`} label="Copy join command" />}
           {local && join && <a className="btn btn-ghost" href={`fivem://connect/${join}`} target="_blank" rel="noreferrer"><Gamepad2 size={14} /><span>Open in FiveM</span></a>}

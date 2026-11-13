@@ -9,8 +9,9 @@ import {
   addBootLine, parseBoot, readCfg, removeBootLine, removeFromManagedBlock, writeCfg,
 } from './cfg.js';
 import { dbRun, tableInfo, VALID_TABLE } from './db.js';
-import { keepVersion, SERVER_SCOPE } from './files.js';
-import { restoreLeftOut } from './move/leftout.js';
+import { backupDirFor, keepVersion, SERVER_SCOPE } from './files.js';
+import { restoreLeftOut, usePcLicense } from './move/leftout.js';
+import { withLicenseOf } from './move/plan.js';
 import { HttpError, resolveInside, STATE_DIR } from './paths.js';
 import {
   isValidName, resourceAction, scanDisk, serverData, setBoot,
@@ -312,6 +313,8 @@ export async function runFix(fix) {
   }
   // What a move to a host left out of server.cfg, read again from the server on this PC.
   if (fix.type === 'restore-moved-lines') return restoreLeftOut(changeCfg);
+  // The license key the server had on this PC, where its name and list entry belong.
+  if (fix.type === 'use-pc-license') return usePcLicense(changeCfg);
   throw new HttpError(400, 'Unknown fix');
 }
 
@@ -345,6 +348,12 @@ export async function undoFix(id) {
       await setBoot(undo.name, true, { record: false });
     } else if (undo.type === 'remove-lines') {
       await changeCfg((cfg) => removeFromManagedBlock(cfg, undo.lines));
+    } else if (undo.type === 'license-line') {
+      // The key line from the copy kept before the fix; the key itself is never in this log.
+      if (!/^\d+$/.test(String(undo.versionId))) throw new HttpError(400, 'Unknown undo');
+      const before = await readFile(path.join(backupDirFor(SERVER_SCOPE, 'server.cfg'), `${undo.versionId}.bak`), 'utf8')
+        .catch(() => { throw new HttpError(409, 'The copy of server.cfg from before this fix is gone, so it can\'t be undone here.'); });
+      await changeCfg((cfg) => withLicenseOf(before, cfg));
     } else {
       throw new HttpError(400, 'Unknown undo');
     }

@@ -21,6 +21,7 @@ import { serverNameOf } from './find.js';
 import {
   helperState, installRemoteHelper, joinLinkOf, lastHelperAddress, NO_ADDRESS, readHelperAddress,
 } from './helper.js';
+import { directAddressOf, listedNow } from './listing.js';
 
 let problem = null;
 
@@ -28,15 +29,18 @@ let problem = null;
 export const hostedProblem = () => problem;
 
 /**
- * What players type after F8 "connect": the Cfx.re join link once the helper has said its address,
- * otherwise the address the panel gives, otherwise (SFTP only) the host's name with the game port,
- * which is right for most hosts. Null when CityHQ can't tell.
+ * What players type after F8 "connect": the Cfx.re join link once the helper has said its address
+ * and FiveM's server list has it (the link only opens then), otherwise the address the panel
+ * gives, otherwise (SFTP only) the host's name with the game port, which is right for most hosts.
+ * listed says whether the list has the server (null: not known). Null when CityHQ can't tell.
  */
 function joinAddress() {
   const link = joinLinkOf(lastHelperAddress());
-  if (link) return { text: link, sure: true };
-  if (REMOTE.address?.ip) return { text: `${REMOTE.address.ip}:${REMOTE.address.port}`, sure: true };
-  if (REMOTE.type === 'sftp' && REMOTE.host) return { text: `${REMOTE.host}:${REMOTE.gamePort || 30120}`, sure: false };
+  const direct = directAddressOf(REMOTE);
+  const listed = link ? listedNow(link) : null;
+  if (link && !(listed === false && direct)) return { text: link, sure: true, listed, link };
+  if (direct) return { text: direct, sure: true, listed, link };
+  if (REMOTE.type === 'sftp' && REMOTE.host) return { text: `${REMOTE.host}:${REMOTE.gamePort || 30120}`, sure: false, listed, link };
   return null;
 }
 
