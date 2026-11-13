@@ -8,6 +8,8 @@ import {
 } from 'node:fs/promises';
 import { constants, setPriority } from 'node:os';
 import path from 'node:path';
+import { Transform } from 'node:stream';
+import { StringDecoder } from 'node:string_decoder';
 import { promisify } from 'node:util';
 import { agentRequest } from './agent.js';
 import {
@@ -100,6 +102,43 @@ export async function runSql(conn, sql, database) {
 
 export const countTables = async (conn, database) => Number(await runSql(conn, `SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = '${database}';`));
 
+/**
+ * "DEFINER=`root`@`localhost`" in a dump's views, triggers, procedures and events: who owns each
+ * one on the database it came from. Making something owned by another account needs a privilege
+ * that rented databases (and limited accounts) don't have ("ERROR 1227 ... SET USER"), so imports
+ * leave it out and each object belongs to the account doing the import. Roles have no @host.
+ */
+const QUOTED = '(?:`(?:[^`]|``)*`|\'(?:[^\'\\\\]|\\\\.|\'\')*\'|[^\\s@*/`\']+)';
+const DEFINER_CLAUSE = new RegExp(`\\bDEFINER\\s*=\\s*${QUOTED}(?:\\s*@\\s*${QUOTED})?\\s*`, 'gi');
+const DATA_ROW = /^\s*(?:INSERT|REPLACE)\s+(?:IGNORE\s+)?INTO\b/i;
+
+/** One line of a dump without its owner names. Rows of data are never changed. */
+export function withoutDefiner(line) {
+  if (!/DEFINER/i.test(line) || DATA_ROW.test(line)) return line;
+  return line.replace(DEFINER_CLAUSE, '');
+}
+
+/** withoutDefiner for a whole dump as it streams, a line at a time (whole UTF-8 characters only). */
+export function definerFilter() {
+  const decoder = new StringDecoder('utf8');
+  let rest = '';
+  const lines = (text) => {
+    const all = rest + text;
+    const cut = all.lastIndexOf('\n');
+    if (cut < 0) { rest = all; return ''; }
+    rest = all.slice(cut + 1);
+    return all.slice(0, cut + 1).split('\n').map(withoutDefiner).join('\n');
+  };
+  return new Transform({
+    transform(chunk, _encoding, done) { done(null, Buffer.from(lines(decoder.write(chunk)), 'utf8')); },
+    flush(done) {
+      const last = withoutDefiner(rest + decoder.end());
+      rest = '';
+      done(null, last ? Buffer.from(last, 'utf8') : null);
+    },
+  });
+}
+
 export function importFile(conn, database, file) {
   return new Promise((resolve, reject) => {
     const child = spawn(dbClient(), [...clientArgs(conn), database], { env: clientEnv(conn), windowsHide: true, stdio: ['pipe', 'ignore', 'pipe'] });
@@ -107,7 +146,9 @@ export function importFile(conn, database, file) {
     child.stderr.on('data', (d) => { stderr += d; });
     child.on('error', reject);
     child.on('close', (code) => (code === 0 ? resolve() : reject(new Error(stderr.trim().split('\n').pop() || `exit ${code}`))));
-    createReadStream(file).on('error', reject).pipe(child.stdin);
+    // The client may stop reading early (on an error); its own message says why, not EPIPE.
+    child.stdin.on('error', () => {});
+    createReadStream(file).on('error', reject).pipe(definerFilter()).pipe(child.stdin);
   });
 }
 

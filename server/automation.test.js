@@ -164,7 +164,7 @@ test('history: joins, leaves, unique players and the daily peak', () => {
 });
 
 import { relocatedDataPath, relocateIni } from './relocate.js';
-import { isRetryableDumpError } from './backups.js';
+import { definerFilter, isRetryableDumpError, withoutDefiner } from './backups.js';
 import {
   isBusy, moveFolderSafely, replaceFile, retry,
 } from './retry.js';
@@ -1631,4 +1631,42 @@ test('buildReport needs a description, keeps a short title and falls back when t
   assert.ok(long.url.length <= MAX_URL);
   assert.ok(long.body.includes('y'.repeat(9000)));
   assert.ok(buildReport({ what: 'z'.repeat(200) }, keep).title.endsWith('...'));
+});
+
+// Your real error: moving the database to a host stopped at "ERROR 1227 (42000) at line 9273: Access
+// denied; you need (at least one of) the SET USER privilege(s)", because the dump named the old
+// owner of a trigger or view. The import leaves owner names out.
+test('importing a dump leaves out the owner names a rented database refuses', () => {
+  assert.equal(withoutDefiner('/*!50013 DEFINER=`root`@`localhost` SQL SECURITY DEFINER */'), '/*!50013 SQL SECURITY DEFINER */', 'a view keeps SQL SECURITY DEFINER');
+  assert.equal(withoutDefiner('/*!50017 DEFINER=`root`@`localhost`*/ /*!50003 TRIGGER `log_money` BEFORE UPDATE ON `players` FOR EACH ROW'), '/*!50017 */ /*!50003 TRIGGER `log_money` BEFORE UPDATE ON `players` FOR EACH ROW');
+  assert.equal(withoutDefiner('CREATE DEFINER=`qbcore`@`%` PROCEDURE `cleanup`()'), 'CREATE PROCEDURE `cleanup`()');
+  assert.equal(withoutDefiner('/*!50106 CREATE*/ /*!50117 DEFINER=`root`@`127.0.0.1`*/ /*!50106 EVENT `nightly` ON SCHEDULE'), '/*!50106 CREATE*/ /*!50117 */ /*!50106 EVENT `nightly` ON SCHEDULE');
+  assert.equal(withoutDefiner('CREATE DEFINER=root@localhost FUNCTION f() RETURNS INT'), 'CREATE FUNCTION f() RETURNS INT');
+  assert.equal(withoutDefiner("CREATE DEFINER='odd''name'@'localhost' VIEW v AS SELECT 1"), 'CREATE VIEW v AS SELECT 1');
+  assert.equal(withoutDefiner('CREATE DEFINER=`my``role` PROCEDURE p()'), 'CREATE PROCEDURE p()', 'a role has no @host');
+  const row = "INSERT INTO `notes` VALUES (1,'set DEFINER=`root`@`localhost` here');";
+  assert.equal(withoutDefiner(row), row, 'data rows are never changed');
+  assert.equal(withoutDefiner('CREATE TABLE `players` (`id` int(11) NOT NULL)'), 'CREATE TABLE `players` (`id` int(11) NOT NULL)');
+});
+
+test('the owner names are taken out as the dump streams, whatever the pieces it arrives in', async () => {
+  const dump = [
+    '-- MariaDB dump',
+    'INSERT INTO `players` VALUES (1,\'Zoë Ångström — 東京\',\'DEFINER=`x`@`y`\');',
+    '/*!50017 DEFINER=`root`@`localhost`*/ /*!50003 TRIGGER `t` BEFORE INSERT ON `players` FOR EACH ROW SET NEW.id = NEW.id */;;',
+    'CREATE DEFINER=`root`@`localhost` PROCEDURE `p`()',
+    '-- Dump completed',
+  ].join('\n');
+  const expected = dump.replace('/*!50017 DEFINER=`root`@`localhost`*/', '/*!50017 */').replace('CREATE DEFINER=`root`@`localhost` PROCEDURE', 'CREATE PROCEDURE');
+  const bytes = Buffer.from(dump, 'utf8');
+  for (const size of [1, 2, 3, 7, 64, bytes.length]) {
+    const filter = definerFilter();
+    const out = [];
+    filter.on('data', (d) => out.push(d));
+    const done = new Promise((resolve) => filter.on('end', resolve));
+    for (let i = 0; i < bytes.length; i += size) filter.write(bytes.subarray(i, i + size));
+    filter.end();
+    await done;
+    assert.equal(Buffer.concat(out).toString('utf8'), expected, `in pieces of ${size} bytes`);
+  }
 });

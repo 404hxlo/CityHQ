@@ -2,6 +2,11 @@
 
 Each version's section is shown in the app before it updates, and on its GitHub release page.
 
+## 1.8.2
+
+- **Move to a host:** copying the database no longer stops with "ERROR 1227 ... you need the SET USER privilege". Triggers, views, procedures and events in a database name the account that made them, and a rented database won't accept another account's name. CityHQ now leaves those names out while copying, so they belong to your host's database account and work the same. Your data isn't changed. If a move stopped there, press Finish the move again.
+- The same fix applies when restoring CityHQ's own backups with a database account that has limited rights, such as some XAMPP and MySQL setups.
+
 ## 1.8.1
 
 - On Home, **See all** under Things to fix opens the whole list, with its fixes, right there. Before, it sent you to the Health page, which has its own checks rather than this list, and on a phone it miscounted how many more there were.
