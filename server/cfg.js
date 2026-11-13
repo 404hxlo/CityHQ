@@ -107,6 +107,31 @@ export const addToManagedBlock = (text, lines) => withBlock(text, (block) => {
 /** Takes lines added with addToManagedBlock out of the app's block again. */
 export const removeFromManagedBlock = (text, lines) => withBlock(text, (block) => block.filter((l) => !lines.includes(l.trim())));
 
+// sv_master1 set to nothing: the server doesn't report to FiveM's server list, so players see it
+// as private. (Left out, it reports to FiveM's own list, which is what almost everyone wants.)
+const HIDING_LINE = /^(?:set[rsa]?\s+)?sv_master1\s+(\S+)$/i;
+const hidesLine = (code) => {
+  const m = String(code).trim().match(HIDING_LINE);
+  return Boolean(m) && !m[1].replace(/^["']|["']$/g, '');
+};
+
+/** True when server.cfg keeps the server off FiveM's server list (sv_master1 ""). */
+export const hidesFromList = (text) => String(text || '').split(/\r?\n/).some((raw) => hidesLine(splitComment(raw)[0]));
+
+/** Switches those lines off, keeping them so hideFromListAgain can switch them back on. */
+export function showOnList(text) {
+  const eol = EOL(text);
+  return text.split(/\r?\n/).map((raw) => (hidesLine(splitComment(raw)[0]) ? `${OFF_MARKER}${raw.trim()}` : raw)).join(eol);
+}
+
+/** Undoes showOnList. */
+export function hideFromListAgain(text) {
+  const eol = EOL(text);
+  return text.split(/\r?\n/).map((raw) => (
+    raw.startsWith(OFF_MARKER) && hidesLine(splitComment(raw.slice(OFF_MARKER.length))[0]) ? raw.slice(OFF_MARKER.length) : raw
+  )).join(eol);
+}
+
 export function addBootLine(text, name) {
   const off = `${OFF_MARKER}ensure ${name}`;
   const eol = EOL(text);

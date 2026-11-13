@@ -54,9 +54,22 @@ export function firewallCovers(rules, { program, port, profile }) {
  * start, so a fresh start without a result yet is "pending", reporting how the last check went.
  */
 export const LISTING_SETTLE_MS = 6 * 60 * 1000;
+const failedAt = (l) => /Server list query returned an error/i.test(l);
+const ipOf = (l) => l.match(/reach the server at (\d+\.\d+\.\d+\.\d+):\d+/)?.[1] || null;
+
+/**
+ * FiveM's server list's last complaint since the latest start: its own words, the address it
+ * tried to reach the server at (when it says), and the log line. Null when there's none.
+ */
+export function listingError(lines) {
+  const boot = lines.findLastIndex((t) => t.includes('FXServer Starting'));
+  const line = (boot >= 0 ? lines.slice(boot) : lines).findLast(failedAt);
+  if (!line) return null;
+  const plain = line.replace(/\x1b\[[0-9;]*m/g, '').replace(/\^\d/g, '');
+  return { text: plain.replace(/^.*?Server list query returned an error:?\s*/i, '').trim(), ip: ipOf(plain), raw: line };
+}
+
 export function listingStatus(lines, now = Date.now()) {
-  const failedAt = (l) => /Server list query returned an error/i.test(l);
-  const ipOf = (l) => l.match(/reach the server at (\d+\.\d+\.\d+\.\d+):\d+/)?.[1] || null;
   const boot = lines.findLastIndex((t) => t.includes('FXServer Starting'));
   const since = boot >= 0 ? lines.slice(boot) : lines;
   const before = boot >= 0 ? lines.slice(0, boot) : [];

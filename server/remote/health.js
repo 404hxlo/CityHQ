@@ -5,7 +5,8 @@ import { readCfg } from '../cfg.js';
 import { duplicateFindings, missingStartFindings, startOrderFindings } from '../health.js';
 import { findServerData, REMOTE, STATE_DIR } from '../paths.js';
 import { scanDisk } from '../resources.js';
-import { lastHelperAddress } from './helper.js';
+import { joinLinkOf, lastHelperAddress } from './helper.js';
+import { listedNow } from './listing.js';
 import { panelClient } from './panel.js';
 import { loadSecret } from './secret.js';
 
@@ -48,8 +49,12 @@ async function checkDatabase() {
 }
 
 function checkJoinable() {
-  if (lastHelperAddress()) return finding('reachable', 'ok', 'Players can join from anywhere', 'The server has its Cfx.re address, so it shows up for players and the join link works.');
-  return null;
+  const link = joinLinkOf(lastHelperAddress());
+  if (!link) return null;
+  if (listedNow(link) === false) {
+    return finding('reachable', 'warn', 'Your server isn\'t on FiveM\'s server list', 'Players can join with its address, but can\'t find it in FiveM (or see it as private), and its join link doesn\'t open. Things to fix on Home says why.');
+  }
+  return finding('reachable', 'ok', 'Players can join from anywhere', 'The server has its Cfx.re address, so it shows up for players and the join link works.');
 }
 
 async function checkPlan() {

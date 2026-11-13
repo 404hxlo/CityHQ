@@ -6,13 +6,15 @@ import path from 'node:path';
 import { refreshAwake } from './awake.js';
 import { createBackup } from './backups.js';
 import {
-  addBootLine, parseBoot, readCfg, removeBootLine, removeFromManagedBlock, writeCfg,
+  addBootLine, hideFromListAgain, hidesFromList, parseBoot, readCfg, readConvar, removeBootLine, removeFromManagedBlock,
+  setConvar, showOnList, writeCfg,
 } from './cfg.js';
 import { dbRun, tableInfo, VALID_TABLE } from './db.js';
 import { backupDirFor, keepVersion, SERVER_SCOPE } from './files.js';
 import { restoreLeftOut, usePcLicense } from './move/leftout.js';
 import { withLicenseOf } from './move/plan.js';
 import { HttpError, resolveInside, STATE_DIR } from './paths.js';
+import { isIpv4 } from './remote/listing.js';
 import {
   isValidName, resourceAction, scanDisk, serverData, setBoot,
 } from './resources.js';
@@ -315,6 +317,32 @@ export async function runFix(fix) {
   if (fix.type === 'restore-moved-lines') return restoreLeftOut(changeCfg);
   // The license key the server had on this PC, where its name and list entry belong.
   if (fix.type === 'use-pc-license') return usePcLicense(changeCfg);
+  // sv_master1 "" keeps the server off FiveM's list: switched off, kept for an undo.
+  if (fix.type === 'show-on-list') {
+    const versionId = await changeCfg((cfg) => {
+      if (!hidesFromList(cfg)) throw new HttpError(409, 'server.cfg doesn\'t keep your server off FiveM\'s list any more.');
+      return showOnList(cfg);
+    });
+    return {
+      message: 'server.cfg no longer keeps your server off FiveM\'s server list. Restart the server; the list can take up to 10 minutes to show it.',
+      versionId,
+      undo: { type: 'hide-from-list' },
+    };
+  }
+  // The list checks the server at the host's address (sv_listingIpOverride).
+  if (fix.type === 'listing-ip') {
+    if (!isIpv4(fix.ip)) throw new HttpError(400, 'Invalid address');
+    let previous = null;
+    const versionId = await changeCfg((cfg) => {
+      previous = readConvar(cfg, 'sv_listingIpOverride');
+      return setConvar(cfg, 'sv_listingIpOverride', `"${fix.ip}"`);
+    });
+    return {
+      message: `server.cfg now tells FiveM's server list your server is at ${fix.ip}. Restart the server; the list can take up to 10 minutes to show it.`,
+      versionId,
+      undo: { type: 'listing-ip', ip: fix.ip, previous },
+    };
+  }
   throw new HttpError(400, 'Unknown fix');
 }
 
@@ -354,6 +382,14 @@ export async function undoFix(id) {
       const before = await readFile(path.join(backupDirFor(SERVER_SCOPE, 'server.cfg'), `${undo.versionId}.bak`), 'utf8')
         .catch(() => { throw new HttpError(409, 'The copy of server.cfg from before this fix is gone, so it can\'t be undone here.'); });
       await changeCfg((cfg) => withLicenseOf(before, cfg));
+    } else if (undo.type === 'hide-from-list') {
+      await changeCfg(hideFromListAgain);
+    } else if (undo.type === 'listing-ip') {
+      if (!isIpv4(undo.ip)) throw new HttpError(400, 'Unknown undo');
+      // Back to what server.cfg said before: its own value, or no line at all.
+      await changeCfg((cfg) => (undo.previous === null || undo.previous === undefined
+        ? removeFromManagedBlock(cfg, [`set sv_listingIpOverride "${undo.ip}"`])
+        : setConvar(cfg, 'sv_listingIpOverride', `"${String(undo.previous).replace(/"/g, '')}"`)));
     } else {
       throw new HttpError(400, 'Unknown undo');
     }

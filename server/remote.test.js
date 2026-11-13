@@ -26,11 +26,14 @@ import {
   findMovedFrom, leftOutProblem, leftOutSource, pcLicenseAction, rememberMovedFrom, restoreLeftOut, usePcLicense,
 } from './move/leftout.js';
 import {
-  askList, directAddressOf, joinCodeOf, listedNow, LISTING_GRACE_MS, listingSettled, notListedProblem,
+  askList, directAddressOf, hiddenByCfgProblem, isIpv4, joinCodeOf, listedNow, LISTING_GRACE_MS, listingSettled, notListedProblem,
+  wrongAddressProblem,
 } from './remote/listing.js';
 import {
-  addToManagedBlock, BLOCK_START, ensureManagedBlock, managedLines, removeFromManagedBlock,
+  addToManagedBlock, BLOCK_START, ensureManagedBlock, hideFromListAgain, hidesFromList, managedLines, removeFromManagedBlock,
+  showOnList,
 } from './cfg.js';
+import { listingError } from './reach.js';
 import { redact } from './report.js';
 
 const KEY = 'ptlc_TestKey1234567890abcdefghij';
@@ -719,6 +722,57 @@ test('FiveM\'s server list: asked every few minutes, and a server missing from i
   assert.equal(asked.length, 2);
   assert.equal(listedNow(link, { now: t + LISTING_GRACE_MS + 1, fetchImpl: fakeFetch }), true);
   assert.equal(notListedProblem({ link, uptimeMs: LISTING_GRACE_MS, now: t + LISTING_GRACE_MS + 2, fetchImpl: fakeFetch }), null);
+});
+
+test('kept off FiveM\'s list: server.cfg hiding the server, and the list checking the wrong address', async () => {
+  // sv_master1 "" keeps a server off the list; a # in front, or a real address, doesn't.
+  assert.equal(hidesFromList('ensure qb-core\nsv_master1 ""'), true);
+  assert.equal(hidesFromList('set sv_master1 ""  # private'), true);
+  assert.equal(hidesFromList('#sv_master1 ""\n// sv_master1 ""'), false);
+  assert.equal(hidesFromList('sv_master1 "https://servers-ingress-live.fivem.net/ingress"'), false);
+  assert.equal(hidesFromList(''), false);
+  const cfg = 'endpoint_add_tcp "0.0.0.0:30123"\r\nsv_master1 ""\r\nensure qb-core\r\n';
+  const shown = showOnList(cfg);
+  assert.equal(shown, 'endpoint_add_tcp "0.0.0.0:30123"\r\n# qb-control-off: sv_master1 ""\r\nensure qb-core\r\n');
+  assert.equal(hidesFromList(shown), false);
+  assert.equal(hideFromListAgain(shown), cfg, 'an undo puts the line back as it was');
+  assert.equal(hiddenByCfgProblem().actions[0].fix.type, 'show-on-list');
+
+  // FiveM's complaint since the latest start, without its colour codes.
+  const lines = [
+    '[txAdmin] FXServer Starting - 11/13/2026, 9:50:12 PM',
+    '[citizen-server-impl] ^1Server list query returned an error: Cfx failed to reach the server at 203.0.113.7:30123 - check if the sv_listingIpOverride is correct^7',
+    '[txAdmin] FXServer Starting - 11/13/2026, 10:20:12 PM',
+    '[citizen-server-impl] ^1Server list query returned an error: Cfx failed to reach the server at 10.10.0.5:30123 - check if the sv_listingIpOverride is correct^7',
+  ];
+  const error = listingError(lines);
+  assert.equal(error.ip, '10.10.0.5');
+  assert.equal(error.text, 'Cfx failed to reach the server at 10.10.0.5:30123 - check if the sv_listingIpOverride is correct');
+  assert.equal(listingError([lines[0], '[script:qb-core] ready']), null, 'nothing since the latest start');
+
+  // The list tried another address than the host's: one button gives it the host's.
+  const wrong = wrongAddressProblem({ error, hostIp: '203.0.113.7', cfgText: 'ensure qb-core' });
+  assert.equal(wrong.id, 'list-wrong-address');
+  assert.deepEqual(wrong.actions[0].fix, { type: 'listing-ip', ip: '203.0.113.7' });
+  assert.match(wrong.what, /at 10\.10\.0\.5, but players reach it at 203\.0\.113\.7/);
+  // Not when it's the host's own address, server.cfg says so already, or the host gives a name.
+  assert.equal(wrongAddressProblem({ error: { ...error, ip: '203.0.113.7' }, hostIp: '203.0.113.7', cfgText: '' }), null);
+  assert.equal(wrongAddressProblem({ error, hostIp: '203.0.113.7', cfgText: 'set sv_listingIpOverride "203.0.113.7"' }), null);
+  assert.equal(wrongAddressProblem({ error, hostIp: 'play.example.net', cfgText: '' }), null);
+  assert.equal(wrongAddressProblem({ error: null, hostIp: '203.0.113.7', cfgText: '' }), null);
+  assert.equal(isIpv4('203.0.113.7'), true);
+  assert.equal(isIpv4('256.1.1.1'), false);
+
+  // Its own address and still unreachable: the list's words, and ask the host.
+  const link = 'cfx.re/join/qq7ww6';
+  const t = 1_900_000_000_000;
+  listedNow(link, { now: t, fetchImpl: async () => ({ status: 404, ok: false }) });
+  await listingSettled();
+  const atHost = { ...error, ip: '203.0.113.7' };
+  const blocked = notListedProblem({ link, uptimeMs: LISTING_GRACE_MS, error: atHost, hostIp: '203.0.113.7', now: t + 1000 });
+  assert.match(blocked.what, /FiveM's list said: "Cfx failed to reach the server at 10\.10\.0\.5/);
+  assert.match(blocked.fix[0], /even at its own address, 203\.0\.113\.7/);
+  assert.equal(blocked.raw, atHost.raw);
 });
 
 test('checks before moving: space, an upload already there, the database', () => {

@@ -2,7 +2,7 @@
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { agentRequest } from './agent.js';
-import { parseBoot, readCfg } from './cfg.js';
+import { hidesFromList, parseBoot, readCfg } from './cfg.js';
 import { readConsole } from './console.js';
 import { buildDocIndex, repoFor, withDocLinks } from './docs.js';
 import { explainLogLines, explainMissingDependency } from './explain.js';
@@ -14,8 +14,11 @@ import {
 import { hostedUptimeMs } from './control.js';
 import { leftOutProblem, pcLicenseAction } from './move/leftout.js';
 import { findServerData, HttpError, REMOTE } from './paths.js';
+import { listingError } from './reach.js';
 import { joinLinkOf, lastHelperAddress } from './remote/helper.js';
-import { directAddressOf, listedNow, notListedProblem } from './remote/listing.js';
+import {
+  directAddressOf, hiddenByCfgProblem, listedNow, notListedProblem, wrongAddressProblem,
+} from './remote/listing.js';
 import { getProcessState } from './processes.js';
 import {
   assertCanControl, listSqlFiles, liveStates, replacementsOf, scanDisk,
@@ -284,11 +287,20 @@ export async function currentProblems({ fresh = false } = {}) {
   if (REMOTE && cfgText) {
     const leftOut = await leftOutProblem(cfgText).catch(() => null);
     if (leftOut) items.push(leftOut);
-    // Running, but not on FiveM's server list (so its join link doesn't open either).
+    // What keeps it off FiveM's server list (where players see it as private): server.cfg saying
+    // so, or the list checking an address that isn't the host's.
+    const error = listingError(texts);
+    const hostIp = REMOTE.address?.ip || null;
+    if (hidesFromList(cfgText)) items.push(hiddenByCfgProblem());
+    const wrongAddress = wrongAddressProblem({ error, hostIp, cfgText });
+    if (wrongAddress) items.push(wrongAddress);
+    // Running, but not on the list (so its join link doesn't open either).
     const link = joinLinkOf(lastHelperAddress());
     if (link && listedNow(link) === false) {
       const keyAction = await pcLicenseAction(cfgText).catch(() => null);
-      const notListed = notListedProblem({ link, direct: directAddressOf(REMOTE), uptimeMs: hostedUptimeMs(), keyAction });
+      const notListed = notListedProblem({
+        link, direct: directAddressOf(REMOTE), uptimeMs: hostedUptimeMs(), keyAction, error, hostIp,
+      });
       if (notListed) items.push(notListed);
     }
   }

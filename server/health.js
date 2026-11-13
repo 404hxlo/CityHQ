@@ -7,7 +7,7 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 import { agentRequest, installedAgentVersion } from './agent.js';
 import { awakeStatus } from './awake.js';
-import { parseBoot, readCfg } from './cfg.js';
+import { hidesFromList, parseBoot, readCfg } from './cfg.js';
 import { serverLogTail } from './doctor.js';
 import { dbRun, VALID_TABLE } from './db.js';
 import { columnsOf, createStatementFor, stripSqlComments } from './fixes.js';
@@ -238,7 +238,13 @@ async function checkHelper() {
   } catch { return null; }
 }
 
-async function checkReachable() {
+async function checkReachable(cfg) {
+  // With sv_master1 "" the server never asks FiveM's list, so the log has nothing to go on.
+  if (hidesFromList(cfg)) {
+    return finding('reachable', 'warn', 'server.cfg keeps your server off FiveM\'s server list', 'The line sv_master1 "" tells your server not to report to FiveM\'s list, so players see it as private and can\'t find it there. Friends can still join with its address.', {
+      fix: { label: 'Switch that line off', confirm: 'server.cfg keeps the sv_master1 line but switches it off, so your server reports to FiveM\'s server list again. A copy of server.cfg is saved first, and you can undo this. It takes effect when the server restarts.', fix: { type: 'show-on-list' } },
+    });
+  }
   try {
     const listing = listingStatus(await serverLogTail(4 * 1024 * 1024));
     if (listing.status === 'blocked' || (listing.status === 'pending' && listing.lastFailed)) {
@@ -263,7 +269,7 @@ export async function healthChecks() {
   const settle = (p) => Promise.resolve(p).then((v) => v, () => null);
   const results = await Promise.all([
     settle(checkSleep()), settle(checkSmartAppControl()), settle(checkDatabase()), settle(checkDisk()), settle(checkMemory()),
-    settle(checkHelper()), settle(checkReachable()),
+    settle(checkHelper()), settle(checkReachable(cfg)),
     server ? settle(checkTables(disk, cfg)) : null,
   ]);
   const findings = results.flat().filter(Boolean);

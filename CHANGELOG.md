@@ -2,6 +2,15 @@
 
 Each version's section is shown in the app before it updates, and on its GitHub release page.
 
+## 1.8.6
+
+- **Shown as private?** FiveM shows a server as private when it isn't on its server list. CityHQ now finds the two server.cfg causes on hosted servers and fixes each with one button in **Things to fix**:
+  - **sv_master1 "":** this line tells the server not to report to FiveM's list. **Switch that line off** keeps it in server.cfg, switched off.
+  - **The list checks the wrong address:** some hosts' servers go out to the internet from a different address than players use, and FiveM's list then can't confirm the server. **Give FiveM's list your host's address** adds `sv_listingIpOverride` with the address your host's panel gives.
+- Both save a copy of server.cfg first and can be undone, and take effect when the server restarts.
+- "Your server isn't on FiveM's server list" now quotes what FiveM's list said in the console. If the list couldn't reach your server even at its own address, it says to ask your host.
+- Health no longer says friends can reach a server on this PC when sv_master1 "" keeps it off the list, and offers the same fix. A hosted server's Health says when it isn't on the list.
+
 ## 1.8.5
 
 - **Move to a host:** your server keeps its license key. Since October 2026, a server's name and its place in FiveM's server list belong to its key, set on the Cfx.re Portal. A move that switched to your host's key left the server under FiveM's default name and off the list. Your host's key is now used only if server.cfg on your PC has none.
