@@ -1,11 +1,15 @@
 // Moving a server from this PC to a host: the checks before anything changes, and the server.cfg
 // the host gets. Everything here is plain text and numbers, so it can be tested on its own.
 import path from 'node:path';
-import { removeManagedBlock, setConvar } from '../cfg.js';
+import {
+  isHelperLine, managedLines, parseBoot, readCommand, readConvar, setConvar, splitComment,
+} from '../cfg.js';
 
 const GB = 1024 ** 3;
 const ENDPOINT = /^\s*endpoint_add_(tcp|udp)\s/i;
 const LICENSE = /^\s*(?:set[sra]?\s+)?sv_licenseKey\s/i;
+// A byte-order mark is only allowed at the very start of a file. Lower down, it spoils the line.
+const withoutBom = (text) => String(text || '').replace(/^\uFEFF/, '');
 
 const quoted = (v) => `"${String(v).replace(/"/g, '')}"`;
 
@@ -21,18 +25,18 @@ export function connectionLine({
 }
 
 /**
- * The server.cfg for the host: yours (scripts, settings, admins), with the host's own lines for
- * where the server listens and its license key, and the host's database. CityHQ's own block is
- * left out; it is added back for the host when the helper is put there.
+ * The server.cfg for the host: all of yours, with the host's own lines for where the server
+ * listens and its license key, and the host's database. That includes CityHQ's own section, which
+ * holds scripts installed or switched on in CityHQ, admins, and settings changed there.
  */
 export function mergeCfgForHost(localCfg, hostCfg, db, { when = new Date() } = {}) {
-  const eol = localCfg.includes('\r\n') ? '\r\n' : '\n';
-  const hostLines = String(hostCfg || '').split(/\r?\n/);
+  const local = withoutBom(localCfg);
+  const eol = local.includes('\r\n') ? '\r\n' : '\n';
+  const hostLines = withoutBom(hostCfg).split(/\r?\n/);
   const hostEndpoints = hostLines.filter((l) => ENDPOINT.test(l));
   const hostLicense = hostLines.filter((l) => LICENSE.test(l));
-  let lines = removeManagedBlock(localCfg).split(/\r?\n/);
   // Where the server listens and its key belong to the host: theirs replace yours.
-  lines = lines.filter((l) => !ENDPOINT.test(l) && !LICENSE.test(l));
+  const lines = local.split(/\r?\n/).filter((l) => !ENDPOINT.test(l) && !LICENSE.test(l));
   const head = [
     `# Moved here from your PC by CityHQ on ${when.toISOString().slice(0, 10)}. The host's own lines come first.`,
     ...hostEndpoints,
@@ -42,6 +46,83 @@ export function mergeCfgForHost(localCfg, hostCfg, db, { when = new Date() } = {
   let text = [...head, ...lines].join(eol);
   if (db) text = setConvar(text, 'mysql_connection_string', quoted(connectionLine(db)));
   return text.replace(/(\r?\n){3,}/g, `${eol}${eol}`);
+}
+
+const BOOT_LINE = /^(?:ensure|start|restart)\s+["']?([^"'\s]+)["']?$/i;
+const ADMIN_LINE = /^add_principal\s+(identifier\.\S+)\s+\S/i;
+const CONVAR_LINE = /^set[rsa]?\s+(\S+)\s+\S/i;
+const COMMAND_LINE = /^(\S+)\s+\S/;
+// Lines that add to a list (permissions, files to run): only the same line counts as there.
+const LIST_LINE = /^(?:add_ace|remove_ace|add_principal|remove_principal|exec|load_server_icon)\s/i;
+const SETTING_WORDS = { sv_maxclients: 'player slots' };
+const codeOf = (line) => splitComment(String(line))[0].trim();
+const sameLine = (code) => code.replace(/\s+/g, ' ').toLowerCase();
+/** The setting a line sets ("sv_maxclients 64", "set foo bar"), or null for scripts and lists. */
+const settingOf = (code) => (BOOT_LINE.test(code) || LIST_LINE.test(code) ? null : (code.match(CONVAR_LINE) || code.match(COMMAND_LINE))?.[1] || null);
+
+/**
+ * What a move before CityHQ 1.8.4 left out: the lines of CityHQ's own section in your PC's
+ * server.cfg that the host's doesn't have, such as scripts installed or switched on in CityHQ,
+ * admins and settings. Left alone: the helper's own lines, the database line, where the server
+ * listens and its key, scripts the host has switched off, players who are admins there already,
+ * and settings the host sets its own way.
+ */
+export function linesLeftOut(localCfg, hostCfg) {
+  const host = withoutBom(hostCfg);
+  const codes = host.split(/\r?\n/).map(codeOf).filter(Boolean);
+  const there = new Set(codes.map(sameLine));
+  const admins = new Set(codes.map((c) => c.match(ADMIN_LINE)?.[1].toLowerCase()).filter(Boolean));
+  const boot = parseBoot(host);
+  const out = [];
+  for (const raw of managedLines(withoutBom(localCfg))) {
+    const code = codeOf(raw);
+    if (!code || isHelperLine(code) || there.has(sameLine(code)) || ENDPOINT.test(code) || LICENSE.test(code)) continue;
+    const script = code.match(BOOT_LINE)?.[1];
+    if (script && (boot.names.has(script) || boot.turnedOff.has(script))) continue;
+    const admin = code.match(ADMIN_LINE)?.[1].toLowerCase();
+    if (admin && admins.has(admin)) continue;
+    const setting = settingOf(code);
+    if (setting && (/^mysql_connection_string$/i.test(setting) || readConvar(host, setting) !== null || readCommand(host, setting) !== null)) continue;
+    there.add(sameLine(code));
+    if (admin) admins.add(admin);
+    out.push(raw.trim());
+  }
+  return out;
+}
+
+/** Up to four names, then how many more: "a, b and c". */
+function namesOf(names) {
+  const shown = names.slice(0, 4);
+  if (names.length > shown.length) shown.push(`${names.length - shown.length} more`);
+  return shown.length > 1 ? `${shown.slice(0, -1).join(', ')} and ${shown.at(-1)}` : shown[0] || '';
+}
+const counted = (n, one, many) => `${n} ${n === 1 ? one : many}`;
+
+/** Lines from linesLeftOut in plain words: "2 scripts (a and b), 1 admin (Sam) and 1 setting (player slots)". */
+export function describeLeftOut(lines) {
+  const scripts = [];
+  const named = [];
+  const settings = [];
+  let unnamed = 0;
+  let other = 0;
+  for (const line of lines) {
+    const [code, comment] = splitComment(line).map((s) => s.trim());
+    const script = code.match(BOOT_LINE)?.[1];
+    const setting = settingOf(code);
+    if (script) scripts.push(script);
+    else if (ADMIN_LINE.test(code)) {
+      const name = comment.replace(/^(?:#|\/\/)\s*/, '');
+      if (name) named.push(name); else unnamed += 1;
+    } else if (setting) settings.push(SETTING_WORDS[setting.toLowerCase()] || setting);
+    else other += 1;
+  }
+  const admins = unnamed ? [...named, `${unnamed} without a name`] : named;
+  const parts = [];
+  if (scripts.length) parts.push(`${counted(scripts.length, 'script', 'scripts')} (${namesOf(scripts)})`);
+  if (admins.length) parts.push(`${counted(named.length + unnamed, 'admin', 'admins')} (${namesOf(admins)})`);
+  if (settings.length) parts.push(`${counted(settings.length, 'setting', 'settings')} (${namesOf(settings)})`);
+  if (other) parts.push(counted(other, 'other line', 'other lines'));
+  return parts.length > 1 ? `${parts.slice(0, -1).join(', ')} and ${parts.at(-1)}` : parts[0] || 'nothing';
 }
 
 /**

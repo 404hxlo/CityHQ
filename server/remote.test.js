@@ -20,8 +20,14 @@ import {
 import { categoriesOf } from './remote/resources.js';
 import { remotePath, sftpClient } from './remote/sftp.js';
 import {
-  databaseNameFor, execFiles, mergeCfgForHost, preflight,
+  databaseNameFor, describeLeftOut, execFiles, linesLeftOut, mergeCfgForHost, preflight,
 } from './move/plan.js';
+import {
+  findMovedFrom, leftOutProblem, leftOutSource, rememberMovedFrom, restoreLeftOut,
+} from './move/leftout.js';
+import {
+  addToManagedBlock, BLOCK_START, ensureManagedBlock, managedLines, removeFromManagedBlock,
+} from './cfg.js';
 import { redact } from './report.js';
 
 const KEY = 'ptlc_TestKey1234567890abcdefghij';
@@ -442,7 +448,7 @@ test('sftp: a big upload cut off halfway continues from the last safe point, and
   } finally { c.close(); }
 });
 
-test('the host\'s server.cfg: your settings, the host\'s ports and key, the host\'s database, no CityHQ block', () => {
+test('the host\'s server.cfg: all of yours, CityHQ\'s section too, with the host\'s ports, key and database', () => {
   const local = [
     'endpoint_add_tcp "0.0.0.0:30229"',
     'endpoint_add_udp "0.0.0.0:30229"',
@@ -454,6 +460,8 @@ test('the host\'s server.cfg: your settings, the host\'s ports and key, the host
     '# >>> CityHQ (managed by the app, edits here may be replaced)',
     'add_ace resource.qb-control command allow',
     'ensure qb-control',
+    'ensure ps-dispatch',
+    'add_principal identifier.fivem:1234 qbcore.god # Owner',
     '# <<< CityHQ',
   ].join('\n');
   const host = 'endpoint_add_tcp "0.0.0.0:30123"\nendpoint_add_udp "0.0.0.0:30123"\nsv_licenseKey "cfxk_HOSTKEY_xyz"\nensure qb-core\n';
@@ -465,11 +473,148 @@ test('the host\'s server.cfg: your settings, the host\'s ports and key, the host
   assert.match(out, /set mysql_connection_string "mysql:\/\/u%402:p%3Aw@db\.example\.net:3306\/s1_city\?charset=utf8mb4"/);
   assert.match(out, /sv_hostname "Harbor Town"/);
   assert.match(out, /exec permissions\.cfg/);
-  assert.doesNotMatch(out, /qb-control/);
+  // CityHQ's section comes along, once: scripts installed or switched on in CityHQ, and admins, live there.
+  assert.match(out, /^ensure ps-dispatch$/m);
+  assert.match(out, /^add_principal identifier\.fivem:1234 qbcore\.god # Owner$/m);
+  assert.equal(out.split('\n').filter((l) => l === BLOCK_START).length, 1);
+  // A byte-order mark at the start of either file doesn't end up partway down, spoiling a line.
+  const marked = mergeCfgForHost('\uFEFFsv_hostname "Harbor Town"\nensure qb-core', '\uFEFFendpoint_add_tcp "0.0.0.0:30123"\n', null);
+  assert.doesNotMatch(marked, /\uFEFF/);
+  assert.match(marked, /^endpoint_add_tcp "0\.0\.0\.0:30123"$/m);
+  assert.match(marked, /^sv_hostname "Harbor Town"$/m);
   // A host whose key lives in txAdmin: no key line on either side afterwards.
   assert.doesNotMatch(mergeCfgForHost(local, 'endpoint_add_tcp "0.0.0.0:30123"', null), /sv_licenseKey/);
   assert.deepEqual(execFiles('exec permissions.cfg\nexec "voice.cfg" # chat\nexec resources/[qb]/x.cfg\nexec ../secret.cfg\nexec @qb-core/a.cfg\n# exec old.cfg'), ['permissions.cfg', 'voice.cfg']);
   assert.equal(databaseNameFor('Midnight-Society DB'), 'midnight_society_db');
+});
+
+test('what an earlier move left out: CityHQ\'s section of the PC\'s server.cfg, minus what the host has', () => {
+  const pc = [
+    'sv_hostname "Harbor Town"',
+    'ensure qb-core',
+    '# >>> CityHQ (managed by the app, edits here may be replaced)',
+    'add_ace resource.qb-control command allow',
+    'ensure qb-control',
+    'set mysql_connection_string "mysql://root@127.0.0.1:3319/city"',
+    'endpoint_add_tcp "0.0.0.0:30229"',
+    'ensure ps-dispatch',
+    'ensure ps-dispatch',
+    'ensure qb-radialmenu',
+    'ensure qb-hud',
+    'add_principal identifier.fivem:1234 qbcore.god # Owner',
+    'add_principal identifier.license:abcdef12 qbcore.admin # Sam',
+    'add_principal identifier.discord:5678 qbcore.mod',
+    'sv_maxclients 64',
+    'set chat_showJoins false',
+    'add_ace group.admin command allow',
+    '# a note',
+    '',
+    '# <<< CityHQ',
+  ].join('\r\n');
+  const host = [
+    'endpoint_add_tcp "0.0.0.0:30123"',
+    'ensure qb-core',
+    'ensure qb-radialmenu',
+    '# qb-control-off: ensure qb-hud',
+    'sv_maxclients 48',
+    'add_ace group.admin command allow',
+    '# >>> CityHQ (managed by the app, edits here may be replaced)',
+    'add_ace resource.qb-control command allow',
+    'ensure qb-control',
+    'add_principal identifier.license:ABCDEF12 qbcore.mod # Sam, set on the host',
+    'set mysql_connection_string "mysql://u:p@db.example.net:3306/s1_city"',
+    '# <<< CityHQ',
+  ].join('\n');
+  // Left alone: the helper's lines, the database and endpoint lines, a script already started or
+  // switched off on the host, a player who's an admin there already, a setting the host has.
+  const left = linesLeftOut(pc, host);
+  assert.deepEqual(left, [
+    'ensure ps-dispatch',
+    'add_principal identifier.fivem:1234 qbcore.god # Owner',
+    'add_principal identifier.discord:5678 qbcore.mod',
+    'set chat_showJoins false',
+  ]);
+  assert.equal(describeLeftOut(left), '1 script (ps-dispatch), 2 admins (Owner and 1 without a name) and 1 setting (chat_showJoins)');
+  assert.equal(describeLeftOut(['sv_maxclients 64', 'ensure a', 'ensure b', 'ensure c', 'ensure d', 'ensure e']), '5 scripts (a, b, c, d and 1 more) and 1 setting (player slots)');
+  assert.deepEqual(linesLeftOut('ensure qb-core', host), [], 'no CityHQ section on the PC');
+  // Put back into CityHQ's section, and taken out again by an undo.
+  const back = addToManagedBlock(host, left);
+  assert.ok(managedLines(back).includes('ensure ps-dispatch'));
+  assert.deepEqual(linesLeftOut(pc, back), []);
+  assert.equal(removeFromManagedBlock(back, left), ensureManagedBlock(host));
+});
+
+test('an earlier move\'s server on this PC is found, and what it left out is put back once', async () => {
+  const base = mkdtempSync(path.join(os.tmpdir(), 'cityhq-leftout-'));
+  const pcCfg = [
+    'ensure qb-core',
+    '# >>> CityHQ (managed by the app, edits here may be replaced)',
+    'add_ace resource.qb-control command allow',
+    'ensure qb-control',
+    'ensure ps-dispatch',
+    'add_principal identifier.fivem:1234 qbcore.god # Owner',
+    '# <<< CityHQ',
+  ].join('\n');
+  const hostCfg = ensureManagedBlock('endpoint_add_tcp "0.0.0.0:30123"\nensure qb-core\n');
+  const remote = { type: 'panel', panelUrl: 'https://panel.example.net', serverId: 'abcd001' };
+  const serverFolder = (dir, target) => {
+    for (const d of ['.qbcontrol', path.join('txData', 'default'), 'server-data']) mkdirSync(path.join(dir, d), { recursive: true });
+    writeFileSync(path.join(dir, 'qbcontrol.json'), '{}');
+    writeFileSync(path.join(dir, '.qbcontrol', 'move.json'), JSON.stringify({ phase: 'done', target }));
+    writeFileSync(path.join(dir, 'txData', 'default', 'config.json'), JSON.stringify({ server: { dataPath: path.join(dir, 'server-data'), cfgPath: 'server.cfg' } }));
+    writeFileSync(path.join(dir, 'server-data', 'server.cfg'), pcCfg);
+  };
+  try {
+    // One server folder moved somewhere else, and the one moved here, two levels down.
+    const drive = path.join(base, 'drive');
+    serverFolder(path.join(drive, 'Other-City'), { ...remote, serverId: 'zzzz999' });
+    serverFolder(path.join(drive, 'Servers', 'Harbor-Town'), remote);
+    const find = (r) => findMovedFrom(r, { starts: [drive] });
+    const found = await find(remote);
+    assert.equal(found.root, path.join(drive, 'Servers', 'Harbor-Town'));
+    assert.equal(found.cfgPath, path.join(drive, 'Servers', 'Harbor-Town', 'server-data', 'server.cfg'));
+
+    // The first check starts the search; the problem shows once it's done.
+    const options = { remote, stateDir: path.join(base, 'hosted', '.qbcontrol'), find };
+    assert.equal(await leftOutProblem(hostCfg, options), null);
+    await leftOutSource({ ...options, wait: true });
+    const problem = await leftOutProblem(hostCfg, options);
+    assert.equal(problem.id, 'move-left-out');
+    assert.equal(problem.severity, 'error');
+    assert.equal(problem.title, 'The move left out 2 lines of your server.cfg');
+    assert.equal(problem.actions[0].fix.type, 'restore-moved-lines');
+    assert.equal(problem.raw, 'ensure ps-dispatch\nadd_principal identifier.fivem:1234 qbcore.god # Owner');
+
+    // Put back the way server.cfg is always changed (a copy is kept first), then never shown again.
+    let text = hostCfg;
+    const changeCfg = async (mutate) => {
+      const next = mutate(text);
+      if (next === text) return null;
+      text = next;
+      return 'version-1';
+    };
+    const done = await restoreLeftOut(changeCfg, options);
+    assert.equal(done.versionId, 'version-1');
+    assert.deepEqual(done.undo, { type: 'remove-lines', lines: ['ensure ps-dispatch', 'add_principal identifier.fivem:1234 qbcore.god # Owner'] });
+    assert.match(done.message, /^Added 1 script \(ps-dispatch\) and 1 admin \(Owner\) to server\.cfg/);
+    assert.ok(managedLines(text).includes('ensure ps-dispatch'));
+    assert.equal(await leftOutProblem(removeFromManagedBlock(text, done.undo.lines), options), null, 'an undo doesn\'t bring it back');
+
+    // A move made by 1.8.4 or later kept CityHQ's lines, so nothing is looked for.
+    rememberMovedFrom(path.join(base, 'newer'), found);
+    const never = () => { throw new Error('searched'); };
+    assert.equal(await leftOutSource({ remote, stateDir: path.join(base, 'newer', '.qbcontrol'), find: never, wait: true }), null);
+    // Nothing found is remembered too, so it's only searched for once.
+    let searches = 0;
+    const nothing = { remote, stateDir: path.join(base, 'none', '.qbcontrol'), find: async () => { searches += 1; return null; } };
+    assert.equal(await leftOutSource({ ...nothing, wait: true }), null);
+    assert.equal(await leftOutSource({ ...nothing, wait: true }), null);
+    assert.equal(searches, 1);
+    // Not a hosted server: nothing to do.
+    assert.equal(await leftOutSource({ remote: null, stateDir: options.stateDir, find: never }), null);
+  } finally {
+    rmSync(base, { recursive: true, force: true });
+  }
 });
 
 test('checks before moving: space, an upload already there, the database', () => {

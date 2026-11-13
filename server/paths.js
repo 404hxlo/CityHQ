@@ -129,6 +129,11 @@ export const DB_INI = path.join(ROOT, 'db', 'my.ini');
 export function findServerData(txProfile = TX_PROFILE, txData = TXDATA) {
   // A hosted server's place was found when it was connected; its paths are the host's.
   if (REMOTE) return REMOTE.cfgPath ? { dataPath: REMOTE.dataPath, cfgPath: REMOTE.cfgPath, remote: true } : null;
+  return findLocalServerData(txProfile, txData);
+}
+
+/** The same for a server folder on this PC, whichever server CityHQ manages now. */
+export function findLocalServerData(txProfile, txData) {
   try {
     const tx = JSON.parse(readFileSync(path.join(txProfile, 'config.json'), 'utf8'));
     // txAdmin 8 keeps it under server, txAdmin 7 under fxRunner.

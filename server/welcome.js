@@ -172,10 +172,11 @@ export async function checkServerFolder(folder) {
 }
 
 // ---- finding servers on this PC ----
-const SKIP = /^(\$recycle\.bin|system volume information|windows|program files|program files \(x86\)|programdata|appdata|node_modules|\.git|resources|cache|stream|txdata|recovery|perflogs|msocache)$/i;
+/** Folders never worth looking inside for a server. */
+export const SKIP_FOLDERS = /^(\$recycle\.bin|system volume information|windows|program files|program files \(x86\)|programdata|appdata|node_modules|\.git|resources|cache|stream|txdata|recovery|perflogs|msocache)$/i;
 
 /** Folders worth searching: each drive's top folders and the user's Desktop, Documents and Downloads. */
-function searchStarts() {
+export function searchStarts() {
   const drives = 'CDEFGHIJKLMNOPQRSTUVWXYZ'.split('').map((d) => `${d}:\\`).filter((d) => tryOr(() => existsSync(d), false));
   const home = os.homedir();
   return [...drives, ...['Desktop', 'Documents', 'Downloads', path.join('OneDrive', 'Desktop'), path.join('OneDrive', 'Documents')].map((d) => path.join(home, d))].filter((d) => tryOr(() => existsSync(d), false));
@@ -192,7 +193,7 @@ export function findServerFolders({ starts = searchStarts(), maxDepth = 3, timeL
       return;
     }
     for (const name of tryOr(() => io.dirs(dir), [])) {
-      if (!SKIP.test(name)) visit(path.join(dir, name), depth + 1);
+      if (!SKIP_FOLDERS.test(name)) visit(path.join(dir, name), depth + 1);
     }
   };
   for (const start of starts) visit(start, 0);

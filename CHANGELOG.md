@@ -2,6 +2,12 @@
 
 Each version's section is shown in the app before it updates, and on its GitHub release page.
 
+## 1.8.4
+
+- **Move to a host:** the move now brings all of server.cfg. Before, it left out CityHQ's own section of it, which holds scripts you installed or switched on in CityHQ, admins added on the Admins page, and settings CityHQ added, such as player slots.
+- If you moved your server with an earlier version, **Things to fix** on Home lists what was left out, read from your server on your PC, with a **Put them back** button. A copy of server.cfg is saved first, and you can undo it. Restart the server afterwards. Anything your host's server.cfg already sets its own way is left as it is.
+- An invisible mark that some editors put at the start of a file (a byte-order mark) no longer ends up partway down the moved server.cfg, where it could stop a line from working.
+
 ## 1.8.3
 
 - **Move to a host:** finishing no longer stops with "The host didn't accept that SFTP username or password" while copying txAdmin's player records (bans, warnings, playtime). If SFTP doesn't work, for example because the panel password changed after the move started, CityHQ sends the file through your host's panel instead.

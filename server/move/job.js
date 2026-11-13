@@ -18,7 +18,7 @@ import { readCfg } from '../cfg.js';
 import { stopServer } from '../control.js';
 import { recordEvent } from '../events.js';
 import {
-  findServerData, HttpError, REMOTE, STATE_DIR, TX_PROFILE,
+  findServerData, HttpError, REMOTE, ROOT, STATE_DIR, TX_PROFILE,
 } from '../paths.js';
 import { ensureDatabase, getProcessState, isPortOpen } from '../processes.js';
 import { replaceFileSync } from '../retry.js';
@@ -28,6 +28,7 @@ import { databaseAddress, panelClient } from '../remote/panel.js';
 import { forgetSecret, loadSecret, saveSecret } from '../remote/secret.js';
 import { sftpClient } from '../remote/sftp.js';
 import { remoteFrom, useHosted } from '../remote/welcome.js';
+import { rememberMovedFrom } from './leftout.js';
 import {
   databaseNameFor, execFiles, mergeCfgForHost, preflight,
 } from './plan.js';
@@ -593,6 +594,8 @@ export async function finishMove(body = {}) {
         ? { type: 'panel', url: t.panelUrl, key: secret.key, serverId: t.serverId }
         : { type: 'sftp', host: t.host, port: t.port, username: t.username, password: secret.key };
       const saved = await useHosted(login);
+      // Where it came from, for later. This move kept CityHQ's own lines in server.cfg.
+      rememberMovedFrom(saved.root, { root: ROOT, cfgPath: local.cfgPath });
       if (panel) await panel.power('start').catch(() => {});
       s.phase = 'done';
       s.step = null;

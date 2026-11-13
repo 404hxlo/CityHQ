@@ -11,6 +11,7 @@ import { tableInfo } from './db.js';
 import {
   fixedThisBoot, recordFix, runFix, tablesDefining,
 } from './fixes.js';
+import { leftOutProblem } from './move/leftout.js';
 import { findServerData, HttpError, REMOTE } from './paths.js';
 import { getProcessState } from './processes.js';
 import {
@@ -275,6 +276,12 @@ export async function currentProblems({ fresh = false } = {}) {
   const { index, links } = await docIndex(disk);
   addRepoInstalls(items, links);
   for (const item of items) item.links = withDocLinks(item, index);
+  // A server moved here before 1.8.4: what that move left out of server.cfg. (Not when the host's
+  // server.cfg couldn't be read, which would make every line look missing.)
+  if (REMOTE && cfgText) {
+    const leftOut = await leftOutProblem(cfgText).catch(() => null);
+    if (leftOut) items.push(leftOut);
+  }
 
   // A fix made during this boot hides its problem; the log line itself stays until a restart.
   const fixed = await fixedThisBoot(bootMarker).catch(() => new Set());

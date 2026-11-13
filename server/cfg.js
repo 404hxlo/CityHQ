@@ -27,7 +27,8 @@ export const readCfg = (cfgPath) => (hostedIo ? hostedIo.read(cfgPath) : readFil
 
 export const writeCfg = (cfgPath, text) => (hostedIo ? hostedIo.write(cfgPath, text) : replaceFile(cfgPath, text));
 
-function splitComment(line) {
+/** A line's code and its comment (# or //), with quoted text kept whole. */
+export function splitComment(line) {
   let quote = null;
   for (let i = 0; i < line.length; i++) {
     const c = line[i];
@@ -81,21 +82,30 @@ function withBlock(text, mutate) {
   return [...head, '', BLOCK_START, ...next, BLOCK_END, ...tail.filter((l, i) => l.trim() !== '' || i < tail.length - 1), ''].join(eol);
 }
 
-/** server.cfg without the app's block (any of its names), for copying a server elsewhere. */
-export function removeManagedBlock(text) {
-  const eol = EOL(text);
-  const lines = text.split(/\r?\n/);
+/** The lines inside the app's block (under any of its names), or none. */
+export function managedLines(text) {
+  const lines = String(text || '').split(/\r?\n/);
   const start = lines.findIndex((l) => STARTS.includes(l));
   const end = start === -1 ? -1 : lines.findIndex((l, i) => i > start && ENDS.includes(l));
-  if (start === -1 || end === -1) return text;
-  return [...lines.slice(0, start), ...lines.slice(end + 1)].join(eol).replace(/(\r?\n){3,}/g, `${eol}${eol}`);
+  return start === -1 || end === -1 ? [] : lines.slice(start + 1, end);
 }
+
+/** The helper's own lines, which every server CityHQ manages has in the app's block. */
+export const isHelperLine = (line) => AGENT_LINES.includes(String(line).trim());
 
 /** Adds the app's block (agent permission and start line) when it is not there yet. */
 export const ensureManagedBlock = (text) => withBlock(text);
 
 /** Changes the lines inside the app's block; mutate gets the lines and may change them in place. */
 export const editManagedBlock = (text, mutate) => withBlock(text, mutate);
+
+/** Adds lines to the end of the app's block, each one once. */
+export const addToManagedBlock = (text, lines) => withBlock(text, (block) => {
+  for (const line of lines) if (!block.includes(line)) block.push(line);
+});
+
+/** Takes lines added with addToManagedBlock out of the app's block again. */
+export const removeFromManagedBlock = (text, lines) => withBlock(text, (block) => block.filter((l) => !lines.includes(l.trim())));
 
 export function addBootLine(text, name) {
   const off = `${OFF_MARKER}ensure ${name}`;

@@ -6,10 +6,11 @@ import path from 'node:path';
 import { refreshAwake } from './awake.js';
 import { createBackup } from './backups.js';
 import {
-  addBootLine, parseBoot, readCfg, removeBootLine, writeCfg,
+  addBootLine, parseBoot, readCfg, removeBootLine, removeFromManagedBlock, writeCfg,
 } from './cfg.js';
 import { dbRun, tableInfo, VALID_TABLE } from './db.js';
 import { keepVersion, SERVER_SCOPE } from './files.js';
+import { restoreLeftOut } from './move/leftout.js';
 import { HttpError, resolveInside, STATE_DIR } from './paths.js';
 import {
   isValidName, resourceAction, scanDisk, serverData, setBoot,
@@ -309,6 +310,8 @@ export async function runFix(fix) {
     await setBoot(fix.name, false, { record: false });
     return { message: `${fix.name} won't start with the server any more. You can turn it back on from Resources.`, versionId: null, undo: { type: 'boot-on', name: fix.name } };
   }
+  // What a move to a host left out of server.cfg, read again from the server on this PC.
+  if (fix.type === 'restore-moved-lines') return restoreLeftOut(changeCfg);
   throw new HttpError(400, 'Unknown fix');
 }
 
@@ -340,6 +343,8 @@ export async function undoFix(id) {
       refreshAwake();
     } else if (undo.type === 'boot-on') {
       await setBoot(undo.name, true, { record: false });
+    } else if (undo.type === 'remove-lines') {
+      await changeCfg((cfg) => removeFromManagedBlock(cfg, undo.lines));
     } else {
       throw new HttpError(400, 'Unknown undo');
     }
