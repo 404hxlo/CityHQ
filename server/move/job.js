@@ -102,14 +102,37 @@ async function sftpFor(target, secret) {
   return sftpClient({ host: target.sftp.host, port: target.sftp.port, username: target.sftp.username, password: secret.sftpPassword, hostKey: target.hostKey || null });
 }
 
-async function reachable(db) {
+/** The database's own words from a failed client run: "ERROR 1045 (28000): Access denied ...". */
+const dbError = (err) => String(err?.stderr || err?.message || '').trim().split(/\r?\n/).filter(Boolean).pop()?.replace(/^.*?(ERROR \d+)/, '$1').slice(0, 300) || null;
+const TLS_ERROR = /ssl|tls|certificate|secure transport/i;
+
+/**
+ * Signs in to a host's database from this PC: first unencrypted, then encrypted, since hosted
+ * database servers often refuse the first. Fills in db.reachable, db.ssl (which one worked),
+ * db.sslRequired (only encrypted works), db.signInError and db.passwordMissing.
+ */
+async function signIn(db) {
+  Object.assign(db, { reachable: false, ssl: false, sslRequired: false, signInError: null, passwordMissing: false });
   if (!db?.host) return false;
-  if (!(await isPortOpen(db.port || 3306, db.host, 5000).catch(() => false))) return false;
-  try {
-    await runSql({ host: db.host, port: db.port, user: db.username, password: db.password }, 'SELECT 1');
-    return true;
-  } catch { return false; }
+  if (!db.password) { db.passwordMissing = true; return false; }
+  if (!(await isPortOpen(db.port || 3306, db.host, 5000).catch(() => false))) {
+    db.signInError = 'The database server didn\'t answer at that address and port.';
+    return false;
+  }
+  const errors = [];
+  for (const ssl of [false, true]) {
+    try {
+      await runSql({ host: db.host, port: db.port, user: db.username, password: db.password, ssl }, 'SELECT 1');
+      Object.assign(db, { reachable: true, ssl, sslRequired: ssl });
+      return true;
+    } catch (err) { errors.push(dbError(err)); }
+  }
+  // The encrypted try's error says more, unless it's only about encryption itself.
+  db.signInError = (errors[1] && !TLS_ERROR.test(errors[1]) ? errors[1] : errors[0]) || null;
+  return false;
 }
+const reachable = signIn;
+const dbConn = (db) => ({ host: db.host, port: db.port, user: db.username, password: db.password, ssl: Boolean(db.ssl) });
 
 // ---------------------------------------------------------------- checking
 /**
@@ -168,15 +191,24 @@ export async function checkMove(body) {
     if (remote.type === 'panel') {
       // Some panels don't share a database's address; then it's typed in (their Databases tab).
       const typed = databaseAddress(body.databaseHost);
-      const withAddress = (d) => (d.host ? d : { ...d, host: typed?.host || null, port: typed?.port || d.port });
+      // The same for a password the panel keeps to itself (the eye button there shows it).
+      const typedPassword = typeof body.databasePassword === 'string' && body.databasePassword ? body.databasePassword : null;
+      const withAddress = (d) => ({
+        ...d,
+        host: d.host || typed?.host || null,
+        port: d.host ? d.port : (typed?.port || d.port),
+        // A password typed in wins: it's asked for when the panel's didn't work.
+        password: typedPassword || d.password,
+      });
       const wanted = databaseNameFor(localName);
       // The one chosen, or the one CityHQ made for this move before (panels add a prefix: s1_name).
       const existing = databases.find((d) => d.id === body.databaseId)
         || databases.find((d) => d.name === wanted || String(d.name || '').endsWith(`_${wanted}`));
       if (existing) {
         database = withAddress(existing);
-        database.reachable = database.host ? await reachable(database) : null;
-        if (database.reachable) database.tables = await countTables({ host: database.host, port: database.port, user: database.username, password: database.password }, database.name).catch(() => 0);
+        if (database.host) await signIn(database);
+        else database.reachable = null;
+        if (database.reachable) database.tables = await countTables(dbConn(database), database.name).catch(() => 0);
       } else {
         // A new one, made when the move starts. Until then, only the database server can be
         // tried: the host's other databases may only allow the game server to sign in.
@@ -191,8 +223,8 @@ export async function checkMove(body) {
     } else if (body.database?.host) {
       const d = body.database;
       database = { host: String(d.host).trim(), port: Number(d.port) || 3306, name: String(d.name || '').trim(), username: String(d.username || '').trim(), password: String(d.password || '') };
-      database.reachable = await reachable(database);
-      if (database.reachable) database.tables = await countTables({ host: database.host, port: database.port, user: database.username, password: database.password }, database.name).catch(() => 0);
+      await signIn(database);
+      if (database.reachable) database.tables = await countTables(dbConn(database), database.name).catch(() => 0);
     }
     facts.database = database;
     const report = preflight(facts);
@@ -204,7 +236,9 @@ export async function checkMove(body) {
       databases: databases.map(({ password, ...d }) => d),
       database: database ? {
         name: database.name, host: database.host, port: database.port, create: Boolean(database.create), reachable: database.reachable,
-        tables: database.tables ?? null, needsAddress: Boolean(database.needsAddress),
+        tables: database.tables ?? null, needsAddress: Boolean(database.needsAddress), passwordMissing: Boolean(database.passwordMissing),
+        // A password box helps when the panel kept it back, or the one it gave didn't work.
+        askPassword: Boolean(database.passwordMissing || (!database.create && database.reachable === false && database.host)),
       } : null,
       alreadyUploaded: Boolean(facts.alreadyUploaded),
       _internal: { target, found, database, zip, localName },
@@ -231,9 +265,10 @@ export async function startMove(body) {
       const panel = panelClient({ url: target.panelUrl, key: login.secret, serverId: target.serverId });
       const made = await panel.databases.create(database.create, '%');
       database = { ...made, host: made.host || database.host, port: made.host ? made.port : database.port, create: null };
-      if (!(await reachable(database))) {
+      if (!(await signIn(database))) {
         const from = made.connectionsFrom && made.connectionsFrom !== '%' ? ` It only allows connections from ${made.connectionsFrom}.` : '';
-        throw new HttpError(409, `Your host made the database "${made.name}", but this PC can't sign in to it.${from} Ask your host to let it accept connections from anywhere ("%"), then check again: CityHQ uses that database instead of making another.`);
+        const said = database.signInError ? ` The database said: ${database.signInError}` : '';
+        throw new HttpError(409, `Your host made the database "${made.name}", but this PC can't sign in to it.${from}${said} Ask your host to let it accept connections from anywhere ("%"), then check again: CityHQ uses that database instead of making another.`);
       }
     }
     saveSecret(STATE_DIR, JSON.stringify({ key: login.secret, sftpPassword: body.sftpPassword || null, dbPassword: database?.password || null }), SECRET_FILE);
@@ -469,6 +504,7 @@ export async function finishMove(body = {}) {
       if (db?.create) {
         const made = await panel.databases.create(db.create);
         db = { ...made, host: made.host || db.host, port: made.host ? made.port : db.port };
+        await signIn(db);
         s.database = { ...db, password: undefined, create: null };
         saveSecret(STATE_DIR, JSON.stringify({ ...secret, dbPassword: made.password }), SECRET_FILE);
         save();
@@ -479,7 +515,8 @@ export async function finishMove(body = {}) {
       await mkdir(MOVE_DIR, { recursive: true });
       const dump = path.join(MOVE_DIR, 'database.sql');
       await dumpDatabase(from, dump);
-      const to = { host: db.host, port: db.port, user: db.username, password: db.password };
+      // Encrypted when the host's database server needs it (found out when the move started).
+      const to = dbConn(db);
       await importFile(to, db.name, dump);
       const want = await countTables(from, from.database);
       const got = await countTables(to, db.name);

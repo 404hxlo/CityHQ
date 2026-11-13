@@ -562,6 +562,28 @@ test('checks before moving: a database address to type in, and a new database th
   assert.match(fine.items.map((i) => i.text).join(' '), /A new database, "city", is made on your host when the move starts/);
 });
 
+test('a host\'s database: the password to type in, the database\'s own error, and encryption when it\'s required', async () => {
+  const base = { localCfg: 'x', hostFound: true, resourcesBytes: 1, alreadyUploaded: true, localZipReady: true };
+  const db = { name: 's1_city', host: 'db.example.net', port: 3319 };
+  const noPassword = preflight({ ...base, database: { ...db, passwordMissing: true, reachable: false } });
+  assert.match(noPassword.items.find((i) => i.level === 'bad').text, /didn't give CityHQ the password for "s1_city"/);
+  const denied = preflight({ ...base, database: { ...db, reachable: false, signInError: 'ERROR 1045 (28000): Access denied for user \'u1\'@\'10.0.0.9\' (using password: YES)' } });
+  const deniedText = denied.items.find((i) => i.level === 'bad').text;
+  assert.match(deniedText, /The database said: ERROR 1045/);
+  assert.match(deniedText, /type its password below/);
+
+  const { connectionLine } = await import('./move/plan.js');
+  const plain = connectionLine({ ...db, username: 'u1', password: 'p w' });
+  assert.equal(plain, 'mysql://u1:p%20w@db.example.net:3319/s1_city?charset=utf8mb4');
+  const encrypted = connectionLine({ ...db, username: 'u1', password: 'pw', sslRequired: true });
+  assert.equal(new URL(encrypted).searchParams.get('ssl'), '{"rejectUnauthorized":false}');
+
+  const { clientArgs } = await import('./dbtools.js');
+  assert.ok(clientArgs({ host: 'h', port: 1, user: 'u' }).includes('--skip-ssl'), 'this PC\'s own database: unencrypted');
+  const sslArgs = clientArgs({ host: 'h', port: 1, user: 'u', ssl: true });
+  assert.ok(sslArgs.includes('--ssl') && !sslArgs.includes('--skip-ssl'));
+});
+
 test('the helper goes onto a host with its in-game page, its token and its server.cfg line', async () => {
   const { installRemoteHelper } = await import('./remote/helper.js');
   mkdirSync(path.join(ROOT, 'resources'), { recursive: true });

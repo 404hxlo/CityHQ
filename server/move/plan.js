@@ -10,10 +10,14 @@ const LICENSE = /^\s*(?:set[sra]?\s+)?sv_licenseKey\s/i;
 const quoted = (v) => `"${String(v).replace(/"/g, '')}"`;
 
 /** The database line oxmysql reads, for the host's database. */
-export function connectionLine({ host, port, username, password, name }) {
+export function connectionLine({
+  host, port, username, password, name, sslRequired,
+}) {
   const user = encodeURIComponent(username);
   const pass = password ? `:${encodeURIComponent(password)}` : '';
-  return `mysql://${user}${pass}@${host}:${port || 3306}/${name}?charset=utf8mb4`;
+  // A database server that only takes encrypted connections: oxmysql reads ssl as JSON.
+  const ssl = sslRequired ? `&ssl=${encodeURIComponent('{"rejectUnauthorized":false}')}` : '';
+  return `mysql://${user}${pass}@${host}:${port || 3306}/${name}?charset=utf8mb4${ssl}`;
 }
 
 /**
@@ -92,7 +96,14 @@ export function preflight(f) {
   if (!f.database) add('bad', 'Choose the database on your host for your data.');
   else if (f.database.needsAddress) add('bad', 'Your host\'s panel doesn\'t tell CityHQ where its databases are. Type the address below: in your panel\'s Databases tab, open a database (the eye button) and copy its Endpoint, such as abc.db.yourhost.com:3306.');
   else if (f.database.reachable === false && f.database.create) add('bad', `This PC can't reach your host's database server (${f.database.host}:${f.database.port}). Check the address, or ask your host whether databases can be reached from outside.`);
-  else if (f.database.reachable === false) add('bad', `This PC can't sign in to the host's database "${f.database.name}" (${f.database.host}:${f.database.port}). In your host's panel, allow connections to it from anywhere (often "Connections from: %"), or ask your host.`);
+  else if (f.database.passwordMissing) add('bad', `Your host's panel didn't give CityHQ the password for "${f.database.name}". Type it below: in your panel's Databases tab, the eye button shows it.`);
+  else if (f.database.reachable === false) {
+    const said = f.database.signInError ? ` The database said: ${f.database.signInError}` : '';
+    const hint = /access denied/i.test(f.database.signInError || '')
+      ? ' Check that it allows connections from anywhere ("Connections from: %") in your host\'s panel. If it does, type its password below (the eye button there shows it) and check again.'
+      : ' In your host\'s panel, allow connections to it from anywhere (often "Connections from: %"), or ask your host.';
+    add('bad', `This PC can't sign in to the host's database "${f.database.name}" (${f.database.host}:${f.database.port}).${said}${hint}`);
+  }
   else if (f.database.create) add('ok', `A new database, "${f.database.name}", is made on your host when the move starts, open to this PC so your data can be copied in.`);
   else if (f.database.tables > 0) add('warn', `The host's database "${f.database.name}" already has ${f.database.tables} tables. They'll be replaced by yours.`);
   else add('ok', `Your data goes into the host's database "${f.database.name}".`);

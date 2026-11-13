@@ -2,6 +2,12 @@
 
 Each version's section is shown in the app before it updates, and on its GitHub release page.
 
+## 1.7.2
+
+- Move to a host can sign in to hosted database servers that only take encrypted connections. CityHQ tries an ordinary connection first and an encrypted one after, and your server on the host is set up the same way.
+- When CityHQ can't sign in to your host's database, it shows the database's own error message, so you can tell a wrong password from a blocked connection.
+- If your host's panel doesn't give CityHQ a database's password, or the one it gives doesn't work, CityHQ asks you to type it (the eye button in your panel's Databases tab shows it).
+
 ## 1.7.1
 
 - Move to a host works with panels that don't share their database's address, such as RocketNode's. CityHQ looks for it in more places, and if the panel doesn't give it, asks you to type the Endpoint from your panel's Databases tab.

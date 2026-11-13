@@ -46,7 +46,11 @@ export const dbDump = () => tool('mariadb-dump.exe');
  * never on the command line, where other programs could read it.
  */
 export function clientArgs(conn) {
-  const args = [`--host=${conn.host}`, `--port=${conn.port}`, `--user=${conn.user}`, '--skip-ssl', '--default-character-set=utf8mb4'];
+  // A database on this PC is reached unencrypted. A host's database server may refuse that; then
+  // the connection is encrypted (conn.ssl). Hosts' certificates are often their own, not one
+  // Windows can check, so it isn't checked: the point is that the data isn't sent in the clear.
+  const ssl = conn.ssl ? ['--ssl', '--skip-ssl-verify-server-cert'] : ['--skip-ssl'];
+  const args = [`--host=${conn.host}`, `--port=${conn.port}`, `--user=${conn.user}`, ...ssl, '--default-character-set=utf8mb4'];
   // Logins such as MySQL 8's caching_sha2_password come from the plugins kept beside the programs.
   if (!MANAGED_DB) args.push(`--plugin-dir=${path.join(TOOLS_HOME, 'lib', 'plugin')}`);
   return args;

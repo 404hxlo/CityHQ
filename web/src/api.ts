@@ -40,6 +40,8 @@ export type MoveLogin = HostedLogin & {
   databaseId?: string;
   /** The host's database address, typed in when its panel doesn't share it (name:port). */
   databaseHost?: string;
+  /** Its password, typed in when the panel keeps it back or the one it gave doesn't work. */
+  databasePassword?: string;
   database?: { host: string; port: number; name: string; username: string; password: string };
   copyPlayersDb?: boolean;
 };
@@ -50,7 +52,7 @@ export interface MoveCheck {
   resources: { bytes: number; files: number };
   databases: { id: string; name: string; host: string; port: number; username: string }[];
   database: {
-    name: string; host: string | null; port: number; create: boolean; reachable: boolean | null; tables: number | null; needsAddress?: boolean;
+    name: string; host: string | null; port: number; create: boolean; reachable: boolean | null; tables: number | null; needsAddress?: boolean; passwordMissing?: boolean; askPassword?: boolean;
   } | null;
   alreadyUploaded: boolean;
 }

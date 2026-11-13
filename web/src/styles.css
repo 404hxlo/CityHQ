@@ -1029,4 +1029,4 @@ button.stat-card:hover { border-color: var(--line-strong); }
 .move-dot { display: inline-block; width: 10px; height: 10px; margin: 4px; border-radius: 50%; border: 2px solid var(--line-strong); }
 .move-sub { margin: 14px 0 4px; font-size: 14px; }
 .move-db-address { margin: 4px 0 14px; }
-.move-db-address .input-row .input { flex: 1 1 260px; }
+.move-db-address .input { margin-bottom: 10px; }
