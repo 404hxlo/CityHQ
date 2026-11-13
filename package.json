@@ -1,7 +1,7 @@
 {
   "name": "cityhq",
   "productName": "CityHQ",
-  "version": "1.7.2",
+  "version": "1.8.0",
   "description": "Desktop and phone dashboard for a local QBCore / txAdmin server",
   "license": "SEE LICENSE IN LICENSE.md",
   "private": true,
@@ -13,7 +13,7 @@
     "build": "npm run typecheck && vite build",
     "serve": "node server/standalone.js",
     "desktop": "electron .",
-    "test": "node --test server/fields.test.js server/browser.test.js server/automation.test.js server/remote.test.js",
+    "test": "node --test server/fields.test.js server/browser.test.js server/automation.test.js server/remote.test.js web/commands.test.ts",
     "package": "npm run build && node scripts/package.js",
     "icons": "electron scripts/make-icons.mjs"
   },

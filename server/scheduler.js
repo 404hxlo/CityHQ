@@ -251,15 +251,15 @@ function reportGameClosed() {
     level: 'alert',
     title: crashed ? 'The game server crashed' : 'The game server stopped unexpectedly',
     detail: getProcessState().game
-      ? 'txAdmin started it again, but anyone online was disconnected. Check the Overview page for anything that may have caused it.'
-      : 'It has not come back yet. Use Start or Restart on the Overview page.',
+      ? 'txAdmin started it again, but anyone online was disconnected. Check Home for anything that may have caused it.'
+      : 'It has not come back yet. Use Start or Restart on Home.',
   });
 }
 
 async function recoverServer() {
   recoveries = recoveries.filter((t) => Date.now() - t < RECOVER_WINDOW_MS);
   if (recoveries.length >= RECOVER_LIMIT) {
-    recordEvent({ level: 'alert', title: 'The server keeps going down', detail: `It stopped ${RECOVER_LIMIT} times in 15 minutes, so the app stopped restarting it. Check the Overview page, then press Start.` });
+    recordEvent({ level: 'alert', title: 'The server keeps going down', detail: `It stopped ${RECOVER_LIMIT} times in 15 minutes, so the app stopped restarting it. Check Home, then press Start.` });
     return;
   }
   let result;
@@ -299,7 +299,7 @@ function watchTick() {
   if (change.databaseStopped) recoverDatabase();
   if (change.serverDown) {
     if (getSettings().autoRecover) recoverServer();
-    else recordEvent({ level: 'alert', title: 'The server went down', detail: 'Automatic recovery is off, so use Start on the Overview page.' });
+    else recordEvent({ level: 'alert', title: 'The server went down', detail: 'Automatic recovery is off, so use Start on Home.' });
     return;
   }
   if (change.gameClosed && !followUp) {

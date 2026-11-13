@@ -417,7 +417,7 @@ const RULES = [
         key: 'database-connect',
         title: 'The server can\'t reach its database',
         what: 'QBCore stores characters, money and items in the database. Without it, players can\'t load in and nothing is saved.',
-        fix: ['Restart the server from the Overview page, which starts the database too.', 'If it keeps happening, check the database line in server.cfg hasn\'t changed.'],
+        fix: ['Restart the server from Home, which starts the database too.', 'If it keeps happening, check the database line in server.cfg hasn\'t changed.'],
         links: [DOCS.oxmysql, DOCS.mariadb, video('oxmysql connection error fix'), forum('oxmysql ECONNREFUSED')],
       });
     },

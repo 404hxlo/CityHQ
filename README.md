@@ -56,7 +56,12 @@ connection drops.
 
 ## What it does
 
-- **Overview:** start, stop and restart the server, with live CPU, memory and player counts.
+- **Home:** your server's command centre. Type what you want in plain words ("kick a player", "make it
+  rain", "add a script") or click a suggestion; everything you do shows up as a block, next to the live
+  log and a panel with players, load and anything to fix. Ctrl K brings the same box up on any page.
+- **Simple and Pro:** Simple (the default) uses forms, plain words and starting points. Pro shows command
+  syntax, the raw log and the console, and runs anything else you type as a server command.
+- **Stats:** players, CPU and memory over time, and a calendar of backups and restarts.
 - **Health:** checks for common setup problems (sleep, missing tables, start-order traps), explains
   every restart, and helps friends outside your home join.
 - **Problems in plain English:** what broke, which resource caused it, how to fix it, a link to that

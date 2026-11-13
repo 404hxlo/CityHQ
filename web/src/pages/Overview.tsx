@@ -54,7 +54,7 @@ const QBOX_RECIPE = 'Qbox';
  * A server whose txAdmin hasn't deployed QBCore or Qbox yet (a new one, or one never finished): start
  * txAdmin, show the PIN it asks for, and say exactly what to choose in its setup.
  */
-function FinishTxAdmin({ data, local }: { data: OverviewData; local: boolean }) {
+export function FinishTxAdmin({ data, local }: { data: OverviewData; local: boolean }) {
   const pin = usePoll(() => (local ? api.txAdminPin() : Promise.resolve({ pin: null, panelUp: false })), 3000, [local]);
   const { busy, run } = useAction();
   const up = Boolean(pin.data?.panelUp) || data.processes.txAdmin;

@@ -49,7 +49,7 @@ export function Learn() {
           <li>On Resources, choose Add a resource and give it the download (a GitHub link, a zip, or a folder).</li>
           <li>Read the <strong>install check</strong> that appears: it says if the script is made for another framework like <Term id="esx">ESX</Term>, what it needs (<Term id="dependency">dependencies</Term>), whether its <Term id="table">database tables</Term> exist, and what it <Term id="replaces">replaces</Term>.</li>
           <li>Run its <Term id="sql">.sql file</Term> if it has one, and follow the author's notes, which the check shows too.</li>
-          <li>Start it, then look at the Health page and the Overview for problems. If it broke something, undo it under Backups, What changed.</li>
+          <li>Start it, then look at Home and the Health page for problems. If it broke something, undo it under Backups, What changed.</li>
         </ol>
       </Section>
 

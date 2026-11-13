@@ -1,53 +1,59 @@
 import {
-  Archive, Bell, BookOpen, Boxes, Building2, CircleHelp, CloudUpload, ExternalLink, FolderOpen, Gauge, HeartPulse, KeyRound, Settings as SettingsIcon, Terminal, Users,
+  Archive, BarChart3, Bell, Boxes, Building2, CircleHelp, FolderOpen, HeartPulse, House, KeyRound, Plus, RotateCw,
+  Search as SearchIcon, Settings as SettingsIcon, Terminal, Users, X,
 } from 'lucide-react';
-import { useCallback, useEffect, useState, type ReactNode } from 'react';
-import { api, onSignedOut } from './api';
+import {
+  useCallback, useEffect, useMemo, useState, type ReactNode,
+} from 'react';
+import { api, onSignedOut, type Overview as OverviewData } from './api';
+import { CommandBox, useActionCtx } from './CommandBox';
+import { useMode } from './mode';
+import { openHomeAction } from './nav';
 import { Backups, HostedBackups } from './pages/Backups';
 import { City } from './pages/City';
 import { Console } from './pages/Console';
-import { GlobalSearch } from './Search';
 import { Files } from './pages/Files';
 import { Health } from './pages/Health';
+import { Home, RAW_ID } from './pages/Home';
 import { Learn } from './pages/Learn';
 import { Move } from './pages/Move';
-import { Tour } from './Tour';
 import { Overview } from './pages/Overview';
 import { Players } from './pages/Players';
 import { Resources } from './pages/Resources';
 import { SettingsPage } from './pages/SettingsPage';
 import { Welcome } from './pages/Welcome';
+import { Tour } from './Tour';
 import { UpdateNotice } from './Updates';
 import {
-  Button, ConfirmProvider, Notice, ServerBadge, Spinner, ToastProvider, usePoll,
+  Button, ConfirmProvider, formatBytes, Notice, ServerBadge, Spinner, ToastProvider, usePoll,
 } from './ui';
+import type { Mode } from './actions';
 
-type Page = 'overview' | 'health' | 'city' | 'resources' | 'players' | 'files' | 'backups' | 'console' | 'settings' | 'learn' | 'move';
-const NAV: { id: Page; label: string; icon: ReactNode }[] = [
-  { id: 'overview', label: 'Overview', icon: <Gauge size={20} /> },
-  { id: 'health', label: 'Health', icon: <HeartPulse size={20} /> },
-  { id: 'city', label: 'City', icon: <Building2 size={20} /> },
-  { id: 'players', label: 'Players', icon: <Users size={20} /> },
-  { id: 'resources', label: 'Resources', icon: <Boxes size={20} /> },
-  { id: 'files', label: 'Files', icon: <FolderOpen size={20} /> },
-  { id: 'backups', label: 'Backups', icon: <Archive size={20} /> },
-  { id: 'console', label: 'Console', icon: <Terminal size={20} /> },
-  { id: 'settings', label: 'Settings', icon: <SettingsIcon size={20} /> },
+type Page = 'home' | 'overview' | 'health' | 'city' | 'resources' | 'players' | 'files' | 'backups' | 'console' | 'settings' | 'learn' | 'move';
+interface NavItem { id: Page; label: string; icon: ReactNode; pro?: boolean }
+const NAV: NavItem[] = [
+  { id: 'home', label: 'Home', icon: <House size={17} /> },
+  { id: 'players', label: 'Players', icon: <Users size={17} /> },
+  { id: 'city', label: 'City', icon: <Building2 size={17} /> },
+  { id: 'resources', label: 'Resources', icon: <Boxes size={17} /> },
+  { id: 'files', label: 'Files', icon: <FolderOpen size={17} /> },
+  { id: 'backups', label: 'Backups', icon: <Archive size={17} /> },
+  { id: 'health', label: 'Health', icon: <HeartPulse size={17} /> },
+  { id: 'overview', label: 'Stats', icon: <BarChart3 size={17} /> },
+  { id: 'console', label: 'Console', icon: <Terminal size={17} />, pro: true },
 ];
-
-const HOSTED_LATER = new Set<Page>([]);
-
-// Learn isn't in the menu (which is full on phones); it's reached from the ? button, Settings and search.
-const SEARCHABLE = [
-  ...NAV,
-  { id: 'learn' as Page, label: 'Learn the basics', icon: <BookOpen size={20} /> },
-  { id: 'move' as Page, label: 'Move to a host', icon: <CloudUpload size={20} /> },
-];
-const isPage = (value: string): value is Page => SEARCHABLE.some((n) => n.id === value);
+const PAGES: Page[] = [...NAV.map((n) => n.id), 'settings', 'learn', 'move'];
+const isPage = (value: string): value is Page => (PAGES as string[]).includes(value);
 const pageFromHash = (): Page => {
   const hash = window.location.hash.slice(1);
-  return isPage(hash) ? hash : 'overview';
+  return isPage(hash) ? hash : 'home';
 };
+
+const STATE_WORD: Record<string, string> = {
+  online: 'Online', stopped: 'Off', 'panel-only': 'Game server off', starting: 'Starting', restarting: 'Restarting', stopping: 'Stopping',
+  restoring: 'Restoring', unreachable: 'Not answering',
+};
+const hhmm = (ms: number) => new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
 function Login({ onDone, startError }: { onDone: () => void; startError: string | null }) {
   const [code, setCode] = useState('');
@@ -69,7 +75,7 @@ function Login({ onDone, startError }: { onDone: () => void; startError: string 
   return (
     <main className="login">
       <form className="login-card" onSubmit={submit}>
-        <img src="/logo.svg" alt="" width={56} height={56} />
+        <img src="/logo.svg" alt="" width={52} height={52} />
         <h1>CityHQ</h1>
         <p className="muted-note">Enter the passcode shown under Settings in the app on your PC, or scan its QR code.</p>
         {error && <Notice kind="error">{error}</Notice>}
@@ -89,8 +95,68 @@ function Login({ onDone, startError }: { onDone: () => void; startError: string 
   );
 }
 
+/** Simple or Pro, at the top of every page. */
+function ModeSwitch({ mode, setMode }: { mode: Mode; setMode: (m: Mode) => void }) {
+  return (
+    <div className="mode-switch" role="radiogroup" aria-label="How much detail to show">
+      {(['simple', 'pro'] as Mode[]).map((m) => (
+        <button
+          key={m}
+          type="button"
+          role="radio"
+          aria-checked={mode === m}
+          className={mode === m ? 'on' : ''}
+          title={m === 'simple' ? 'Simple: plain words, forms and starting points' : 'Pro: command syntax, the raw log and every tool'}
+          onClick={() => setMode(m)}
+        >
+          {m === 'simple' ? 'Simple' : 'Pro'}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/** Ctrl K on any page other than Home: the same box, in a pop-up. */
+function Palette({ data, local, mode, onClose }: { data: OverviewData | null; local: boolean; mode: Mode; onClose: () => void }) {
+  const hosted = data?.hosted || null;
+  const base = useMemo(() => ({
+    online: data?.state === 'online',
+    hosted: Boolean(hosted),
+    local,
+    canPower: !hosted || hosted.capabilities.power,
+    playerCount: data?.status?.players ?? 0,
+    mode,
+  }), [data?.state, data?.status?.players, hosted, local, mode]);
+  const { ctx, ensure } = useActionCtx(base, true);
+  useEffect(() => { ensure(); }, [ensure]);
+  return (
+    <div className="overlay overlay-palette" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="palette" role="dialog" aria-modal="true" aria-label="Search or run a command">
+        <CommandBox
+          ctx={ctx}
+          mode={mode}
+          below
+          autoFocus
+          onEscape={onClose}
+          placeholder="Search players, scripts and pages, or type what you want to do"
+          onAction={(action, values) => {
+            onClose();
+            if (action.go) action.go(values);
+            else openHomeAction({ id: action.id, values, run: false });
+          }}
+          onRaw={(text) => { onClose(); openHomeAction({ id: RAW_ID, values: { text }, run: true }); }}
+          trailing={<button type="button" className="icon-btn" aria-label="Close" onClick={onClose}><X size={15} /></button>}
+        />
+        <p className="palette-hint">Enter runs or opens the highlighted one. Actions that need details open on Home.</p>
+      </div>
+    </div>
+  );
+}
+
 function Shell({ local, onSignOut }: { local: boolean; onSignOut: () => void }) {
   const [page, setPage] = useState<Page>(pageFromHash);
+  const [mode, setMode] = useMode();
+  const [palette, setPalette] = useState(false);
   const overview = usePoll(api.overview, 2500);
 
   useEffect(() => {
@@ -99,96 +165,123 @@ function Shell({ local, onSignOut }: { local: boolean; onSignOut: () => void }) 
     return () => window.removeEventListener('hashchange', onHash);
   }, []);
 
+  // Ctrl K: the command box on Home, or the pop-up anywhere else.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        if (pageFromHash() === 'home') window.dispatchEvent(new Event('qbc-focus-command'));
+        else setPalette(true);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
   const goTo = useCallback((next: string) => { window.location.hash = next; }, []);
-  const state = overview.data?.state;
+  const data = overview.data;
+  const state = data?.state;
   const online = state === 'online';
-  const hosted = overview.data?.hosted || null;
-  // Health checks and backups look at this PC's own copy of the server; hosted servers get them later.
-  const nav = hosted ? NAV.filter((n) => !HOSTED_LATER.has(n.id)) : NAV;
-  const later = hosted && HOSTED_LATER.has(page);
+  const hosted = data?.hosted || null;
+  const nav = NAV.filter((n) => !n.pro || mode === 'pro' || page === n.id);
+  const problems = data?.problems.length || 0;
+  const alerts = data?.alerts.length || 0;
+  const restartAt = data?.schedule?.pendingRestart?.at || data?.schedule?.nextRestart || null;
 
   // A downloaded copy that hasn't been connected to a server yet starts on the Welcome screen.
-  if (overview.data && overview.data.folderFound === false) return <Welcome local={local} />;
+  if (data && data.folderFound === false) {
+    return (
+      <>
+        <div className="titlebar titlebar-min"><img src="/logo.svg" alt="" width={18} height={18} /><span>CityHQ</span></div>
+        <Welcome local={local} />
+      </>
+    );
+  }
 
   return (
-    <div className="shell">
-      <nav className="rail" aria-label="Main">
-        <div className="brand">
-          <img src="/logo.svg" alt="" width={30} height={30} />
-          <span>CityHQ</span>
+    <div className={`app mode-${mode}`}>
+      <header className="titlebar">
+        <img className="tb-logo" src="/logo.svg" alt="" width={18} height={18} />
+        <div className="tb-tab" title={hosted ? `${data?.serverName} on ${hosted.label}` : data?.serverName}>
+          <i className={`tb-dot state-${state || 'none'}`} />
+          <span className="tb-name">{data?.serverName || 'CityHQ'}</span>
+          {hosted && <span className="tb-host">{hosted.label}</span>}
         </div>
+        <a className="tb-plus" href="#settings" title="Change server, or move to a host (in Settings)" aria-label="Change server"><Plus size={15} /></a>
+        <span className="tb-drag" />
+        <button type="button" className="tb-search" onClick={() => (page === 'home' ? window.dispatchEvent(new Event('qbc-focus-command')) : setPalette(true))}>
+          <SearchIcon size={14} /><span>Search or run a command</span><kbd>Ctrl K</kbd>
+        </button>
+        <ModeSwitch mode={mode} setMode={setMode} />
+        <a className="tb-icon tb-help" href="#learn" title="Learn the basics" aria-label="Learn the basics"><CircleHelp size={16} /></a>
+        <a className="tb-icon" href="#home" title={alerts ? `${alerts} alert${alerts === 1 ? '' : 's'} on Home` : 'No alerts'} aria-label={`${alerts} alerts`}>
+          <Bell size={16} />{alerts > 0 && <span className="tb-badge">{alerts}</span>}
+        </a>
+        <span className="tb-caption-space" aria-hidden="true" />
+      </header>
+
+      <div className="topbar">
+        <img src="/logo.svg" alt="" width={24} height={24} />
+        <span className="topbar-name">{data?.serverName || 'CityHQ'}</span>
+        {state && <ServerBadge state={state} />}
+        <button type="button" className="icon-btn" aria-label="Search or run a command" onClick={() => (page === 'home' ? window.dispatchEvent(new Event('qbc-focus-command')) : setPalette(true))}><SearchIcon size={18} /></button>
+      </div>
+
+      <nav className="sidenav" aria-label="Main">
         <ul>
           {nav.map((n) => (
             <li key={n.id}>
-              <a href={`#${n.id}`} className={page === n.id ? 'active' : ''} aria-current={page === n.id ? 'page' : undefined}>
+              <a href={`#${n.id}`} title={n.label} className={page === n.id ? 'active' : ''} aria-current={page === n.id ? 'page' : undefined}>
                 {n.icon}<span>{n.label}</span>
+                {n.id === 'players' && online && data?.status ? <small className="nav-n">{data.status.players}</small> : null}
+                {n.id === 'health' && problems > 0 ? <small className="nav-c">{problems}</small> : null}
               </a>
             </li>
           ))}
         </ul>
-        <div className="rail-foot">
-          <div className="server-card">
-            <div className="server-card-head">
-              <img src="/logo-small.svg" alt="" width={22} height={22} />
-              <strong>{overview.data?.serverName || 'Your server'}</strong>
-            </div>
-            {state && <ServerBadge state={state} />}
-            <span className="muted-note">
-              {online && overview.data?.status ? `${overview.data.status.players} of ${overview.data.status.maxClients} players` : 'Not running'}
-            </span>
-            {local && overview.data && !hosted && (
-              <a className="btn btn-default server-card-btn" href={`http://localhost:${overview.data.txAdminPort}`} target="_blank" rel="noreferrer"><ExternalLink size={15} /><span>Open txAdmin</span></a>
-            )}
-            {hosted?.panelUrl && (
-              <a className="btn btn-default server-card-btn" href={hosted.panelUrl} target="_blank" rel="noreferrer"><ExternalLink size={15} /><span>Open your host's panel</span></a>
-            )}
-          </div>
+        <div className="sidenav-foot">
+          <a href="#settings" className={`sidenav-settings ${page === 'settings' ? 'active' : ''}`} aria-current={page === 'settings' ? 'page' : undefined}>
+            <SettingsIcon size={17} /><span>Settings</span>
+          </a>
         </div>
       </nav>
 
-      <div className="topbar">
-        <img src="/logo.svg" alt="" width={26} height={26} />
-        <span className="topbar-name">{overview.data?.serverName || 'CityHQ'}</span>
-        {state && <ServerBadge state={state} />}
-      </div>
-
-      <main className={`content ${page === 'console' ? 'content-console' : ''} ${page === 'files' ? 'content-files' : ''}`}>
-        {page !== 'console' && page !== 'files' && (
-          <header className="app-header">
-            <GlobalSearch pages={SEARCHABLE} />
-            <div className="app-header-right">
-              <a className="header-bell header-help" href="#learn" aria-label="Learn the basics" title="Learn the basics">
-                <CircleHelp size={18} />
-              </a>
-              <button className="header-bell" aria-label={`${overview.data?.alerts.length || 0} alerts`} title="Alerts" onClick={() => goTo('overview')}>
-                <Bell size={18} />
-                {(overview.data?.alerts.length || 0) > 0 && <span className="bell-dot">{overview.data?.alerts.length}</span>}
-              </button>
-              <div className="header-chip">
-                <img src="/logo.svg" alt="" width={30} height={30} />
-                <span>
-                  <strong>{overview.data?.serverName || 'CityHQ'}</strong>
-                  <span className="muted-note">{online ? 'Live' : state === 'stopped' ? 'Offline' : state ? 'Working' : ''}</span>
-                </span>
-              </div>
-            </div>
-          </header>
+      <main className={`main page-${page}`}>
+        {page === 'home' && <Home data={data} error={overview.error} refresh={overview.refresh} local={local} mode={mode} />}
+        {page !== 'home' && (
+          <div className={`content ${page === 'console' ? 'content-console' : ''} ${page === 'files' ? 'content-files' : ''}`}>
+            {local && data?.update && page !== 'console' && page !== 'files' && <UpdateNotice version={data.update.version} />}
+            {page === 'overview' && <Overview data={data} error={overview.error} refresh={overview.refresh} local={local} goTo={goTo} />}
+            {page === 'health' && <Health hosted={Boolean(hosted)} />}
+            {page === 'city' && <City online={online} helperOutdated={Boolean(data?.helperOutdated)} />}
+            {page === 'resources' && <Resources />}
+            {page === 'players' && <Players gamePort={data?.gamePort ?? 30121} />}
+            {page === 'files' && <Files online={online} />}
+            {page === 'backups' && (hosted ? <HostedBackups /> : <Backups />)}
+            {page === 'console' && <Console online={online} />}
+            {page === 'settings' && <SettingsPage online={online} onSignOut={onSignOut} />}
+            {page === 'learn' && <Learn />}
+            {page === 'move' && (hosted ? <Notice kind="info">This CityHQ runs a hosted server already. Moving works from a server on this PC.</Notice> : local ? <Move /> : <Notice kind="info">Moving a server is done on the PC that runs it.</Notice>)}
+          </div>
         )}
-        {local && overview.data?.update && page !== 'console' && page !== 'files' && <UpdateNotice version={overview.data.update.version} />}
-        {page === 'overview' && <Overview data={overview.data} error={overview.error} refresh={overview.refresh} local={local} goTo={goTo} />}
-        {later && <Notice kind="info">This page isn't available for hosted servers yet. It's coming in a later version of CityHQ.</Notice>}
-        {page === 'health' && !later && <Health hosted={Boolean(hosted)} />}
-        {page === 'city' && <City online={online} helperOutdated={Boolean(overview.data?.helperOutdated)} />}
-        {page === 'resources' && <Resources />}
-        {page === 'players' && <Players gamePort={overview.data?.gamePort ?? 30121} />}
-        {page === 'files' && <Files online={online} />}
-        {page === 'backups' && !later && (hosted ? <HostedBackups /> : <Backups />)}
-        {page === 'console' && <Console online={online} />}
-        {page === 'settings' && <SettingsPage online={online} onSignOut={onSignOut} />}
-        {page === 'learn' && <Learn />}
-        {page === 'move' && (hosted ? <Notice kind="info">This CityHQ runs a hosted server already. Moving works from a server on this PC.</Notice> : local ? <Move /> : <Notice kind="info">Moving a server is done on the PC that runs it.</Notice>)}
       </main>
-      <Tour autoStart={Boolean(overview.data?.deployed)} />
+
+      <footer className="statusbar">
+        <span className={`sb-state state-${state || 'none'}`}><i />{state ? STATE_WORD[state] || state : 'Connecting'}</span>
+        {online && data?.status && <span><Users size={12} />{data.status.players} / {data.status.maxClients}</span>}
+        {online && data && data.stats.cpuPct !== null && <span>CPU {Math.round(data.stats.cpuPct)}%</span>}
+        {online && data?.stats.memBytes ? <span>{formatBytes(data.stats.memBytes)}</span> : null}
+        {data && !data.processes.database && !hosted && state !== 'stopped' && <span className="sb-bad">Database off</span>}
+        <span className="sb-space" />
+        {restartAt && online && <span><RotateCw size={12} />Restart at {hhmm(restartAt)}</span>}
+        {data?.schedule?.nextBackup ? <span><Archive size={12} />Backup at {hhmm(data.schedule.nextBackup)}</span> : null}
+        {data?.helperOutdated && online && <span title="CityHQ's helper on the server updates when the server restarts">Helper updates at next restart</span>}
+        {local && data?.update && <a className="sb-accent" href="#settings">CityHQ {data.update.version} is ready</a>}
+        <span>{hosted ? hosted.label : 'This PC'}</span>
+      </footer>
+
+      {palette && <Palette data={data} local={local} mode={mode} onClose={() => setPalette(false)} />}
+      <Tour autoStart={Boolean(data?.deployed)} />
     </div>
   );
 }

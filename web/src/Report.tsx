@@ -96,7 +96,7 @@ function ReportDialog({ onClose }: { onClose: () => void }) {
       )}
     >
       <p className="muted-note">
-        For problems with CityHQ itself. For a script or the server, the Problems list on the Overview and the Health page usually explain what to do.
+        For problems with CityHQ itself. For a script or the server, Things to fix on Home and the Health page usually explain what to do.
         Nothing is sent until you look over the report and choose to.
       </p>
       <label className="input-label" htmlFor="report-what">What went wrong?</label>

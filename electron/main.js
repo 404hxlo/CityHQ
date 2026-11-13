@@ -81,8 +81,13 @@ function createWindow() {
     minHeight: size.minHeight,
     center: true,
     title: 'CityHQ',
-    backgroundColor: '#0a0b11',
+    backgroundColor: '#0b0b0d',
     autoHideMenuBar: true,
+    // CityHQ draws its own title bar (server tab, search, Simple/Pro); Windows keeps its own
+    // minimise, maximise and close buttons, drawn on top in CityHQ's colours.
+    titleBarStyle: 'hidden',
+    // One pixel shorter than the bar, so its bottom line runs under the buttons too.
+    titleBarOverlay: { color: '#08080a', symbolColor: '#a0a0ab', height: 39 },
     icon: iconPath,
     show: false,
     webPreferences: { contextIsolation: true, sandbox: true, nodeIntegration: false },

@@ -2,6 +2,17 @@
 
 Each version's section is shown in the app before it updates, and on its GitHub release page.
 
+## 1.8.0
+
+- **A new look.** CityHQ is now a proper desktop app: its own title bar with your server's name and Windows' own window buttons, a menu down the side, a status bar along the bottom, and calm dark panels instead of glowing cards.
+- **A new Home page.** Type what you want to do in your own words, like "kick a player", "make it rain" or "give Lena a bandage". Suggestions show as you type. Things that need details open a short form, and risky ones (kick, ban, stop, restart) always ask first.
+- Everything you do on Home shows up there as a block, with the result. The live log is right underneath, and a panel beside it shows who's on, how hard the server is working, anything to fix and what's coming up.
+- **Simple and Pro.** Simple, the default, adds a welcome, clickable starting points, and plain-word summaries of the log. Pro shows the command for everything, the raw log, the console, and runs anything else you type as a server command, like txAdmin. Switch at the top right.
+- **Ctrl K** brings up the same box on any page to find a player, a script or a page, or to start an action.
+- The old dashboard is now **Stats**: players, CPU and memory over time, and the calendar.
+- The banner preview on the City page now looks like the in-game announcement.
+- Settings' "New to running a server?" card no longer leaves a big empty space.
+
 ## 1.7.2
 
 - Move to a host can sign in to hosted database servers that only take encrypted connections. CityHQ tries an ordinary connection first and an encrypted one after, and your server on the host is set up the same way.

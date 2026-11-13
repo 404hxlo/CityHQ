@@ -10,7 +10,7 @@ function locationIn(text: string) {
   return m ? { resource: m[1], file: m[2], line: Number(m[3]) } : null;
 }
 
-function ConsoleRow({ line }: { line: ConsoleLine }) {
+export function ConsoleRow({ line }: { line: ConsoleLine }) {
   const toast = useToast();
   const location = line.level === 'error' ? locationIn(line.text) : null;
   const open = async () => {

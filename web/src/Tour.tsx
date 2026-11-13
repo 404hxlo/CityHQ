@@ -7,17 +7,19 @@ const START_EVENT = 'cityhq-start-tour';
 interface Step { target?: string; title: string; text: string }
 
 const STEPS: Step[] = [
-  { title: 'Welcome to CityHQ', text: 'A one-minute tour of where everything is. You can replay it any time from Settings or the Learn page.' },
-  { target: '#overview', title: 'Overview', text: 'Whether the server is running, who\'s on, and anything that needs attention, with the problem explained and a fix button when there\'s a safe one.' },
-  { target: '#health', title: 'Health', text: 'Checks for common setup problems, explains why the server restarted, and walks you through letting friends join.' },
-  { target: '#city', title: 'City', text: 'Change the weather and time, show announcements to everyone, and manage who\'s allowed in.' },
+  { title: 'Welcome to CityHQ', text: 'A one-minute look around. You can replay it any time from Home, Settings or the Learn page.' },
+  { target: '.cmdbox', title: 'Type what you want', text: 'Say it in your own words, like "kick a player", "make it rain" or "add a script". Suggestions show as you type; Enter runs or opens the best one. Everything here also has a button.' },
+  { target: '#home', title: 'Home', text: 'What\'s going on right now, everything you\'ve done, and the live log. The panel beside it shows players, how hard the server is working, and anything to fix.' },
   { target: '#players', title: 'Players', text: 'Help the people who are on: heal, teleport, give items or money, change jobs, kick or ban.' },
+  { target: '#city', title: 'City', text: 'Change the weather and time, show announcements to everyone, and manage who\'s allowed in.' },
   { target: '#resources', title: 'Resources', text: 'Your scripts. Add new ones (each gets an install check), start or stop them, and choose which start with the server.' },
   { target: '#files', title: 'Files', text: 'Open and edit any server file. Every save keeps a backup, and mistakes are caught before they reach the server.' },
   { target: '#backups', title: 'Backups', text: 'Back up and restore the server, and see "What changed": every change made through CityHQ, with Undo.' },
-  { target: '#console', title: 'Console', text: 'The server\'s live log, and a place to type server commands.' },
-  { target: '#settings', title: 'Settings', text: 'Automatic backups, keeping the PC awake, phone access, your server profile and admin roles.' },
-  { target: '.header-help', title: 'Help when you need it', text: 'Dotted words explain themselves when you point at or tap them. The Learn page covers the basics and every term.' },
+  { target: '#health', title: 'Health', text: 'Checks for common setup problems, explains why the server restarted, and walks you through letting friends join.' },
+  { target: '#overview', title: 'Stats', text: 'Players, CPU and memory over time, and a calendar of backups and restarts.' },
+  { target: '.mode-switch', title: 'Simple or Pro', text: 'Simple keeps things plain, with forms and starting points. Pro shows command syntax, the raw log and the console. Switch whenever you like.' },
+  { target: '#settings', title: 'Settings', text: 'Automatic backups and restarts, keeping the PC awake, phone access, your server profile and admin roles.' },
+  { target: '.tb-help', title: 'Help when you need it', text: 'Dotted words explain themselves when you point at or tap them. The Learn page covers the basics and every term.' },
 ];
 
 const done = () => { try { return localStorage.getItem(DONE_KEY) === '1'; } catch { return true; } };
@@ -29,7 +31,7 @@ export const startTour = () => window.dispatchEvent(new Event(START_EVENT));
 function targetOf(step: Step): Element | null {
   if (!step.target) return null;
   if (step.target.startsWith('#')) {
-    const link = document.querySelector(`.rail a[href="${step.target}"]`);
+    const link = document.querySelector(`.sidenav a[href="${step.target}"]`);
     if (link && link.getBoundingClientRect().width > 0) return link;
   }
   const el = document.querySelector(step.target);

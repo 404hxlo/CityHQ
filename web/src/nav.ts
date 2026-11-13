@@ -46,6 +46,23 @@ export function takePlayerTarget() {
   return value;
 }
 
+/** An action chosen somewhere else (the Ctrl K box on another page), to open on Home. */
+export interface HomeAction { id: string; values: Record<string, string | number | boolean | undefined>; run: boolean }
+let homeAction: HomeAction | null = null;
+
+export function openHomeAction(action: HomeAction) {
+  homeAction = action;
+  const hash = window.location.hash;
+  if (hash === '#home' || hash === '' || hash === '#') window.dispatchEvent(new Event('qbc-home-action'));
+  else window.location.hash = 'home';
+}
+
+export function takeHomeAction() {
+  const value = homeAction;
+  homeAction = null;
+  return value;
+}
+
 export function takeResourceTargets() {
   const value = { name: resourceTarget, addUrl: addResourceUrl };
   resourceTarget = null;

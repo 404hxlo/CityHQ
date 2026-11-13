@@ -142,7 +142,7 @@ export function HostedBackups() {
       confirm: 'Stop and restore',
       danger: true,
     });
-    if (ok && await run(`restore:${id}`, () => api.restoreHostBackup(id), 'Your host is restoring it. Start the server from the Overview page when it\'s done.')) refresh();
+    if (ok && await run(`restore:${id}`, () => api.restoreHostBackup(id), 'Your host is restoring it. Start the server from Home when it\'s done.')) refresh();
   };
   const download = async (id: string) => {
     const r = await run(`dl:${id}`, () => api.hostBackupLink(id));

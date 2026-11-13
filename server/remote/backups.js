@@ -99,7 +99,7 @@ export async function restoreHostBackup(id) {
   await p.power('stop').catch(() => {});
   for (let i = 0; i < 30 && (await p.resources().catch(() => ({ state: 'offline' }))).state !== 'offline'; i++) await new Promise((r) => setTimeout(r, 2000));
   await p.backups.restore(id);
-  recordEvent({ title: 'Your host is restoring a backup', detail: 'The server stays off while the host puts the files back. Start it from the Overview page when it\'s done.' });
+  recordEvent({ title: 'Your host is restoring a backup', detail: 'The server stays off while the host puts the files back. Start it from Home when it\'s done.' });
   return { restoring: true };
 }
 
