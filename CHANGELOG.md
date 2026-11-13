@@ -2,6 +2,11 @@
 
 Each version's section is shown in the app before it updates, and on its GitHub release page.
 
+## 1.8.1
+
+- On Home, **See all** under Things to fix opens the whole list, with its fixes, right there. Before, it sent you to the Health page, which has its own checks rather than this list, and on a phone it miscounted how many more there were.
+- The red count of things to fix now sits on Home in the menu, where they're listed, instead of on Health.
+
 ## 1.8.0
 
 - **A new look.** CityHQ is now a proper desktop app: its own title bar with your server's name and Windows' own window buttons, a menu down the side, a status bar along the bottom, and calm dark panels instead of glowing cards.

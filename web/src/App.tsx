@@ -234,7 +234,8 @@ function Shell({ local, onSignOut }: { local: boolean; onSignOut: () => void }) 
               <a href={`#${n.id}`} title={n.label} className={page === n.id ? 'active' : ''} aria-current={page === n.id ? 'page' : undefined}>
                 {n.icon}<span>{n.label}</span>
                 {n.id === 'players' && online && data?.status ? <small className="nav-n">{data.status.players}</small> : null}
-                {n.id === 'health' && problems > 0 ? <small className="nav-c">{problems}</small> : null}
+                {/* Things to fix are listed on Home, so that's where their count shows. */}
+                {n.id === 'home' && problems > 0 ? <small className="nav-c" title={`${problems} thing${problems === 1 ? '' : 's'} to fix`}>{problems}</small> : null}
               </a>
             </li>
           ))}

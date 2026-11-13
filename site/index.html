@@ -4,11 +4,11 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>CityHQ: a Windows app for running a QBCore or Qbox server</title>
-<meta name="description" content="CityHQ is a free Windows app that runs a QBCore or Qbox FiveM server: it starts txAdmin, explains errors in plain words, fixes what it safely can, backs everything up, and can undo every change it makes.">
+<meta name="description" content="CityHQ is a free Windows app that runs a QBCore or Qbox FiveM server: type what you want in plain words, see what broke and how to fix it, and back everything up. Every change it makes can be undone.">
 <meta property="og:title" content="CityHQ: a Windows app for running a QBCore or Qbox server">
-<meta property="og:description" content="Free. Explains what broke and how to fix it, checks the setup, backs up every night, and undoes every change it makes.">
+<meta property="og:description" content="Free. Type what you want in plain words, see what broke and how to fix it, back up every night, and undo every change it makes.">
 <meta property="og:type" content="website">
-<meta property="og:image" content="img/overview.jpg">
+<meta property="og:image" content="img/home.jpg">
 <meta name="theme-color" content="#f4f0e6">
 <link rel="icon" href="img/logo.svg" type="image/svg+xml">
 <style>
@@ -153,7 +153,7 @@ footer p { margin: 0; max-width: 38em; }
 <main id="main">
   <div class="opening col">
     <h1>CityHQ runs your QBCore or Qbox server, and tells you what's wrong with it in plain words.</h1>
-    <p>It's a free Windows app. It starts txAdmin, watches the console, fixes what it safely can and backs everything up. <mark>Every change it makes can be undone.</mark></p>
+    <p>It's a free Windows app. Type what you want in plain words, like "kick a player" or "make it rain", or click a suggestion. It watches the console, fixes what it safely can and backs everything up. <mark>Every change it makes can be undone.</mark></p>
     <div class="get">
       <a class="button" href="https://github.com/404hxlo/CityHQ/releases/latest/download/CityHQ-windows.zip">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg>
@@ -165,19 +165,19 @@ footer p { margin: 0; max-width: 38em; }
 
   <div class="figure wide">
     <div class="photo">
-      <img src="img/overview.jpg" width="2000" height="1250" alt="CityHQ's Overview page for a made-up server called Sunset Bay RP: online, with Restart, Stop and Announce buttons, cards for players and scripts, a player activity chart and a calendar.">
-      <span class="pin" style="left: 18.6%; top: 29%"><span>1</span></span>
-      <span class="pin" style="left: 66%; top: 48.8%"><span>2</span></span>
-      <span class="pin" style="left: 43%; top: 70%"><span>3</span></span>
-      <span class="pin" style="left: 78.5%; top: 15.5%"><span>4</span></span>
+      <img src="img/home.jpg" width="2000" height="1250" alt="CityHQ's Home for a made-up server called Sunset Bay RP: a welcome with setup checks, the server online with its join command, six things to do as cards, the live log, a box to type what you want, and a panel with players, load and things to fix.">
+      <span class="pin" style="left: 58%; top: 88.6%"><span>1</span></span>
+      <span class="pin" style="left: 29.6%; top: 55.8%"><span>2</span></span>
+      <span class="pin" style="left: 86.8%; top: 38.2%"><span>3</span></span>
+      <span class="pin" style="left: 70.3%; top: 8.4%"><span>4</span></span>
     </div>
     <ol class="notes">
-      <li><b>1</b><span>Restart warns everyone in game first, and saves them.</span></li>
-      <li><b>2</b><span>Things CityHQ noticed. Each one says what it is and what to do.</span></li>
-      <li><b>3</b><span>Who was on, over the last day or week.</span></li>
-      <li><b>4</b><span>What your friends type in FiveM to join.</span></li>
+      <li><b>1</b><span>Type what you want, in your own words.</span></li>
+      <li><b>2</b><span>New to this? Start with a click.</span></li>
+      <li><b>3</b><span>Anything wrong, in plain words, with how to fix it.</span></li>
+      <li><b>4</b><span>Simple or Pro: as much detail as you like.</span></li>
     </ol>
-    <p class="caption"><strong>Fig. 1</strong> The Overview. The city and names are made up.</p>
+    <p class="caption"><strong>Fig. 1</strong> Home, the way it looks the first time. The city and names are made up.</p>
   </div>
 
   <hr class="rule">
@@ -192,31 +192,59 @@ footer p { margin: 0; max-width: 38em; }
           <p>Point it at the server you already have, and it reads txAdmin's settings, the ports and the database, including XAMPP's MySQL. No server yet? It downloads FiveM's server and a database into one folder and walks you through txAdmin.</p>
         </li>
         <li>
-          <h3>Tells you what broke</h3>
-          <p>Errors in the console become a short list, most serious first: which script, what happened, and the steps to fix it. A button opens that script's files, and there's a link to its own documentation.</p>
+          <h3>Does what you ask</h3>
+          <p>Type it the way you'd say it: "kick a player", "make it rain", "give Lena a bandage". Suggestions show as you type, and anything that needs details opens a short form. Kicks, bans, stops and restarts always ask first. Simple mode keeps it plain; Pro mode shows the commands, the raw log and the console.</p>
         </li>
       </ol>
     </div>
   </section>
 
   <div class="figure wide">
-    <div class="photo right narrow">
-      <img src="img/problems.jpg" width="1515" height="1770" alt="A list of problems: one script hit an error, another needs a script that isn't installed. Each has numbered steps to fix it and a button to open the script." loading="lazy">
-      <span class="pin" style="left: 52%; top: 9.8%"><span>1</span></span>
-      <span class="pin" style="left: 20.5%; top: 17.2%"><span>2</span></span>
-      <span class="pin" style="left: 33.5%; top: 25.6%"><span>3</span></span>
+    <div class="photo right">
+      <img src="img/form.jpg" width="2000" height="1250" alt="Home with a short form open: Tell everyone something, a message about a car meet, a Big banner switch and a Send button, with a note saying the same thing can be typed next time." loading="lazy">
+      <span class="pin" style="left: 40.5%; top: 54.9%"><span>1</span></span>
+      <span class="pin" style="left: 31.8%; top: 75%"><span>2</span></span>
+      <span class="pin" style="left: 50.3%; top: 75%"><span>3</span></span>
     </div>
     <ol class="notes">
-      <li><b>1</b><span>The script, by name, and what went wrong.</span></li>
-      <li><b>2</b><span>What to do about it, step by step.</span></li>
-      <li><b>3</b><span>Opens the script's files in CityHQ.</span></li>
+      <li><b>1</b><span>A short form instead of a command.</span></li>
+      <li><b>2</b><span>Nothing happens until you press it.</span></li>
+      <li><b>3</b><span>Next time, just type it. It teaches you as you go.</span></li>
     </ol>
-    <p class="caption"><strong>Fig. 2</strong> The problems list on the Overview.</p>
+    <p class="caption"><strong>Fig. 2</strong> An announcement, started from a card on Home.</p>
   </div>
 
   <section class="section">
     <div class="col">
       <ol class="does" style="counter-reset: does 2">
+        <li>
+          <h3>Tells you what broke</h3>
+          <p>Errors in the console become a short list on Home, most serious first: which script, what happened, and the steps to fix it. A button opens that script's files, and there's a link to its own documentation.</p>
+        </li>
+      </ol>
+    </div>
+  </section>
+
+  <div class="figure wide">
+    <div class="photo">
+      <img src="img/problem.jpg" width="1516" height="648" alt="One problem explained: a script hit an error, so that feature may not work, with two numbered steps to fix it, a button to open the script, and links to its documentation." loading="lazy">
+      <span class="pin" style="left: 35.6%; top: 25.6%"><span>1</span></span>
+      <span class="pin" style="left: 61.3%; top: 53.5%"><span>2</span></span>
+      <span class="pin" style="left: 29.4%; top: 68.2%"><span>3</span></span>
+      <span class="pin" style="left: 56.1%; top: 79.5%"><span>4</span></span>
+    </div>
+    <ol class="notes">
+      <li><b>1</b><span>The script, by name, and what went wrong.</span></li>
+      <li><b>2</b><span>What to do about it, step by step.</span></li>
+      <li><b>3</b><span>Opens the script's files in CityHQ.</span></li>
+      <li><b>4</b><span>Its own documentation, found for you.</span></li>
+    </ol>
+    <p class="caption"><strong>Fig. 3</strong> One problem, opened from Home.</p>
+  </div>
+
+  <section class="section">
+    <div class="col">
+      <ol class="does" style="counter-reset: does 3">
         <li>
           <h3>Checks the setup</h3>
           <p>The usual reasons a new server keeps falling over: the PC going to sleep, missing database tables, scripts starting in the wrong order, and friends outside your home who can't join. It also explains every restart in the last day.</p>
@@ -231,20 +259,20 @@ footer p { margin: 0; max-width: 38em; }
 
   <div class="figure wide">
     <div class="photo">
-      <img src="img/health.jpg" width="2000" height="1250" alt="The Health page: two things to look at, one with a fix button, and a list of recent fixes, each with an Undo button." loading="lazy">
-      <span class="pin" style="left: 44.5%; top: 42.5%"><span>1</span></span>
-      <span class="pin" style="left: 92.5%; top: 67.6%"><span>2</span></span>
+      <img src="img/health.jpg" width="2000" height="1250" alt="The Health page: one thing to look at, friends outside the home can't join yet, with a Show me how button; nine checks that look good; and the steps for letting friends join, router included." loading="lazy">
+      <span class="pin" style="left: 32%; top: 34.8%"><span>1</span></span>
+      <span class="pin" style="left: 72%; top: 56.8%"><span>2</span></span>
     </div>
     <ol class="notes">
-      <li><b>1</b><span>A fix button. It asks before it changes anything.</span></li>
-      <li><b>2</b><span>Changed your mind? Undo.</span></li>
+      <li><b>1</b><span>Something to look at, and the way to sort it out.</span></li>
+      <li><b>2</b><span>Friends can't join from outside? The steps for your own router.</span></li>
     </ol>
-    <p class="caption"><strong>Fig. 3</strong> The Health page.</p>
+    <p class="caption"><strong>Fig. 4</strong> The Health page.</p>
   </div>
 
   <section class="section">
     <div class="col">
-      <ol class="does" style="counter-reset: does 4">
+      <ol class="does" style="counter-reset: does 5">
         <li>
           <h3>Looks after your scripts</h3>
           <p>Add one from a zip, a folder or a GitHub link. Before it goes live, an install check says whether it works with your framework, what it needs and which database tables it creates. Settings files open as simple forms, and every save keeps a copy of the file as it was.</p>
@@ -256,19 +284,19 @@ footer p { margin: 0; max-width: 38em; }
   <div class="figure wide">
     <div class="photo right">
       <img src="img/install-check.jpg" width="2000" height="1250" alt="A script opened in CityHQ: the install check says it works with QBCore, and its config.lua is shown as settings with switches and text boxes." loading="lazy">
-      <span class="pin" style="left: 69%; top: 24%"><span>1</span></span>
-      <span class="pin" style="left: 70%; top: 56%"><span>2</span></span>
+      <span class="pin" style="left: 69.8%; top: 23.8%"><span>1</span></span>
+      <span class="pin" style="left: 65%; top: 56.2%"><span>2</span></span>
     </div>
     <ol class="notes">
       <li><b>1</b><span>The install check: does it fit your server, and what does it need?</span></li>
       <li><b>2</b><span><code>config.lua</code> as plain settings, no code.</span></li>
     </ol>
-    <p class="caption"><strong>Fig. 4</strong> One script, opened from the Resources page.</p>
+    <p class="caption"><strong>Fig. 5</strong> One script, opened from the Resources page.</p>
   </div>
 
   <section class="section">
     <div class="col">
-      <ol class="does" style="counter-reset: does 5">
+      <ol class="does" style="counter-reset: does 6">
         <li>
           <h3>Runs the city</h3>
           <p>Weather and time for everyone, a big announcement across every screen, revive everyone, clear empty cars, and a whitelist. For players: heal, teleport, items, money, jobs, kicks and bans, with no commands to type.</p>
@@ -280,7 +308,7 @@ footer p { margin: 0; max-width: 38em; }
         <li>
           <h3>Works from your phone</h3>
           <div class="phone-row">
-            <div class="photo"><img src="img/phone.jpg" width="780" height="1688" alt="CityHQ's Overview on a phone." loading="lazy"></div>
+            <div class="photo"><img src="img/phone.jpg" width="780" height="1688" alt="CityHQ's Home on a phone: the server online, players, load, one thing to fix, and the box to type what you want." loading="lazy"></div>
             <p>Turn on phone access and scan the QR code. The same dashboard works on any phone on your home Wi-Fi. It isn't reachable from the internet.</p>
           </div>
         </li>

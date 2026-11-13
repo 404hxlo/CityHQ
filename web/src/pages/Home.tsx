@@ -19,7 +19,7 @@ import { CommandBox, useActionCtx } from '../CommandBox';
 import { findNamed, normalize, playerName } from '../commands';
 import { readStored, useStored, writeStored } from '../mode';
 import { takeHomeAction } from '../nav';
-import { ProblemCard } from '../Problems';
+import { ProblemCard, ProblemList, RecentFixes } from '../Problems';
 import { startTour } from '../Tour';
 import {
   Button, formatBytes, formatUptime, Modal, Notice, Spinner, Toggle, useConfirm, usePoll, useToast,
@@ -638,6 +638,7 @@ function HomeSide({ data, dash, mode, onStart, refresh }: {
   data: OverviewData; dash: Dashboard | null; mode: Mode; onStart: (id: string) => void; refresh: () => void;
 }) {
   const [problem, setProblem] = useState<Problem | null>(null);
+  const [all, setAll] = useState(false);
   const hosted = data.hosted || null;
   const canPower = !hosted || hosted.capabilities.power;
   const online = data.state === 'online';
@@ -696,7 +697,7 @@ function HomeSide({ data, dash, mode, onStart, refresh }: {
             <button type="button" className="link-plain side-link" onClick={() => setProblem(p)}>{p.actions.some((a) => a.kind === 'fix') ? 'Fix it' : 'See how to fix it'}</button>
           </div>
         ))}
-        {data.problems.length > 3 && <a className="link-plain side-link side-more" href="#health">{data.problems.length - 3} more on the Health page</a>}
+        {data.problems.length > 1 && <button type="button" className="link-plain side-link side-more" onClick={() => setAll(true)}>See all {data.problems.length}</button>}
       </div>
 
       {dash && dash.upcoming.length > 0 && (
@@ -711,6 +712,13 @@ function HomeSide({ data, dash, mode, onStart, refresh }: {
       {problem && (
         <Modal title={problem.title} onClose={() => setProblem(null)} wide>
           <ProblemCard problem={problem} onChanged={() => { setProblem(null); refresh(); }} />
+        </Modal>
+      )}
+      {all && (
+        <Modal title={`Things to fix (${data.problems.length})`} onClose={() => setAll(false)} wide>
+          <p className="muted-note">From the server's latest start, most serious first. Each says what happened and how to fix it.</p>
+          <ProblemList problems={data.problems} onChanged={refresh} />
+          <RecentFixes onChanged={refresh} />
         </Modal>
       )}
     </aside>
