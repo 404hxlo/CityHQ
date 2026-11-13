@@ -25,6 +25,9 @@ import {
   awakeStatus, refreshAwake, startAwakeWatch, stopAwakeWatch,
 } from './awake.js';
 import { desktop } from './desktop.js';
+import {
+  COLORS, discordStatus, forgetDiscordWebhook, sendDiscord, setDiscordWebhook,
+} from './discord.js';
 import { currentFramework, serverFramework } from './framework.js';
 import {
   listEvents, markSeen, recordEvent, unseenAlerts,
@@ -350,6 +353,18 @@ function buildApp() {
     updateSettings(patch);
     if (patch.keepAwake) refreshAwake();
     return automationView(req);
+  }));
+  // Crash alerts on Discord. The webhook link is set, tested and removed on the PC only.
+  api.get('/alerts', handler(() => ({ discord: discordStatus() })));
+  api.put('/alerts/discord', localOnly, json, handler((req) => ({ discord: setDiscordWebhook(req.body?.url) })));
+  api.delete('/alerts/discord', localOnly, handler(() => ({ discord: forgetDiscordWebhook() })));
+  api.post('/alerts/discord/test', localOnly, handler(async () => {
+    await sendDiscord({
+      title: `${getOverview().serverName || 'Your server'}: CityHQ alerts are on`,
+      description: 'When the server crashes or goes down, CityHQ posts here: what happened, why, and what to do.',
+      color: COLORS.info,
+    }, { throwErrors: true });
+    return { discord: discordStatus() };
   }));
   api.post('/announce', json, handler((req) => agentRequest('/announce', { method: 'POST', body: { message: req.body?.message } })));
 

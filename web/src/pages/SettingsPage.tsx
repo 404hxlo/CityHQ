@@ -1,5 +1,5 @@
 import {
-  BookOpen, CloudUpload, Compass, ExternalLink, FolderOpen, KeyRound, LogOut, Plus, QrCode, RefreshCw, Repeat, Server, Smartphone, Timer, X,
+  BellRing, BookOpen, CloudUpload, Compass, ExternalLink, FolderOpen, KeyRound, LogOut, Plus, QrCode, RefreshCw, Repeat, Send, Server, Smartphone, Timer, X,
 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import {
@@ -185,7 +185,7 @@ function Automation() {
       />
       <SwitchRow
         title="Bring the server back if it goes down"
-        help="If txAdmin or the database stops unexpectedly, the app starts them again and tells you. It gives up after 3 times in 15 minutes."
+        help="If the server stops unexpectedly and doesn't come back by itself, CityHQ starts it again and tells you why it went down. It gives up after 3 times in 15 minutes."
         checked={data.autoRecover}
         disabled={saving}
         onChange={(autoRecover) => update({ autoRecover })}
@@ -214,6 +214,87 @@ function Automation() {
         </div>
       )}
       <p className="muted-note">These all need CityHQ open or in the tray. Closing its window keeps it running in the tray; right-click the tray icon to quit.</p>
+    </section>
+  );
+}
+
+/** Crash alerts: Windows and Things to fix always; a Discord channel once its webhook is pasted. */
+function CrashAlerts({ local }: { local: boolean }) {
+  const { data, setData } = usePoll(api.alerts, 0);
+  const { busy, run } = useAction();
+  const confirm = useConfirm();
+  const [url, setUrl] = useState('');
+
+  if (!data) return <section className="card"><Spinner /></section>;
+  const { discord } = data;
+
+  const save = async () => {
+    const result = await run('save', () => api.setDiscordWebhook(url.trim()), 'Saved. Send a test message to check it.');
+    if (result) { setData(result); setUrl(''); }
+  };
+  const test = async () => {
+    const result = await run('test', () => api.testDiscord(), 'Sent. Check your Discord channel.');
+    if (result) setData(result);
+  };
+  const remove = async () => {
+    const ok = await confirm({
+      title: 'Stop alerts on Discord?',
+      body: <p>CityHQ forgets the webhook link. Windows notifications and Things to fix keep working.</p>,
+      confirm: 'Stop Discord alerts',
+    });
+    if (!ok) return;
+    const result = await run('remove', () => api.forgetDiscordWebhook(), 'Discord alerts are off.');
+    if (result) setData(result);
+  };
+
+  let body;
+  if (!local) body = <Notice kind="info">Discord alerts can only be set up on the PC running CityHQ.</Notice>;
+  else if (!discord.canKeep) body = <Notice kind="info">Discord alerts need the CityHQ desktop app, which locks the link with Windows' own protection.</Notice>;
+  else if (discord.set) {
+    body = (
+      <>
+        <p className="field-help">Discord alerts are on.</p>
+        {discord.lastError && <Notice kind="error">The last alert didn't reach Discord: {discord.lastError}</Notice>}
+        <div className="button-row">
+          <Button icon={<Send size={15} />} busy={busy === 'test'} onClick={test}>Send a test message</Button>
+          <Button variant="ghost" busy={busy === 'remove'} onClick={remove}>Stop Discord alerts</Button>
+        </div>
+      </>
+    );
+  } else {
+    body = (
+      <>
+        <ol className="alert-steps">
+          <li>In Discord, open the settings of the channel you want alerts in (the gear next to its name).</li>
+          <li>Go to Integrations, then Webhooks. Press New Webhook, then Copy Webhook URL.</li>
+          <li>Paste it below and save.</li>
+        </ol>
+        <div className="input-row">
+          <input
+            className="input"
+            type="password"
+            autoComplete="off"
+            spellCheck={false}
+            aria-label="Discord webhook link"
+            placeholder="https://discord.com/api/webhooks/..."
+            value={url}
+            onChange={(e) => setUrl(e.target.value)}
+          />
+          <Button variant="primary" busy={busy === 'save'} disabled={!url.trim()} onClick={save}>Save</Button>
+        </div>
+        <p className="muted-note">Anyone with this link can post in that channel, so CityHQ keeps it locked on this PC and never shows it again.</p>
+      </>
+    );
+  }
+
+  return (
+    <section className="card">
+      <h3 className="card-title"><BellRing size={16} />Crash alerts</h3>
+      <p className="muted-note">
+        When the server crashes or goes down, CityHQ shows a Windows notification and puts what happened in Things to fix on Home: why, and a button when
+        it can fix it. It can also post to a Discord channel, so you hear about it on your phone.
+      </p>
+      {body}
     </section>
   );
 }
@@ -261,6 +342,8 @@ export function SettingsPage({ online, onSignOut }: { online: boolean; onSignOut
       </section>
 
       <Automation />
+
+      <CrashAlerts local={data.local} />
 
       {data.local && <UpdatesCard />}
 

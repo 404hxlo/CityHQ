@@ -72,8 +72,10 @@ connection drops.
 - **City and Players:** weather, announcements, the whitelist, money, jobs, items, revive, kick and ban.
 - **Backups:** one-click backup and restore of players, settings and scripts, plus a nightly backup,
   and a list of every change made through CityHQ with Undo.
-- **Safety net:** if the server crashes, CityHQ restarts it and tells you. Scheduled restarts warn
-  players first, and the PC is kept awake while the server runs.
+- **Safety net:** if the server crashes, on your PC or at a host, CityHQ tells you why: a Windows
+  notification, a message in your Discord channel if you like, and the cause with its fix (a button
+  when switching something off fixes it) in Things to fix. It restarts the server if it stays down.
+  Scheduled restarts warn players first, and the PC is kept awake while the server runs.
 
 ## Moving a server to another PC
 

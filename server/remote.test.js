@@ -34,6 +34,12 @@ import {
   showOnList,
 } from './cfg.js';
 import { listingError } from './reach.js';
+import {
+  crashProblem, explainCrash, isCrashReason, isHostCrashLine, reportCrash, reportRecovery, resolveCrash, restartReasonOf, sinceBoot,
+} from './crashes.js';
+import {
+  discordMessage, discordStatus, forgetDiscordWebhook, isDiscordWebhook, sendDiscord, setDiscordWebhook,
+} from './discord.js';
 import { redact } from './report.js';
 
 const KEY = 'ptlc_TestKey1234567890abcdefghij';
@@ -773,6 +779,139 @@ test('kept off FiveM\'s list: server.cfg hiding the server, and the list checkin
   assert.match(blocked.what, /FiveM's list said: "Cfx failed to reach the server at 10\.10\.0\.5/);
   assert.match(blocked.fix[0], /even at its own address, 203\.0\.113\.7/);
   assert.equal(blocked.raw, atHost.raw);
+});
+
+test('crashes: the cause in plain words, and a button only when switching something off fixes it', () => {
+  // An inactive key, in FiveM's own words from a real log (inside txAdmin's box).
+  const license = explainCrash({
+    reason: 'Server boot timed out (P:45s|HB:--|HC:--)',
+    lines: ['[           resources] Scanning resources.', '║              STDERR║ Fatal Error: Could not authenticate server license key. Your key is inactive.↩'],
+  });
+  assert.equal(license.kind, 'license');
+  assert.match(license.title, /inactive/);
+  assert.match(license.detail, /"Fatal Error: Could not authenticate server license key\. Your key is inactive\."/);
+  assert.equal(license.fix, null);
+  assert.match(license.steps[1], /Name, Tagline, Description and Language/);
+
+  // Stuck or crashed while starting: the script loading then gets the blame, and a button.
+  const boot = ['[           resources] Scanning resources.', '[    c-scripting-core] Creating script environments for qb-core', '[    c-scripting-core] Creating script environments for bad-mlo'];
+  const stuck = explainCrash({ reason: 'Server boot timed out (P:45s|HB:--|HC:--)', lines: boot });
+  assert.equal(stuck.kind, 'stuck');
+  assert.equal(stuck.suspect, 'bad-mlo');
+  assert.deepEqual(stuck.fix.fix, { type: 'boot-off', name: 'bad-mlo' });
+  assert.equal(explainCrash({ reason: 'Server process close detected', lines: boot }).fix.fix.name, 'bad-mlo');
+
+  // Once fully started, the last script loaded isn't blamed; an error just before is named.
+  const running = [...boot, '[   script:qb-control] [qb-control] ready', '[  script:ps-dispatch] SCRIPT ERROR: @ps-dispatch/server/main.lua:12: attempt to index a nil value'];
+  const crash = explainCrash({ reason: 'Server process close detected', lines: running });
+  assert.equal(crash.kind, 'crash');
+  assert.equal(crash.suspect, 'ps-dispatch');
+  assert.equal(crash.fix, null);
+  assert.match(crash.detail, /ps-dispatch showed an error/);
+  assert.equal(explainCrash({ reason: 'Server hang detected', lines: running.slice(0, 4) }).kind, 'hang');
+
+  // The host's own words when the whole process crashed: out of memory, or not.
+  const host = ['[panel] ---------- Detected server process in a crashed state! ----------', '[panel] Exit code: 137'];
+  assert.equal(explainCrash({ wentDown: true, hosted: true, lines: [...running.slice(0, 4), ...host, '[panel] Out of memory: true'] }).kind, 'memory');
+  const down = explainCrash({ wentDown: true, hosted: true, lines: [...running.slice(0, 4), ...host, '[panel] Out of memory: false'] });
+  assert.equal(down.kind, 'down');
+  assert.match(down.detail, /whole server process crashed/);
+
+  // txAdmin's lines: which restarts are crashes, and where each start begins.
+  assert.equal(restartReasonOf('║             TXADMIN║ Restarting server: Server boot timed out (P:45s|HB:--|HC:--).'), 'Server boot timed out (P:45s|HB:--|HC:--)');
+  assert.equal(isCrashReason('Server process close detected'), true);
+  assert.equal(isCrashReason('Server boot timed out (P:45s|HB:--|HC:--)'), true);
+  assert.equal(isCrashReason('scheduled restart at 06:00'), false);
+  assert.equal(isCrashReason('Server restart requested by admin'), false);
+  assert.equal(isHostCrashLine(host[0]), true);
+  assert.deepEqual(sinceBoot(['old', '[           resources] Scanning resources.', 'new']), ['[           resources] Scanning resources.', 'new']);
+});
+
+test('crashes are kept, announced once per crash loop, and leave Things to fix once dealt with', () => {
+  const dir = mkdtempSync(path.join(os.tmpdir(), 'cityhq-crash-'));
+  try {
+    const sent = [];
+    const recorded = [];
+    const send = async (m) => { sent.push(m); return true; };
+    const record = (e) => recorded.push(e);
+    const at = (now) => ({ stateDir: dir, now, serverName: 'Harbor Town', after: 'txAdmin is starting it again.', send, record });
+    const t = 1_900_000_000_000;
+    const stuck = explainCrash({ reason: 'Server boot timed out', lines: ['[    c-scripting-core] Creating script environments for bad-mlo'] });
+    const first = reportCrash(stuck, { ...at(t), raw: 'a log line' });
+    assert.equal(recorded.length, 1);
+    assert.equal(recorded[0].level, 'alert');
+    assert.equal(sent.length, 1);
+    assert.match(sent[0].title, /^Harbor Town: bad-mlo got stuck/);
+    assert.match(sent[0].description, /What to do:\*\* Press "Turn bad-mlo off at boot"/);
+    assert.doesNotMatch(sent[0].description, /a log line/, 'log lines never go to Discord');
+    // The same again a minute later: a crash loop, counted, not announced again.
+    reportCrash(stuck, at(t + 60_000));
+    assert.equal(recorded.length, 1);
+    assert.equal(sent.length, 1);
+    const problem = crashProblem({ stateDir: dir, now: t + 61_000 });
+    assert.equal(problem.id, `crash:${first.id}`);
+    assert.match(problem.title, /\(2 times\)$/);
+    assert.deepEqual(problem.actions[0].fix, { type: 'boot-off', name: 'bad-mlo' });
+    // A different crash minutes later: Discord hears about it, and about the one it missed.
+    const t2 = t + 5 * 60_000;
+    reportCrash(explainCrash({ reason: 'Server hang detected', lines: ['[qb-control] ready'] }), at(t2));
+    assert.equal(sent.length, 2);
+    assert.match(sent[1].description, /went down 1 more time/);
+    const latest = crashProblem({ stateDir: dir, now: t2 + 1000 });
+    assert.match(latest.title, /froze/);
+    assert.equal(latest.actions.length, 0, 'no button: steps only');
+    // Running fine for half an hour since, or dealt with: gone from Things to fix.
+    assert.equal(crashProblem({ stateDir: dir, now: t2 + 40 * 60_000, uptimeSec: 35 * 60 }), null);
+    assert.ok(crashProblem({ stateDir: dir, now: t2 + 40 * 60_000, uptimeSec: 10 * 60 }));
+    resolveCrash(latest.id.slice('crash:'.length), dir);
+    assert.equal(crashProblem({ stateDir: dir, now: t2 + 2000 }), null, 'an older crash doesn\'t come back');
+    // Back up again: good news, in green.
+    reportRecovery({ ok: true, serverName: 'Harbor Town' }, { stateDir: dir, send, record });
+    assert.equal(sent.at(-1).title, 'Harbor Town: The server is back up');
+    assert.equal(recorded.at(-1).level, undefined);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('Discord alerts: only a webhook link, locked like a host key, and only CityHQ\'s own words', async () => {
+  const hook = `https://discord.com/api/webhooks/123456789012345678/${'a1B2-c3_'.repeat(9)}`;
+  assert.equal(isDiscordWebhook(hook), true);
+  assert.equal(isDiscordWebhook('https://evil.example/api/webhooks/123456789012345678/abcdefghijklmnopqrstuvwxyz'), false);
+  assert.equal(isDiscordWebhook(hook.replace('https:', 'http:')), false, 'only https');
+  const message = discordMessage({ title: 'x'.repeat(300), description: 'Hello @everyone' }, new Date(0));
+  assert.equal(message.embeds[0].title.length, 250);
+  assert.deepEqual(message.allowed_mentions, { parse: [] }, 'it never pings anyone');
+  const { setDesktopHooks } = await import('./desktop.js');
+  const dir = mkdtempSync(path.join(os.tmpdir(), 'cityhq-discord-'));
+  try {
+    setDesktopHooks(null);
+    assert.equal(await sendDiscord({ title: 't' }, { stateDir: dir }), false, 'nothing set up: nothing sent');
+    assert.throws(() => setDiscordWebhook(hook, dir), /desktop app/);
+    const pad = randomBytes(16);
+    setDesktopHooks({
+      canProtect: () => true,
+      protect: (s) => Buffer.from(Buffer.from(s).map((b, i) => b ^ pad[i % 16])).toString('base64'),
+      unprotect: (s) => Buffer.from(Buffer.from(s, 'base64').map((b, i) => b ^ pad[i % 16])).toString(),
+    });
+    assert.throws(() => setDiscordWebhook('https://example.com/x', dir), /isn't a Discord webhook link/);
+    assert.equal(setDiscordWebhook(hook, dir).set, true);
+    assert.equal(readFileSync(path.join(dir, 'discord-webhook.bin'), 'utf8').includes('webhooks'), false, 'locked, not plain text');
+    const posts = [];
+    const fetchImpl = async (url, init) => { posts.push({ url, body: JSON.parse(init.body) }); return { ok: true, status: 204 }; };
+    assert.equal(await sendDiscord({ title: 'Harbor Town: The server crashed', description: 'Why, and what to do.' }, { stateDir: dir, fetchImpl }), true);
+    assert.equal(posts[0].url, hook);
+    assert.equal(posts[0].body.embeds[0].title, 'Harbor Town: The server crashed');
+    // A deleted webhook is said plainly, for Settings; the test button gets the reason.
+    const gone = async () => ({ ok: false, status: 404 });
+    assert.equal(await sendDiscord({ title: 't' }, { stateDir: dir, fetchImpl: gone }), false);
+    assert.match(discordStatus(dir).lastError, /no longer exists/);
+    await assert.rejects(sendDiscord({ title: 't' }, { stateDir: dir, fetchImpl: gone, throwErrors: true }), /no longer exists/);
+    assert.equal(forgetDiscordWebhook(dir).set, false);
+  } finally {
+    setDesktopHooks(null);
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test('checks before moving: space, an upload already there, the database', () => {

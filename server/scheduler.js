@@ -1,15 +1,20 @@
 // Nightly backups, scheduled restarts with in-game warnings, and noticing when the server goes down.
-import { readdirSync, statSync, existsSync, readFileSync } from 'node:fs';
+import { readdirSync, statSync, existsSync } from 'node:fs';
 import path from 'node:path';
 import { agentRequest } from './agent.js';
 import { backupStatus, createBackup, listBackups } from './backups.js';
+import { readConsole } from './console.js';
 import {
-  isControlBusy, lastControlAt, restartServer, startAfterCrash, startServer,
+  getOverview, isControlBusy, lastControlAt, restartServer, startAfterCrash, startServer,
 } from './control.js';
+import {
+  explainCrash, isCrashReason, isHostCrashLine, reportCrash, reportRecovery, restartReasonOf, sinceBoot,
+} from './crashes.js';
 import { isSecondary } from './desktop.js';
+import { adminLogTail, serverLogTail } from './doctor.js';
 import { recordEvent } from './events.js';
 import {
-  FXSERVER_DIR, FXSERVER_LOG, findServerData, REMOTE,
+  FXSERVER_DIR, findServerData, REMOTE,
 } from './paths.js';
 import {
   ensureDatabase, getProcessState,
@@ -221,13 +226,6 @@ let lastSample = 0;
 let recoveries = [];
 let followUp = null;
 
-function logTail(lines = 80) {
-  try {
-    const text = readFileSync(FXSERVER_LOG, 'utf8');
-    return text.slice(-20000).split('\n').slice(-lines).join('\n').replace(/\x1b\[[0-9;?]*[A-Za-z]/g, '');
-  } catch { return ''; }
-}
-
 function recentCrashDump() {
   const dir = path.join(FXSERVER_DIR, 'crashes');
   if (!existsSync(dir)) return false;
@@ -236,30 +234,62 @@ function recentCrashDump() {
   } catch { return false; }
 }
 
-/** Runs shortly after the game closed, once the log has caught up. */
-function reportGameClosed() {
-  const tail = logTail();
-  const boots = tail.split('FXServer Starting');
-  const beforeLatestBoot = boots.length > 1 ? boots.slice(0, -1).join('') : tail;
-  const closing = beforeLatestBoot.slice(-3000);
-  if (/-> Quitting:/.test(closing)) {
+const nameOfServer = () => {
+  try { return getOverview().serverName || ''; } catch { return ''; }
+};
+
+/** txAdmin's reason for the restart it just made (its own log), or null if it didn't make one. */
+async function recentAdminReason() {
+  const line = (await adminLogTail().catch(() => [])).findLast((l) => /Restarting server:/i.test(l));
+  if (!line) return null;
+  const t = line.match(/^\[(\d{2}):(\d{2}):(\d{2})\]/);
+  if (t) {
+    const at = new Date();
+    at.setHours(Number(t[1]), Number(t[2]), Number(t[3]), 0);
+    if (Math.abs(Date.now() - at.getTime()) > 5 * 60000) return null;
+  }
+  return restartReasonOf(line);
+}
+
+/** Runs shortly after the game closed, once the log has caught up: what happened, and why. */
+async function reportGameClosed() {
+  const lines = await serverLogTail(512 * 1024).catch(() => []);
+  // When txAdmin has started it again, the crashed run is the one before its new start.
+  const restarted = Boolean(getProcessState().game);
+  const latest = lines.findLastIndex((l) => /FXServer Starting/.test(l));
+  const before = restarted && latest > 0 ? lines.slice(0, latest) : lines;
+  if (/-> Quitting:/.test(before.slice(-60).join('\n'))) {
     recordEvent({ title: 'The server restarted', detail: 'It was restarted from the console or txAdmin.' });
     return;
   }
-  const crashed = recentCrashDump();
-  recordEvent({
-    level: 'alert',
-    title: crashed ? 'The game server crashed' : 'The game server stopped unexpectedly',
-    detail: getProcessState().game
-      ? 'txAdmin started it again, but anyone online was disconnected. Check Home for anything that may have caused it.'
-      : 'It has not come back yet. Use Start or Restart on Home.',
+  const reason = await recentAdminReason();
+  if (reason && !isCrashReason(reason)) {
+    recordEvent({ title: 'The server restarted', detail: `txAdmin restarted it: ${reason}.` });
+    return;
+  }
+  const segment = sinceBoot(before);
+  reportCrash(explainCrash({ reason, lines: segment, dumpSaved: recentCrashDump() }), {
+    reason,
+    raw: segment.slice(-15).join('\n'),
+    serverName: nameOfServer(),
+    after: restarted ? 'txAdmin started it again, but anyone online was disconnected.' : 'It hasn\'t come back yet. Use Start or Restart on Home.',
+  });
+}
+
+/** txAdmin itself stopped: explained, before CityHQ starts it again (when it may). */
+async function reportServerDown(autoRecover) {
+  const segment = sinceBoot(await serverLogTail(512 * 1024).catch(() => []));
+  reportCrash(explainCrash({ wentDown: true, lines: segment, dumpSaved: recentCrashDump() }), {
+    raw: segment.slice(-15).join('\n'),
+    serverName: nameOfServer(),
+    after: autoRecover ? 'CityHQ is starting it again.' : 'Automatic recovery is off, so use Start on Home.',
   });
 }
 
 async function recoverServer() {
   recoveries = recoveries.filter((t) => Date.now() - t < RECOVER_WINDOW_MS);
   if (recoveries.length >= RECOVER_LIMIT) {
-    recordEvent({ level: 'alert', title: 'The server keeps going down', detail: `It stopped ${RECOVER_LIMIT} times in 15 minutes, so the app stopped restarting it. Check Home, then press Start.` });
+    reportRecovery({ ok: false, detail: `It went down ${RECOVER_LIMIT} times in 15 minutes, so CityHQ stopped starting it. Check Things to fix on Home, then press Start.`, serverName: nameOfServer() });
     return;
   }
   let result;
@@ -273,9 +303,7 @@ async function recoverServer() {
   }
   if (result.alreadyRunning) return;
   recoveries.push(Date.now());
-  recordEvent(result.ok
-    ? { level: 'alert', title: 'The server went down and was started again', detail: 'Anyone online was disconnected.' }
-    : { level: 'alert', title: 'The server went down and could not be started again', detail: result.reason });
+  reportRecovery({ ok: result.ok, detail: result.reason || '', serverName: nameOfServer() });
 }
 
 async function recoverDatabase() {
@@ -298,13 +326,80 @@ function watchTick() {
 
   if (change.databaseStopped) recoverDatabase();
   if (change.serverDown) {
-    if (getSettings().autoRecover) recoverServer();
-    else recordEvent({ level: 'alert', title: 'The server went down', detail: 'Automatic recovery is off, so use Start on Home.' });
+    const { autoRecover } = getSettings();
+    reportServerDown(autoRecover).catch(() => {});
+    if (autoRecover) recoverServer();
     return;
   }
   if (change.gameClosed && !followUp) {
     // Give txAdmin time to bring it back and the log time to catch up before judging.
-    followUp = setTimeout(() => { followUp = null; if (!isControlBusy()) reportGameClosed(); }, 15000);
+    followUp = setTimeout(() => { followUp = null; if (!isControlBusy()) reportGameClosed().catch(() => {}); }, 15000);
+  }
+}
+
+// ---------------------------------------------------------------- hosted servers
+// The host and txAdmin bring a crashed server back themselves; CityHQ follows the console to say
+// what happened and why. txAdmin says "Restarting server: <reason>" when the game server crashed
+// or froze; the host (Wings) says "Detected server process in a crashed state" when everything
+// did, then whether memory ran out and whether it's restarting it.
+const HOSTED_QUIET_MS = 60000;
+let hostedAt;
+let hostedLines = [];
+let hostCrash = null;
+let hostedRecoveries = [];
+let sftpTicks = 0;
+
+const recentlyControlled = () => isControlBusy() || Date.now() - lastControlAt() < HOSTED_QUIET_MS;
+
+async function recoverHosted() {
+  hostedRecoveries = hostedRecoveries.filter((t) => Date.now() - t < RECOVER_WINDOW_MS);
+  if (hostedRecoveries.length >= RECOVER_LIMIT) {
+    reportRecovery({ ok: false, detail: `It went down ${RECOVER_LIMIT} times in 15 minutes, so CityHQ stopped starting it. Check Things to fix on Home, then press Start.`, serverName: nameOfServer() });
+    return;
+  }
+  hostedRecoveries.push(Date.now());
+  try {
+    await startServer();
+    reportRecovery({ ok: true, serverName: nameOfServer() });
+  } catch (err) {
+    // Someone pressed Start, Stop or Restart at the same moment; leave it to them.
+    if (err.status !== 409) reportRecovery({ ok: false, detail: err.message, serverName: nameOfServer() });
+  }
+}
+
+async function hostedWatchTick() {
+  const chunk = await readConsole(hostedAt).catch(() => null);
+  if (!chunk) return;
+  const texts = chunk.lines.map((l) => l.text);
+  // The first read is what happened before CityHQ was watching: only kept, to explain later ones.
+  const watching = hostedAt !== undefined && !chunk.reset;
+  hostedAt = chunk.offset;
+  if (watching) {
+    texts.forEach((line, i) => {
+      const reason = restartReasonOf(line);
+      if (reason && isCrashReason(reason) && !recentlyControlled()) {
+        const lines = sinceBoot([...hostedLines, ...texts.slice(0, i)]);
+        reportCrash(explainCrash({ reason, lines, hosted: true }), {
+          reason, raw: lines.slice(-15).join('\n'), serverName: nameOfServer(), after: 'txAdmin is starting it again. Anyone online was disconnected.',
+        });
+      }
+      if (hostCrash) hostCrash.follow.push(line);
+      else if (isHostCrashLine(line) && !recentlyControlled()) hostCrash = { at: Date.now(), lines: sinceBoot([...hostedLines, ...texts.slice(0, i)]), follow: [] };
+    });
+  }
+  hostedLines = [...hostedLines, ...texts].slice(-500);
+  // Reported once the host's own follow-up lines (memory, restarting or not) are in.
+  if (hostCrash && Date.now() - hostCrash.at >= 4000) {
+    const { lines, follow } = hostCrash;
+    hostCrash = null;
+    const gaveUp = follow.some((l) => /Aborting automatic restart/i.test(l));
+    const { autoRecover } = getSettings();
+    let after = 'Your host is starting it again.';
+    if (gaveUp) after = `Your host stopped restarting it, because it crashed twice within a minute.${autoRecover ? ' CityHQ will try once more in 30 seconds.' : ' Start it from Home when you\'re ready.'}`;
+    reportCrash(explainCrash({ wentDown: true, lines: [...lines, ...follow], hosted: true }), {
+      raw: [...lines.slice(-10), ...follow.slice(0, 6)].join('\n'), serverName: nameOfServer(), after,
+    });
+    if (gaveUp && autoRecover) setTimeout(() => { recoverHosted().catch(() => {}); }, 30000);
   }
 }
 
@@ -320,11 +415,13 @@ async function tick() {
     if (!isSecondary()) {
       const now = new Date();
       scheduleTick(now);
-      // A hosted server is watched and backed up by its host (CityHQ's own backups of hosted
-      // servers come later).
+      // A hosted server is backed up by its host, and its crashes are followed in its console:
+      // the panel's live one each time, a log file over SFTP every third time.
       if (!REMOTE) {
         watchTick();
         await backupTick(now);
+      } else if (REMOTE.type !== 'sftp' || (sftpTicks = (sftpTicks + 1) % 3) === 0) {
+        await hostedWatchTick();
       }
     }
   } catch (err) {

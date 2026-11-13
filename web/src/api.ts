@@ -140,6 +140,8 @@ export interface ScheduleInfo {
   nextBackup: number | null;
   backupRunning: { id: string; reason: string; step: string } | null;
 }
+/** Crash alerts in a Discord channel: whether a webhook is saved (never the link itself). */
+export interface DiscordAlerts { set: boolean; canKeep: boolean; lastError: string | null }
 export interface Automation {
   backups: { enabled: boolean; time: string; keep: number; lastAuto: number };
   restarts: { enabled: boolean; times: string[] };
@@ -451,6 +453,11 @@ export const api = {
     backups?: Partial<Automation['backups']>;
     keepAwake?: { enabled?: boolean; screenOnBattery?: boolean };
   }) => request<Automation>('PUT', '/api/automation', patch),
+
+  alerts: () => request<{ discord: DiscordAlerts }>('GET', '/api/alerts'),
+  setDiscordWebhook: (url: string) => request<{ discord: DiscordAlerts }>('PUT', '/api/alerts/discord', { url }),
+  forgetDiscordWebhook: () => request<{ discord: DiscordAlerts }>('DELETE', '/api/alerts/discord'),
+  testDiscord: () => request<{ discord: DiscordAlerts }>('POST', '/api/alerts/discord/test'),
 
   console: (since?: number) => request<ConsoleChunk>('GET', `/api/console${since === undefined ? '' : `?since=${since}`}`),
   command: (command: string) => request('POST', '/api/console/command', { command }),

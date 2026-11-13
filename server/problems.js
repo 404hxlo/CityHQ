@@ -11,7 +11,8 @@ import { tableInfo } from './db.js';
 import {
   fixedThisBoot, recordFix, runFix, tablesDefining,
 } from './fixes.js';
-import { hostedUptimeMs } from './control.js';
+import { hostedUptimeMs, serverUptimeSec } from './control.js';
+import { crashProblem, resolveCrash } from './crashes.js';
 import { leftOutProblem, pcLicenseAction } from './move/leftout.js';
 import { findServerData, HttpError, REMOTE } from './paths.js';
 import { listingError } from './reach.js';
@@ -304,6 +305,9 @@ export async function currentProblems({ fresh = false } = {}) {
       if (notListed) items.push(notListed);
     }
   }
+  // The latest crash, until it's dealt with or the server has run fine for a while since.
+  const crash = crashProblem({ uptimeSec: serverUptimeSec() });
+  if (crash) items.push(crash);
 
   // A fix made during this boot hides its problem; the log line itself stays until a restart.
   const fixed = await fixedThisBoot(bootMarker).catch(() => new Set());
@@ -322,6 +326,7 @@ export async function fixProblem(id) {
   const action = problem.actions.find((a) => a.kind === 'fix');
   if (!action) throw new HttpError(400, 'There\'s no one-click fix for this problem.');
   const result = await runFix(action.fix);
+  if (id.startsWith('crash:')) resolveCrash(id.slice('crash:'.length));
   tableMemo.clear();
   const record = await recordFix({
     problemId: id, boot: cached.boot, title: problem.title, label: action.label, message: result.message, undo: result.undo, versionId: result.versionId,

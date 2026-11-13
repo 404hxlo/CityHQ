@@ -424,13 +424,19 @@ const RULES = [
   },
   {
     id: 'license-key',
-    test: /(?:invalid|no valid|missing).{0,30}license key|license key.{0,30}(?:invalid|expired|not valid)|sv_licenseKey.{0,40}(?:not|missing|invalid)/i,
+    test: /(?:invalid|no valid|missing).{0,30}license key|license key.{0,30}(?:invalid|expired|not valid)|sv_licenseKey.{0,40}(?:not|missing|invalid)|could not authenticate server license key/i,
     build(_m, { raw }) {
+      // Since October 2026, a key without the server's details on the Portal is inactive.
+      const inactive = /inactive/i.test(raw);
       return finish(raw, {
         key: 'license-key',
-        title: 'There is a problem with your license key',
-        what: 'FiveM servers need a valid key from the Cfx.re Portal to start.',
-        fix: ['Sign in at the Cfx.re Portal and check your key is still valid.', 'If you need a new one, create it there and put it in server.cfg.', 'Restart the server.'],
+        title: inactive ? 'Your license key is inactive' : 'There is a problem with your license key',
+        what: inactive
+          ? 'FiveM refused the key, so the server can\'t start. Since October 2026, a key only works once the server\'s details are filled in on the Cfx.re Portal.'
+          : 'FiveM servers need a valid key from the Cfx.re Portal to start.',
+        fix: inactive
+          ? ['Sign in at the Cfx.re Portal with the account the key comes from, and open Servers, then Server Registration Keys.', 'Open the key in server.cfg, choose Edit Server Details, and fill in Name, Tagline, Description and Language. Save, and activate the key if the Portal asks.', 'Restart the server.']
+          : ['Sign in at the Cfx.re Portal and check your key is still valid.', 'If you need a new one, create it there and put it in server.cfg.', 'Restart the server.'],
         links: [DOCS.portal, DOCS.setup, video('server license key'), forum('license key invalid')],
       });
     },

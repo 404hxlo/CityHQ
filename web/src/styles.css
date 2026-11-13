@@ -337,6 +337,7 @@ button.stat:hover { border-color: var(--line-strong); background: var(--raised);
 .field-text { min-width: 0; display: flex; flex-direction: column; gap: 1px; }
 .field-label { font-weight: 560; overflow-wrap: anywhere; }
 .field-help { color: var(--ink-soft); font-size: 13px; overflow-wrap: anywhere; }
+.alert-steps { margin: 8px 0 12px; padding-left: 20px; font-size: 14px; color: var(--ink-soft); display: flex; flex-direction: column; gap: 2px; }
 .field-key { color: var(--ink-faint); font-size: 11.5px; overflow-wrap: anywhere; }
 .field-control { display: flex; justify-content: flex-end; min-width: 0; }
 .field-control .input-number { width: 100%; max-width: 150px; }

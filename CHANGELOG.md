@@ -2,6 +2,16 @@
 
 Each version's section is shown in the app before it updates, and on its GitHub release page.
 
+## 1.9.0
+
+- **Crash alerts.** When the server crashes or goes down, CityHQ tells you what happened and why, in plain words: a Windows notification, and the crash in **Things to fix** on Home with its fix.
+  - When switching something off fixes it, such as a script the server got stuck on while starting, there's a button for it. Otherwise you get the steps.
+  - It recognises a license key that's inactive or refused, running out of memory, a script stuck while starting, the server freezing, a crash while a script loads, and a script error just before a crash.
+- **On Discord too.** Paste a channel's webhook link in Settings, under Crash alerts, and every crash is posted there, so you hear about it on your phone. A crash loop is summed up instead of posted over and over, and you get a message when the server is back up. The link is locked on your PC like a host's key, and only CityHQ's summary is sent, never log lines.
+- **Hosted servers are watched now.** CityHQ follows the console for txAdmin restarting a crashed or frozen server, and for your host reporting the whole server crashed (and whether memory ran out). If your host stops restarting it, CityHQ tries once more when "Bring the server back if it goes down" is on.
+- On a PC, crash alerts now say why, using txAdmin's reason and the server log, instead of only "the game server crashed".
+- "Your key is inactive", the error FiveM gives a license key without its details on the Cfx.re Portal, is now recognised, with the steps to fix it.
+
 ## 1.8.6
 
 - **Shown as private?** FiveM shows a server as private when it isn't on its server list. CityHQ now finds the two server.cfg causes on hosted servers and fixes each with one button in **Things to fix**:

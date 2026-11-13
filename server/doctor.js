@@ -19,6 +19,9 @@ const PAUSE_MS = 60000;
 /** The last few MB of the server log, cleaned, as lines. */
 export const serverLogTail = (bytes = TAIL_BYTES) => tail(FXSERVER_LOG, bytes);
 
+/** The end of txAdmin's own log, where it says why it restarted the server. */
+export const adminLogTail = (bytes = 64 * 1024) => tail(ADMIN_LOG, bytes);
+
 async function tail(file, bytes = TAIL_BYTES) {
   if (!existsSync(file)) return [];
   const { size } = await stat(file);
