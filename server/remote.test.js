@@ -584,6 +584,25 @@ test('a host\'s database: the password to type in, the database\'s own error, an
   assert.ok(sslArgs.includes('--ssl') && !sslArgs.includes('--skip-ssl'));
 });
 
+// Your real error: finishing a move stopped with "The host didn't accept that SFTP username or
+// password" while copying txAdmin's records, after the database and server.cfg had moved.
+test('txAdmin\'s player records still reach the host when SFTP turns the password down', async () => {
+  const { copyPlayersDb } = await import('./move/job.js');
+  const file = path.join(ROOT, 'playersDB-local.json');
+  writeFileSync(file, '{"version":5,"players":[{"license":"abc","playTime":12}]}');
+  const target = { type: 'panel', txProfile: '/txData/default', sftp: { host: '127.0.0.1', port: sftpHost.address().port, username: 'cityhq.abcd' } };
+  const conn = { panel: panelClient({ url: panel.url, key: KEY, serverId: 'abcd001' }) };
+  // The panel password saved when the move started no longer works: the panel's upload takes over.
+  assert.equal(await copyPlayersDb(target, { key: KEY, sftpPassword: 'changed-since' }, conn, file), 'panel');
+  assert.equal(panel.seen.upload.directory, '/txData/default/data');
+  assert.ok(panel.seen.upload.body.includes(Buffer.from('"playTime":12')));
+  // With the right one it goes over SFTP, into the profile's data folder.
+  assert.equal(await copyPlayersDb(target, { key: KEY, sftpPassword: 'pw' }, conn, file), 'sftp');
+  assert.equal(readFileSync(path.join(ROOT, 'txData', 'default', 'data', 'playersDB.json'), 'utf8'), readFileSync(file, 'utf8'));
+  // Neither way working is reported, for the move to finish with a note rather than stop.
+  await assert.rejects(copyPlayersDb(target, { key: KEY, sftpPassword: 'changed-since' }, { panel: panelClient({ url: panel.url, key: KEY, serverId: 'zzzz999' }) }, file));
+});
+
 test('the helper goes onto a host with its in-game page, its token and its server.cfg line', async () => {
   const { installRemoteHelper } = await import('./remote/helper.js');
   mkdirSync(path.join(ROOT, 'resources'), { recursive: true });

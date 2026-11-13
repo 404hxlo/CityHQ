@@ -2,6 +2,11 @@
 
 Each version's section is shown in the app before it updates, and on its GitHub release page.
 
+## 1.8.3
+
+- **Move to a host:** finishing no longer stops with "The host didn't accept that SFTP username or password" while copying txAdmin's player records (bans, warnings, playtime). If SFTP doesn't work, for example because the panel password changed after the move started, CityHQ sends the file through your host's panel instead.
+- If txAdmin's records can't be copied at all, the move still finishes and says how to copy that one file yourself. If a move stopped there, press Finish the move again.
+
 ## 1.8.2
 
 - **Move to a host:** copying the database no longer stops with "ERROR 1227 ... you need the SET USER privilege". Triggers, views, procedures and events in a database name the account that made them, and a rented database won't accept another account's name. CityHQ now leaves those names out while copying, so they belong to your host's database account and work the same. Your data isn't changed. If a move stopped there, press Finish the move again.

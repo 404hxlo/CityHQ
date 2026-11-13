@@ -43,7 +43,8 @@ export function registerHostedRoutes(api, { json, handler, localOnly, relaunchSo
   api.post('/move/pause', localOnly, handler(() => pauseMove()));
   api.post('/move/finish', localOnly, json, handler(async (req) => {
     const done = await finishMove(req.body);
-    return { ...done, relaunching: relaunchSoon() };
+    // With a note to read (txAdmin's records stayed behind), CityHQ waits to be reopened.
+    return { ...done, relaunching: done.playersDbCopied === false ? false : relaunchSoon() };
   }));
   api.post('/move/cancel', localOnly, handler(() => cancelMove()));
   api.get('/move', localOnly, handler(() => moveStatus()));

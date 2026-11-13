@@ -61,6 +61,9 @@ export interface MoveStatus {
   running?: boolean;
   step?: string | null;
   error?: string | null;
+  /** False when txAdmin's records of players couldn't be copied (the move still finished). */
+  playersDbCopied?: boolean;
+  playersDbNote?: string;
   target?: { type: 'panel' | 'sftp'; name: string | null; panelUrl: string | null; host: string | null } | null;
   database?: { name: string; host: string } | null;
   steps?: {

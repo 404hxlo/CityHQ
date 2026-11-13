@@ -173,7 +173,10 @@ export function Move() {
     setFinishing(true);
     const r = await run('finish', () => api.moveFinish({ stopLocal: true }));
     setFinishing(false);
-    if (r) setDone(r.relaunching ? 'CityHQ is starting again on your hosted server. This window closes and opens by itself in a few seconds.' : 'Close CityHQ from its tray icon and open it again.');
+    if (r) {
+      const restart = r.relaunching ? 'CityHQ is starting again on your hosted server. This window closes and opens by itself in a few seconds.' : 'When you\'ve read this, close CityHQ from its tray icon and open it again: it opens on your hosted server.';
+      setDone(r.playersDbCopied === false && r.playersDbNote ? `Your server moved. ${r.playersDbNote} ${restart}` : restart);
+    }
     refresh();
   };
 

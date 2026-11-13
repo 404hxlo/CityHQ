@@ -102,6 +102,38 @@ async function sftpFor(target, secret) {
   return sftpClient({ host: target.sftp.host, port: target.sftp.port, username: target.sftp.username, password: secret.sftpPassword, hostKey: target.hostKey || null });
 }
 
+/**
+ * txAdmin's records of players onto the host: over SFTP, or, if that fails in any way (a panel
+ * password changed since the move started, say), through the panel's own upload, which only needs
+ * the API key. Says which way worked, or throws with the last reason.
+ */
+export async function copyPlayersDb(t, secret, conn, file) {
+  const dir = path.posix.join(t.txProfile, 'data');
+  let reason = null;
+  if (t.type === 'sftp' || secret.sftpPassword) {
+    let sftp = null;
+    try {
+      sftp = await sftpFor(t, secret);
+      await sftp.mkdirs(dir);
+      await sftp.uploadFile(file, path.posix.join(dir, 'playersDB.json'), { resume: false });
+      return 'sftp';
+    } catch (err) {
+      reason = err.message;
+    } finally {
+      try { sftp?.close(); } catch { /* already closed */ }
+    }
+  }
+  if (conn?.panel) {
+    try {
+      await conn.panel.files.upload(dir, 'playersDB.json', readFileSync(file));
+      return 'panel';
+    } catch (err) {
+      reason = err.message;
+    }
+  }
+  throw new HttpError(502, reason || 'There was no way to send the file to your host.');
+}
+
 /** The database's own words from a failed client run: "ERROR 1045 (28000): Access denied ...". */
 const dbError = (err) => String(err?.stderr || err?.message || '').trim().split(/\r?\n/).filter(Boolean).pop()?.replace(/^.*?(ERROR \d+)/, '$1').slice(0, 300) || null;
 const TLS_ERROR = /ssl|tls|certificate|secure transport/i;
@@ -535,20 +567,22 @@ export async function finishMove(body = {}) {
       await conn.files.write(t.cfgPath, mergeCfgForHost(localCfg, hostCfg, db));
 
       // txAdmin's records of players (bans, warnings, playtime), if wanted and there's a txAdmin.
+      // Nice to have, so they never stop the move: if they can't be copied, the move finishes and
+      // says how to copy that one file.
       if (s.copyPlayersDb && t.txProfile) {
         const file = path.join(TX_PROFILE, 'data', 'playersDB.json');
         if (existsSync(file)) {
           s.step = 'txadmin';
           save();
-          const sftp = await sftpFor(t, secret).catch(() => null);
-          if (sftp) {
-            try {
-              await sftp.mkdirs(path.posix.join(t.txProfile, 'data'));
-              await sftp.uploadFile(file, path.posix.join(t.txProfile, 'data', 'playersDB.json'), { resume: false });
-            } finally { sftp.close(); }
-          } else {
-            await conn.files.write(path.posix.join(t.txProfile, 'data', 'playersDB.json'), readFileSync(file, 'utf8'));
+          try {
+            await copyPlayersDb(t, secret, conn, file);
+            s.playersDbCopied = true;
+          } catch (err) {
+            s.playersDbCopied = false;
+            s.playersDbNote = `txAdmin's player records (bans, warnings and playtime) couldn't be copied: ${err.message} Everything else moved. To copy them yourself, stop the server on your host, then put ${file} into ${path.posix.join(t.txProfile, 'data')} there, for example with WinSCP.`;
+            recordEvent({ level: 'alert', title: 'txAdmin\'s player records stayed on this PC', detail: s.playersDbNote });
           }
+          save();
         }
       }
 
