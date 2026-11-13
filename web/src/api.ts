@@ -140,6 +140,13 @@ export interface ScheduleInfo {
   nextBackup: number | null;
   backupRunning: { id: string; reason: string; step: string } | null;
 }
+/**
+ * txAdmin's page on a hosted server: its port (from the host's settings), whether the host opened
+ * that port (open), its address (url) and whether the page answers. sftp: CityHQ can't tell.
+ */
+export interface HostedTxAdmin {
+  sftp?: boolean; port: number | null; enabled?: boolean | null; guessed?: boolean; open: boolean; url: string | null; answers?: boolean | null;
+}
 /** Crash alerts in a Discord channel: whether a webhook is saved (never the link itself). */
 export interface DiscordAlerts { set: boolean; canKeep: boolean; lastError: string | null }
 export interface Automation {
@@ -454,6 +461,7 @@ export const api = {
     keepAwake?: { enabled?: boolean; screenOnBattery?: boolean };
   }) => request<Automation>('PUT', '/api/automation', patch),
 
+  hostedTxAdmin: (fresh = false) => request<HostedTxAdmin>('GET', `/api/hosted-txadmin${fresh ? '?fresh=1' : ''}`),
   alerts: () => request<{ discord: DiscordAlerts }>('GET', '/api/alerts'),
   setDiscordWebhook: (url: string) => request<{ discord: DiscordAlerts }>('PUT', '/api/alerts/discord', { url }),
   forgetDiscordWebhook: () => request<{ discord: DiscordAlerts }>('DELETE', '/api/alerts/discord'),

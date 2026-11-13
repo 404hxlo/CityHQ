@@ -11,6 +11,7 @@ import { hostedResourceAction, listHostedResources, setHostedBoot } from './reso
 import {
   createDatabaseBackup, createHostBackup, deleteDatabaseBackup, deleteHostBackup, hostBackupLink, hostedBackups, openDatabaseBackups, restoreHostBackup,
 } from './backups.js';
+import { hostedTxAdmin } from './txadmin.js';
 import { checkHosted, listPanelServers, useHosted } from './welcome.js';
 import {
   cancelMove, checkMove, finishMove, moveStatus, pauseMove, startMove,
@@ -67,6 +68,9 @@ export function registerHostedRoutes(api, { json, handler, localOnly, relaunchSo
     if (conn.command) { await conn.command(command); return { ran: command }; }
     return agentRequest('/command', { method: 'POST', body: { command } });
   }));
+
+  // txAdmin's page at the host: its address, or why it can't be reached.
+  api.get('/hosted-txadmin', handler((req) => hostedTxAdmin({ fresh: req.query.fresh === '1' })));
 
   // Backups: the host's own, and CityHQ's copy of the database kept on this PC.
   api.get('/hosted-backups', handler(() => hostedBackups()));

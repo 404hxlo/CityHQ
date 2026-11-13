@@ -7,6 +7,7 @@ import { findServerData, REMOTE, STATE_DIR } from '../paths.js';
 import { scanDisk } from '../resources.js';
 import { joinLinkOf, lastHelperAddress } from './helper.js';
 import { listedNow } from './listing.js';
+import { hostedTxAdmin, txAdminFinding } from './txadmin.js';
 import { panelClient } from './panel.js';
 import { loadSecret } from './secret.js';
 
@@ -57,6 +58,11 @@ function checkJoinable() {
   return finding('reachable', 'ok', 'Players can join from anywhere', 'The server has its Cfx.re address, so it shows up for players and the join link works.');
 }
 
+async function checkTxAdmin() {
+  const f = txAdminFinding(await hostedTxAdmin());
+  return f ? finding('txadmin', f.status, f.title, f.detail, { steps: f.steps }) : null;
+}
+
 async function checkPlan() {
   if (REMOTE.type !== 'panel') return [];
   const key = loadSecret(STATE_DIR);
@@ -77,11 +83,11 @@ async function checkPlan() {
 export async function hostedHealthChecks() {
   const server = findServerData();
   const settle = (p) => Promise.resolve(p).then((v) => v, () => null);
-  const [helper, database, plan, disk, cfg] = await Promise.all([
+  const [helper, database, plan, disk, cfg, txAdmin] = await Promise.all([
     settle(checkHelper()), settle(checkDatabase()), settle(checkPlan()),
-    settle(scanDisk()), server ? settle(readCfg(server.cfgPath)) : null,
+    settle(scanDisk()), server ? settle(readCfg(server.cfgPath)) : null, settle(checkTxAdmin()),
   ]);
-  const findings = [helper, database, checkJoinable(), ...(plan || [])].filter(Boolean);
+  const findings = [helper, database, checkJoinable(), txAdmin, ...(plan || [])].filter(Boolean);
   // Script checks need the running server's list; without it they'd call everything missing.
   if (disk?.length && cfg) {
     const order = startOrderFindings(disk, cfg);

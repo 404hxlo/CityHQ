@@ -1,7 +1,7 @@
 {
   "name": "cityhq",
   "productName": "CityHQ",
-  "version": "1.9.0",
+  "version": "1.9.1",
   "description": "Desktop and phone dashboard for a local QBCore / txAdmin server",
   "license": "SEE LICENSE IN LICENSE.md",
   "private": true,

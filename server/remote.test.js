@@ -34,6 +34,7 @@ import {
   showOnList,
 } from './cfg.js';
 import { listingError } from './reach.js';
+import { pageAnswers, txAdminFinding, txAdminOf } from './remote/txadmin.js';
 import {
   crashProblem, explainCrash, isCrashReason, isHostCrashLine, reportCrash, reportRecovery, resolveCrash, restartReasonOf, sinceBoot,
 } from './crashes.js';
@@ -912,6 +913,46 @@ test('Discord alerts: only a webhook link, locked like a host key, and only City
     setDesktopHooks(null);
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test('txAdmin at a host: its port from the host\'s settings, whether that port is open, and what to do', async () => {
+  const record = (variables, allocations, invocation = '') => ({
+    invocation,
+    relationships: {
+      variables: { data: variables.map((attributes) => ({ attributes })) },
+      allocations: { data: allocations.map((attributes) => ({ attributes })) },
+    },
+  });
+  const game = { ip: '203.0.113.7', ip_alias: null, port: 30123, is_default: true };
+  // The usual setup: a txAdmin port setting, but that port isn't one the host opened (like now).
+  const closed = txAdminOf(record([
+    { name: 'Enable txAdmin', env_variable: 'TXADMIN_ENABLE', server_value: '1' },
+    { name: 'txAdmin Port', env_variable: 'TXADMIN_PORT', server_value: '40120' },
+  ], [game]));
+  assert.deepEqual([closed.port, closed.enabled, closed.open, closed.url], [40120, true, false, null]);
+  const advice = txAdminFinding(closed);
+  assert.equal(advice.status, 'warn');
+  assert.match(advice.detail, /port 40120/);
+  assert.match(advice.steps[0], /open Network and add a port/);
+  // Opened: a button, at the host's name for that port when it has one.
+  const opened = txAdminOf(record([{ env_variable: 'TXADMIN_PORT', server_value: '40121' }], [game, { ip: '203.0.113.7', ip_alias: 'play.example.net', port: 40121, is_default: false }]));
+  assert.equal(opened.url, 'http://play.example.net:40121');
+  assert.equal(txAdminFinding({ ...opened, answers: true }).status, 'ok');
+  assert.match(txAdminFinding({ ...opened, answers: false }).title, /didn't answer/);
+  // A host that only has a "txAdmin" switch: its one extra port is taken to be txAdmin's.
+  const rocket = txAdminOf(record([{ name: 'txAdmin', env_variable: 'TXADMIN', server_value: 'true' }], [game, { ip: '203.0.113.7', port: 30124, is_default: false }]));
+  assert.deepEqual([rocket.port, rocket.guessed, rocket.url], [30124, true, 'http://203.0.113.7:30124']);
+  // From the start command, or a note on the port.
+  assert.equal(txAdminOf(record([], [game], './run.sh +set txAdminPort 40150 +exec server.cfg')).port, 40150);
+  assert.equal(txAdminOf(record([], [game, { ip: '203.0.113.7', port: 40200, notes: 'txAdmin', is_default: false }, { ip: '203.0.113.7', port: 40201, is_default: false }])).port, 40200);
+  // Switched off: said so, and no port guessed.
+  const off = txAdminOf(record([{ env_variable: 'TXADMIN_ENABLE', server_value: '0' }], [game, { ip: '203.0.113.7', port: 30124, is_default: false }]));
+  assert.deepEqual([off.enabled, off.port], [false, null]);
+  assert.equal(txAdminFinding(off).title, 'txAdmin is switched off');
+  // Nothing to go on: nothing said.
+  assert.equal(txAdminFinding(txAdminOf(record([], [game]))), null);
+  assert.equal(await pageAnswers('http://203.0.113.7:40121', async () => ({ status: 302 })), true);
+  assert.equal(await pageAnswers('http://203.0.113.7:40121', async () => { throw new Error('refused'); }), false);
 });
 
 test('checks before moving: space, an upload already there, the database', () => {

@@ -78,6 +78,8 @@ export function panelClient({ url, key, serverId, timeoutMs = 15000 }) {
       return out;
     },
     async details() { return serverSummary((await call('GET', server()))?.attributes || {}); },
+    /** The panel's whole record of the server: its ports (allocations), startup settings and command. */
+    async record() { return (await call('GET', server()))?.attributes || {}; },
     /** 'running', 'starting', 'stopping' or 'offline', with CPU, memory and disk use. */
     async resources() {
       const a = (await call('GET', server('/resources'), { timeout: 8000 }))?.attributes || {};

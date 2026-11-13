@@ -218,6 +218,56 @@ function Automation() {
   );
 }
 
+/** txAdmin's page at the host: a button when it can be reached, and how to open its port when not. */
+function HostedTxAdminCard() {
+  const { data, error, setData } = usePoll(api.hostedTxAdmin, 0);
+  const { busy, run } = useAction();
+  const recheck = async () => {
+    const result = await run('check', () => api.hostedTxAdmin(true));
+    if (result) setData(result);
+  };
+
+  let body;
+  if (!data) body = error ? <Notice kind="error">{error}</Notice> : <Spinner />;
+  else if (data.sftp) body = <p className="muted-note">With SFTP only, CityHQ can't read your host's settings, so it can't tell txAdmin's port. Your host's panel shows it.</p>;
+  else if (data.enabled === false) body = <Notice kind="info">txAdmin is turned off in your host's settings for the server. In your host's panel, open Startup, turn it on, then restart the server.</Notice>;
+  else if (!data.port) body = <p className="muted-note">CityHQ couldn't find txAdmin's port in your host's settings for the server. Your host's panel shows it, usually under Startup or Network.</p>;
+  else if (!data.open) {
+    body = (
+      <>
+        <Notice kind="info">txAdmin uses port {data.port}, but your host hasn't opened that port for your server, so its page can't be reached.</Notice>
+        <ol className="alert-steps">
+          <li>In your host's panel, open Network and add a port (create an allocation). Note its number.</li>
+          <li>Open Startup and set txAdmin's port to that number. On some hosts, you turn txAdmin on there and it uses the new port by itself.</li>
+          <li>Restart the server, then check again here.</li>
+        </ol>
+      </>
+    );
+  } else {
+    body = (
+      <>
+        {data.answers === false && <Notice kind="info">txAdmin's page didn't answer just now. It starts with the server: if the server is running, restart it.</Notice>}
+        <p className="muted-note">
+          The first time, txAdmin asks for a PIN and to link your Cfx.re account. The PIN shows in the console as the server starts (search for "PIN" on the Console page in Pro).
+        </p>
+      </>
+    );
+  }
+
+  return (
+    <section className="card">
+      <div className="card-row">
+        <h3 className="card-title"><Server size={16} />txAdmin</h3>
+        <div className="button-row">
+          {data?.url && <a className="btn btn-default" href={data.url} target="_blank" rel="noreferrer"><ExternalLink size={16} /><span>Open txAdmin</span></a>}
+          {data && !data.sftp && <Button variant="ghost" icon={<RefreshCw size={15} />} busy={busy === 'check'} onClick={recheck}>Check again</Button>}
+        </div>
+      </div>
+      {body}
+    </section>
+  );
+}
+
 /** Crash alerts: Windows and Things to fix always; a Discord channel once its webhook is pasted. */
 function CrashAlerts({ local }: { local: boolean }) {
   const { data, setData } = usePoll(api.alerts, 0);
@@ -344,6 +394,8 @@ export function SettingsPage({ online, onSignOut }: { online: boolean; onSignOut
       <Automation />
 
       <CrashAlerts local={data.local} />
+
+      {data.hosted && <HostedTxAdminCard />}
 
       {data.local && <UpdatesCard />}
 

@@ -2,6 +2,12 @@
 
 Each version's section is shown in the app before it updates, and on its GitHub release page.
 
+## 1.9.1
+
+- **txAdmin for hosted servers.** Settings has a txAdmin card with an **Open txAdmin** button. CityHQ reads txAdmin's port from your host's settings for the server, and checks that the port is open and the page answers.
+- When txAdmin's port isn't one your host opened for the server (so its page can't be reached), the card and Health say so, with the steps: add a port under Network in your host's panel, point txAdmin at it under Startup, and restart.
+- Health also says when txAdmin is switched off in your host's settings, or when its page doesn't answer.
+
 ## 1.9.0
 
 - **Crash alerts.** When the server crashes or goes down, CityHQ tells you what happened and why, in plain words: a Windows notification, and the crash in **Things to fix** on Home with its fix.
