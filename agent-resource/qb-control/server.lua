@@ -335,13 +335,47 @@ routes['POST /refresh'] = function()
     return { refreshed = true }
 end
 
+-- A resource that stops or restarts itself from inside its own code crashes the whole server, and
+-- commands sent here run inside this resource. So nothing may start, stop or restart it, or the
+-- [folder] it's in, and exec is refused too: a .cfg file such as server.cfg starts it again.
+local OWN_FOLDERS = {}
+for folder in ((GetResourcePath(RES) or ''):gsub('\\', '/')):gmatch('%[[^/%]]+%]') do
+    OWN_FOLDERS[#OWN_FOLDERS + 1] = folder:lower()
+end
+local RESTART_WORDS = { 'restart', 'stop', 'ensure', 'start' }
+
+-- True when word appears in text on its own, not as part of a longer name.
+local function hasWord(textValue, word)
+    local from = 1
+    while true do
+        local s, e = textValue:find(word, from, true)
+        if not s then return false end
+        local before, after = textValue:sub(s - 1, s - 1), textValue:sub(e + 1, e + 1)
+        if not before:match('[%w_%.%-]') and not after:match('[%w_%.%-]') then return true end
+        from = s + 1
+    end
+end
+
+local function restartsSelf(command)
+    local lowered = command:lower()
+    if hasWord(lowered, 'exec') then return true end
+    local restarting = false
+    for _, word in ipairs(RESTART_WORDS) do
+        if hasWord(lowered, word) then restarting = true break end
+    end
+    if not restarting then return false end
+    if hasWord(lowered, RES:lower()) then return true end
+    for _, folder in ipairs(OWN_FOLDERS) do
+        if hasWord(lowered, folder) then return true end
+    end
+    return false
+end
+
 routes['POST /command'] = function(body)
     local command = text(body.command, 500)
     if not command or command == '' then error('Type a command first') end
-    -- A resource that stops itself from inside its own code crashes the whole server.
-    local lowered = command:lower()
-    if lowered:find(RES:lower(), 1, true) and (lowered:find('restart', 1, true) or lowered:find('stop', 1, true) or lowered:find('ensure', 1, true)) then
-        error(RES .. ' cannot be restarted from here. Restart the whole server instead.')
+    if restartsSelf(command) then
+        error(RES .. ' would stop or restart itself, which crashes the whole server. Restart the whole server instead.')
     end
     ExecuteCommand(command)
     return { ran = command }

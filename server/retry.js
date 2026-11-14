@@ -2,8 +2,11 @@
 // read them, especially right after they were created. Replacing or moving a file at that moment
 // fails with EPERM, EBUSY or EACCES, even though trying again a moment later works. Everything
 // that saves or moves files goes through here, so a passing lock never turns into an error.
-import { renameSync, rmSync, writeFileSync } from 'node:fs';
-import { rename, rm, writeFile } from 'node:fs/promises';
+import { randomBytes } from 'node:crypto';
+import {
+  closeSync, fsyncSync, openSync, renameSync, rmSync, writeFileSync,
+} from 'node:fs';
+import { open, rename, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { HttpError } from './paths.js';
 
@@ -33,14 +36,27 @@ export async function retry(fn, {
 const lockedMessage = (target) => `${path.basename(target)} is open in another program, so it could not be saved. `
   + 'Close it there (or wait a moment if a virus scan is running), then try again.';
 
+/** A name beside the file for its new copy, never the same for two saves at once. */
+export const tempNameFor = (target) => `${target}.${process.pid}-${randomBytes(4).toString('hex')}.qbctmp`;
+
 /**
- * Saves a file safely: the new text goes into a copy beside it, which then replaces the file in
- * one step, so a crash halfway never leaves a half-written file. If the swap keeps failing, the
- * copy is removed and the original stays exactly as it was.
+ * Saves a file safely: the new text goes into a copy beside it, written all the way to the disk,
+ * which then replaces the file in one step. A crash or power cut halfway never leaves a
+ * half-written or empty file, and two saves at once never share a copy. If the swap keeps
+ * failing, the copy is removed and the original stays exactly as it was.
  */
 export async function replaceFile(target, text, { renameFn = rename, wait } = {}) {
-  const tmp = `${target}.qbctmp`;
-  await writeFile(tmp, text);
+  const tmp = tempNameFor(target);
+  const handle = await open(tmp, 'w');
+  try {
+    await handle.writeFile(text);
+    await handle.sync();
+    await handle.close();
+  } catch (err) {
+    await handle.close().catch(() => {});
+    await rm(tmp, { force: true }).catch(() => {});
+    throw err;
+  }
   try {
     await retry(() => renameFn(tmp, target), { wait });
   } catch (err) {
@@ -52,8 +68,17 @@ export async function replaceFile(target, text, { renameFn = rename, wait } = {}
 
 /** The same for the app's own small settings files, which are saved synchronously. */
 export function replaceFileSync(target, text) {
-  const tmp = `${target}.qbctmp`;
-  writeFileSync(tmp, text);
+  const tmp = tempNameFor(target);
+  const fd = openSync(tmp, 'w');
+  try {
+    writeFileSync(fd, text);
+    fsyncSync(fd);
+    closeSync(fd);
+  } catch (err) {
+    try { closeSync(fd); } catch { /* already closed */ }
+    try { rmSync(tmp, { force: true }); } catch { /* best effort */ }
+    throw err;
+  }
   const pause = new Int32Array(new SharedArrayBuffer(4));
   for (let attempt = 1; ; attempt++) {
     try {

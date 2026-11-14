@@ -26,6 +26,8 @@ const BACKUP_RETRY_MS = 60 * 60 * 1000;
 const RECOVER_LIMIT = 3;
 const RECOVER_WINDOW_MS = 15 * 60 * 1000;
 export const WARN_MINUTES = [15, 5, 1];
+/** A planned restart this late means the PC slept through it (or CityHQ couldn't run). */
+export const MISSED_AFTER_MS = 2 * 60 * 1000;
 
 // ---------------------------------------------------------------- pure time helpers
 export const isValidTime = (value) => typeof value === 'string' && /^([01]\d|2[0-3]):[0-5]\d$/.test(value);
@@ -67,6 +69,16 @@ export function warningDue(msLeft, announced, thresholds = WARN_MINUTES) {
   if (!due.length) return null;
   const closest = Math.min(...due);
   return { minutes: closest, marks: due };
+}
+
+/**
+ * What a planned restart needs now: 'wait', 'now', or 'missed' when its time passed long ago, which
+ * means the PC was asleep. Restarting the moment it wakes, hours late and without the last
+ * warnings, would throw off players who joined since.
+ */
+export function restartDue(msLeft, missedAfterMs = MISSED_AFTER_MS) {
+  if (msLeft > 0) return 'wait';
+  return -msLeft > missedAfterMs ? 'missed' : 'now';
 }
 
 const minutesText = (n) => `${n} minute${n === 1 ? '' : 's'}`;
@@ -112,10 +124,30 @@ async function runPendingRestart() {
   }
 }
 
+function skipMissedRestart() {
+  const { at, reason, key, announced } = pending;
+  const scheduled = reason === 'scheduled';
+  if (key) skipped.add(key);
+  pending = null;
+  if (announced.length) announce('The planned server restart was cancelled.');
+  const when = new Date(at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  recordEvent({
+    // A restart someone asked for is worth a notice; the daily one just comes round again.
+    level: scheduled ? 'info' : 'alert',
+    title: scheduled ? 'A scheduled restart was skipped' : 'A planned restart was skipped',
+    detail: `It was due at ${when}, while the PC was asleep or CityHQ couldn't run. Restarting this late, without warning players first, would catch out anyone who joined since. ${scheduled ? 'The next one happens at its usual time.' : 'Plan it again from Home if it\'s still needed.'}`,
+  });
+}
+
 function pendingTick() {
   if (!pending || restartRunning) return;
   const msLeft = pending.at - Date.now();
-  if (msLeft <= 0) {
+  const due = restartDue(msLeft);
+  if (due === 'missed') {
+    skipMissedRestart();
+    return;
+  }
+  if (due === 'now') {
     runPendingRestart();
     return;
   }
@@ -404,32 +436,44 @@ async function hostedWatchTick() {
 }
 
 // ---------------------------------------------------------------- the loop
-let timer = null;
-let ticking = false;
-
-async function tick() {
-  if (ticking) return;
-  ticking = true;
-  try {
-    pendingTick();
-    if (!isSecondary()) {
-      const now = new Date();
-      scheduleTick(now);
-      // A hosted server is backed up by its host, and its crashes are followed in its console:
-      // the panel's live one each time, a log file over SFTP every third time.
-      if (!REMOTE) {
-        watchTick();
-        await backupTick(now);
-      } else if (REMOTE.type !== 'sftp' || (sftpTicks = (sftpTicks + 1) % 3) === 0) {
-        await hostedWatchTick();
-      }
+/**
+ * One turn of the scheduler: the quick checks every time, and the slow job (the nightly backup)
+ * started beside them, never waited for and never run twice at once. A backup can take an hour on
+ * a big server, and crash watching, restart warnings and scheduled restarts keep going meanwhile.
+ */
+export function createTicker({ quick, slow, onError = (err) => console.error('[cityhq] scheduler:', err) }) {
+  let ticking = false;
+  let slowRun = null;
+  return async () => {
+    if (ticking) return;
+    ticking = true;
+    try {
+      await quick();
+    } catch (err) {
+      onError(err);
+    } finally {
+      ticking = false;
     }
-  } catch (err) {
-    console.error('[cityhq] scheduler:', err);
-  } finally {
-    ticking = false;
-  }
+    if (!slowRun) {
+      slowRun = Promise.resolve().then(slow).catch(onError).finally(() => { slowRun = null; });
+    }
+  };
 }
+
+const tick = createTicker({
+  async quick() {
+    pendingTick();
+    if (isSecondary()) return;
+    scheduleTick(new Date());
+    // A hosted server is backed up by its host, and its crashes are followed in its console:
+    // the panel's live one each time, a log file over SFTP every third time.
+    if (!REMOTE) watchTick();
+    else if (REMOTE.type !== 'sftp' || (sftpTicks = (sftpTicks + 1) % 3) === 0) await hostedWatchTick();
+  },
+  slow: () => (!isSecondary() && !REMOTE ? backupTick(new Date()) : null),
+});
+
+let timer = null;
 
 export function startScheduler() {
   if (timer) return;

@@ -35,7 +35,7 @@ import {
 import {
   parseAdmins, removeAdmin, rolesFor, setAdmin, VALID_IDENTIFIER,
 } from './admins.js';
-import { readCfg, writeCfg } from './cfg.js';
+import { readCfg, withCfg, writeCfg } from './cfg.js';
 import { knownPlayers, nameFor } from './people.js';
 import { startupDoctor } from './doctor.js';
 import {
@@ -556,20 +556,23 @@ function buildApp() {
     const cfgPath = serverCfg();
     const { framework } = serverFramework();
     const ROLES = rolesFor(framework);
-    const before = parseAdmins(await readCfg(cfgPath), framework).find((a) => a.identifier === identifier) || null;
+    // Read and saved with server.cfg to itself, so a change made at the same moment isn't lost.
+    const { before, removed } = await withCfg(cfgPath, async () => {
+      const cfg = await readCfg(cfgPath);
+      const was = parseAdmins(cfg, framework).find((a) => a.identifier === identifier) || null;
+      const change = role ? setAdmin(cfg, identifier, role, name, framework) : removeAdmin(cfg, identifier, framework);
+      if (!role && !change.removed.length) throw new HttpError(404, 'That player is not an admin');
+      await writeCfg(cfgPath, change.text);
+      return { before: was, removed: change.removed };
+    });
     let result;
     if (role) {
-      const { text, removed } = setAdmin(await readCfg(cfgPath), identifier, role, name, framework);
-      await writeCfg(cfgPath, text);
       const live = await applyLive([
         ...removed.map((principal) => ({ identifier, role: principal, remove: true })),
         { identifier, role: ROLES[role].principal },
       ]);
       result = { saved: true, live };
     } else {
-      const { text, removed } = removeAdmin(await readCfg(cfgPath), identifier, framework);
-      if (!removed.length) throw new HttpError(404, 'That player is not an admin');
-      await writeCfg(cfgPath, text);
       result = { removed: removed.length, live: await applyLive(removed.map((principal) => ({ identifier, role: principal, remove: true }))) };
     }
     if (getSettings().whitelist.enabled) await pushWhitelist().catch(() => {});
@@ -716,6 +719,11 @@ let appInstance = null;
 let mainServer = null;
 let lanServers = [];
 let lastLanErrors = [];
+let lanQueue = Promise.resolve();
+let lanWatch = null;
+// How often phone access checks this PC's network addresses: Wi-Fi often connects after CityHQ
+// opens at sign-in, and a laptop moves between networks.
+const LAN_CHECK_MS = 30000;
 
 const listen = (app, host) => new Promise((resolve, reject) => {
   const server = http.createServer(app);
@@ -729,21 +737,51 @@ const listen = (app, host) => new Promise((resolve, reject) => {
   });
 });
 
-export async function applyLanSetting() {
-  await Promise.all(lanServers.map((s) => new Promise((r) => {
-    s.close(() => r());
-    s.closeAllConnections?.();
-  })));
-  lanServers = [];
+const closeServer = (s) => new Promise((r) => {
+  s.close(() => r());
+  s.closeAllConnections?.();
+});
+
+/**
+ * Listens on this PC's home-network addresses while phone access is on, and on nothing while it's
+ * off. Run again whenever the addresses may have changed: an address that's gone is closed, a new
+ * one is opened, one that failed is tried again, and the ones that work are left alone, so phones
+ * stay connected.
+ */
+async function applyLanNow() {
+  const wanted = getSettings().lanEnabled ? lanAddresses() : [];
+  const keep = [];
+  for (const s of lanServers) {
+    if (wanted.includes(s.boundTo)) keep.push(s);
+    else await closeServer(s);
+  }
+  lanServers = keep;
   lastLanErrors = [];
-  if (!getSettings().lanEnabled) return;
-  for (const address of lanAddresses()) {
+  for (const address of wanted) {
+    if (lanServers.some((s) => s.boundTo === address)) continue;
     try {
-      lanServers.push(await listen(appInstance, address));
+      const server = await listen(appInstance, address);
+      server.boundTo = address;
+      lanServers.push(server);
     } catch (err) {
       lastLanErrors.push(`${address}: ${err.message}`);
     }
   }
+}
+
+/** One change to phone access at a time (a check and a click on the switch can meet). */
+export function applyLanSetting() {
+  const run = lanQueue.then(applyLanNow, applyLanNow);
+  lanQueue = run.catch(() => {});
+  return run;
+}
+
+function watchLan() {
+  if (lanWatch) return;
+  lanWatch = setInterval(() => {
+    if (getSettings().lanEnabled || lanServers.length) applyLanSetting().catch((err) => console.error('[cityhq] phone access:', err));
+  }, LAN_CHECK_MS);
+  lanWatch.unref?.();
 }
 
 export async function startApp() {
@@ -766,6 +804,7 @@ export async function startApp() {
     startStatusPolling();
     mainServer = await listen(appInstance, '127.0.0.1');
     await applyLanSetting();
+    watchLan();
     startScheduler();
     startStats();
     startUpdateChecks();
@@ -782,6 +821,7 @@ export async function startApp() {
   await ensureCfgBlock().catch((err) => console.error('[cityhq] cfg setup:', err));
   mainServer = await listen(appInstance, '127.0.0.1');
   await applyLanSetting();
+  watchLan();
   startScheduler();
   startStats();
   startAwakeWatch();
@@ -794,6 +834,8 @@ export async function startApp() {
 }
 
 export async function stopApp() {
+  clearInterval(lanWatch);
+  lanWatch = null;
   stopScheduler();
   stopStats();
   stopAwakeWatch();

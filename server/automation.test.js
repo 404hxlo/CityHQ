@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import {
-  existsSync, readFileSync, renameSync, rmSync, writeFileSync,
+  existsSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync,
 } from 'node:fs';
 import path from 'node:path';
 import { test } from 'node:test';
@@ -185,7 +185,7 @@ test('your real error: a file busy for a moment is saved on a later try', async 
   await replaceFile(target, 'new', { renameFn: flakyRename, wait: noWait });
   assert.equal(calls, 3);
   assert.equal(readFileSync(target, 'utf8'), 'new');
-  assert.equal(existsSync(`${target}.qbctmp`), false);
+  assert.deepEqual(readdirSync(tmpDir).filter((n) => n.endsWith('.qbctmp')), []);
   rmSync(tmpDir, { recursive: true, force: true });
 });
 
@@ -202,7 +202,7 @@ test('a file that stays busy: a plain message, the original untouched, no leftov
   });
   assert.equal(calls, 8);
   assert.equal(readFileSync(target, 'utf8'), 'old');
-  assert.equal(existsSync(`${target}.qbctmp`), false);
+  assert.deepEqual(readdirSync(tmpDir).filter((n) => n.endsWith('.qbctmp')), []);
   rmSync(tmpDir, { recursive: true, force: true });
 });
 

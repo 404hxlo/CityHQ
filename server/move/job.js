@@ -20,7 +20,9 @@ import { recordEvent } from '../events.js';
 import {
   findServerData, HttpError, REMOTE, ROOT, STATE_DIR, TX_PROFILE,
 } from '../paths.js';
-import { ensureDatabase, getProcessState, isPortOpen } from '../processes.js';
+import {
+  ensureDatabase, getProcessState, isPortOpen, waitFor,
+} from '../processes.js';
 import { replaceFileSync } from '../retry.js';
 import { makeConnection } from '../remote/connection.js';
 import { findHostedServer } from '../remote/find.js';
@@ -498,6 +500,28 @@ async function uploadTree(sftp, localDir, remoteDir, s, signal) {
 
 // ---------------------------------------------------------------- finishing
 /**
+ * Why finishing has to wait before it stops the server on this PC, or null. players is the list
+ * from the helper, or null when it didn't answer while the server was up: then nobody can say
+ * whether anyone is on, so it waits too.
+ */
+export function finishBlocker({ stopLocal = true, playersOk = false, serverUp, players }) {
+  if (stopLocal === false || playersOk || !serverUp) return null;
+  if (players === null) {
+    return new HttpError(409, 'CityHQ couldn\'t check whether anyone is playing on your server on this PC, so it didn\'t stop it. Stop it from Home when nobody is on, then press Finish the move again.', { players: null });
+  }
+  if (players.length) {
+    return new HttpError(409, `${players.length} player${players.length === 1 ? ' is' : 's are'} on your server. Finishing stops it here; try again when nobody is on.`, { players: players.length });
+  }
+  return null;
+}
+
+/** True once neither txAdmin nor the game server of this PC's server is running. */
+const stoppedHere = () => {
+  const p = getProcessState();
+  return !p.monitor && !p.game;
+};
+
+/**
  * The last part, once the resources are there: stop the server here (if asked), copy the
  * database and server.cfg, put the helper on the host, start it there, and switch CityHQ over.
  */
@@ -505,10 +529,10 @@ export async function finishMove(body = {}) {
   const s = load();
   if (!s || s.phase !== 'ready') throw new HttpError(409, 'The resources aren\'t on your host yet.');
   if (running) throw new HttpError(409, 'The move is already running.');
-  const players = await agentRequest('/players', { timeoutMs: 4000 }).catch(() => []);
-  if (body.stopLocal !== false && players.length && !body.playersOk) {
-    throw new HttpError(409, `${players.length} player${players.length === 1 ? ' is' : 's are'} on your server. Finishing stops it here; try again when nobody is on.`, { players: players.length });
-  }
+  const serverUp = !stoppedHere();
+  const players = serverUp ? await agentRequest('/players', { timeoutMs: 4000 }).catch(() => null) : [];
+  const blocker = finishBlocker({ ...body, serverUp, players });
+  if (blocker) throw blocker;
   holdAwake('move');
   running = (async () => {
     const local = findServerData();
@@ -521,7 +545,15 @@ export async function finishMove(body = {}) {
       // Stop the server here first, so nothing changes in the database after it is copied.
       s.step = 'stop-local';
       save();
-      if (body.stopLocal !== false) await stopServer('The server is moving to its new home. See you there in a few minutes!').catch(() => {});
+      if (body.stopLocal !== false) {
+        let stopError = null;
+        await stopServer('The server is moving to its new home. See you there in a few minutes!').catch((err) => { stopError = err; });
+        // The database is only copied once nothing here can change it any more: what players do
+        // after the copy would otherwise be lost when CityHQ switches to the host.
+        if (!(await waitFor(stoppedHere, 20000))) {
+          throw new HttpError(409, `Your server on this PC is still running${stopError ? ` (${stopError.message})` : ''}, so nothing was copied yet. Stop it from Home, then press Finish the move again.`);
+        }
+      }
       // The host's server stays off while its files change.
       if (panel) {
         s.step = 'stop-host';

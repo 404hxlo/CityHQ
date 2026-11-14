@@ -4,7 +4,7 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import {
-  readCfg, readCommand, readConvar, setCommand, writeCfg,
+  changeCfgFile, readCfg, readCommand, readConvar, setCommand,
 } from './cfg.js';
 import { keepVersion, SERVER_SCOPE } from './files.js';
 import { recordChange } from './history.js';
@@ -59,15 +59,19 @@ export async function setMaxClients(value) {
   const slots = Number(value);
   if (!Number.isInteger(slots) || slots < 1 || slots > MAX_SLOTS) throw new HttpError(400, `Choose between 1 and ${MAX_SLOTS} player slots.`);
   const { cfgPath } = serverData();
-  const before = await readCfg(cfgPath);
-  const onesync = oneSyncMode(before, txConfig());
-  if (slots > ONESYNC_SLOTS[onesync]) {
-    throw new HttpError(400, `With OneSync ${onesync === 'off' ? 'off' : 'set to legacy'}, FiveM allows at most ${ONESYNC_SLOTS[onesync]} player slots. Turn OneSync on in txAdmin's settings (or server.cfg) for more.`);
-  }
-  const old = Number(readCommand(before, 'sv_maxclients')) || null;
-  if (old === slots) return readProfile();
-  const versionId = await keepVersion(SERVER_SCOPE, 'server.cfg');
-  await writeCfg(cfgPath, setCommand(before, 'sv_maxclients', String(slots)));
+  let old = null;
+  let versionId = null;
+  const { changed } = await changeCfgFile(cfgPath, async (before) => {
+    const onesync = oneSyncMode(before, txConfig());
+    if (slots > ONESYNC_SLOTS[onesync]) {
+      throw new HttpError(400, `With OneSync ${onesync === 'off' ? 'off' : 'set to legacy'}, FiveM allows at most ${ONESYNC_SLOTS[onesync]} player slots. Turn OneSync on in txAdmin's settings (or server.cfg) for more.`);
+    }
+    old = Number(readCommand(before, 'sv_maxclients')) || null;
+    if (old === slots) return before;
+    versionId = await keepVersion(SERVER_SCOPE, 'server.cfg');
+    return setCommand(before, 'sv_maxclients', String(slots));
+  });
+  if (!changed) return readProfile();
   recordChange({
     kind: 'file',
     title: `Player slots changed${old ? ` from ${old}` : ''} to ${slots}`,

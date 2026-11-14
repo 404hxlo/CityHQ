@@ -6,7 +6,9 @@ import {
 } from 'node:fs/promises';
 import path from 'node:path';
 import { agentRequest } from './agent.js';
-import { maskSecrets, restoreSecrets, SECRET_MASK } from './cfg.js';
+import {
+  fileLock, maskSecrets, restoreSecrets, SECRET_MASK, withFileLock,
+} from './cfg.js';
 import { luaPlain } from './explain.js';
 import { applyFieldChanges, parseCfgFields, parseLuaFields } from './fields.js';
 import {
@@ -268,8 +270,19 @@ async function loadForWrite(scope, rel, etag) {
   return { full, current };
 }
 
-export async function saveContent(scope, rel, content, etag, { force = false } = {}) {
+/** Runs a save with the file to itself, so two saves (or a save and a fix) can't overwrite each other. */
+async function holding(scope, rel, fn) {
+  assertScopePath(scope, rel);
+  const full = resolveInside(await scopeBase(scope), rel);
+  return withFileLock(fileLock(full), fn);
+}
+
+export async function saveContent(scope, rel, content, etag, options = {}) {
   if (typeof content !== 'string') throw new HttpError(400, 'Missing file content');
+  return holding(scope, rel, () => saveContentNow(scope, rel, content, etag, options));
+}
+
+async function saveContentNow(scope, rel, content, etag, { force = false } = {}) {
   const { full, current } = await loadForWrite(scope, rel, etag);
   let next = content;
   if (isCfgFile(full)) {
@@ -285,8 +298,12 @@ export async function saveContent(scope, rel, content, etag, { force = false } =
   return { ...(await readEditable(scope, rel)), backupId, syntaxChecked: check.checked && !check.plain };
 }
 
-export async function saveFields(scope, rel, changes, etag, { force = false } = {}) {
+export async function saveFields(scope, rel, changes, etag, options = {}) {
   if (!Array.isArray(changes) || !changes.length) throw new HttpError(400, 'No changes to save');
+  return holding(scope, rel, () => saveFieldsNow(scope, rel, changes, etag, options));
+}
+
+async function saveFieldsNow(scope, rel, changes, etag, { force = false } = {}) {
   const { full, current } = await loadForWrite(scope, rel, etag);
   const { kind } = fieldsFor(scope, rel, current);
   if (!kind) throw new HttpError(400, 'This file does not have simple settings');
@@ -328,6 +345,10 @@ export async function listVersions(scope, rel) {
 
 export async function restoreVersion(scope, rel, id) {
   if (!/^\d+$/.test(String(id))) throw new HttpError(400, 'Invalid version');
+  return holding(scope, rel, () => restoreVersionNow(scope, rel, id));
+}
+
+async function restoreVersionNow(scope, rel, id) {
   const { full } = await loadForWrite(scope, rel);
   const source = path.join(backupDirFor(scope, rel), `${id}.bak`);
   if (!existsSync(source)) throw new HttpError(404, 'That backup no longer exists');

@@ -6,8 +6,8 @@ import path from 'node:path';
 import { refreshAwake } from './awake.js';
 import { createBackup } from './backups.js';
 import {
-  addBootLine, hideFromListAgain, hidesFromList, parseBoot, readCfg, readConvar, removeBootLine, removeFromManagedBlock,
-  setConvar, showOnList, writeCfg,
+  addBootLine, changeCfgFile, hideFromListAgain, hidesFromList, parseBoot, readCfg, readConvar, removeBootLine, removeFromManagedBlock,
+  setConvar, showOnList,
 } from './cfg.js';
 import { dbRun, tableInfo, VALID_TABLE } from './db.js';
 import { backupDirFor, keepVersion, SERVER_SCOPE } from './files.js';
@@ -196,13 +196,16 @@ export async function fixedThisBoot(bootMarker) {
   return new Set((await readLog()).filter((f) => !f.undone && f.boot === bootMarker).map((f) => f.problemId));
 }
 
+/** Changes server.cfg as one step (nothing else changes it meanwhile), keeping a copy first. */
 async function changeCfg(mutate) {
   const { cfgPath } = serverData();
-  const before = await readCfg(cfgPath);
-  const after = mutate(before);
-  if (after === before) return null;
-  const versionId = await keepVersion(SERVER_SCOPE, 'server.cfg');
-  await writeCfg(cfgPath, after);
+  let versionId = null;
+  await changeCfgFile(cfgPath, async (before) => {
+    const after = mutate(before);
+    if (after === before) return before;
+    versionId = await keepVersion(SERVER_SCOPE, 'server.cfg');
+    return after;
+  });
   return versionId;
 }
 

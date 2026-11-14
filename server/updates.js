@@ -166,19 +166,28 @@ export function stopUpdateChecks() {
   timer = null;
 }
 
-/** The expected SHA-256 of the zip: GitHub's own digest, and the .sha256 file when there is one. */
+/** The checksum in a .sha256 file ("<64 hex characters>  CityHQ-windows.zip"), or null. */
+export const checksumIn = (text) => /^([0-9a-f]{64})\b/i.exec(String(text ?? '').trim())?.[1]?.toLowerCase() || null;
+
+/**
+ * The SHA-256 the download must have: GitHub's own digest and the .sha256 file. When both are
+ * there they must agree, and with neither there is nothing to check against, so nothing installs.
+ */
+export function expectedFrom(digest, fromFile) {
+  if (digest && fromFile && digest !== fromFile) throw new HttpError(502, 'The update\'s two published checksums disagree, so nothing was installed.');
+  const expected = digest || fromFile;
+  if (!expected) throw new HttpError(502, 'The update has no checksum to check it against, so nothing was installed.');
+  return expected;
+}
+
 async function expectedChecksum(release) {
   let fromFile = null;
   if (release.sumsUrl) {
     const file = path.join(UPDATES_DIR, `${ASSET}.sha256`);
     await download(release.sumsUrl, file, null, 'the update\'s checksum');
-    fromFile = /^([0-9a-f]{64})\b/i.exec((await readFile(file, 'utf8')).trim())?.[1]?.toLowerCase() || null;
+    fromFile = checksumIn(await readFile(file, 'utf8'));
   }
-  const digest = release.zip.digest;
-  if (digest && fromFile && digest !== fromFile) throw new HttpError(502, 'The update\'s two published checksums disagree, so nothing was installed.');
-  const expected = digest || fromFile;
-  if (!expected) throw new HttpError(502, 'The update has no checksum to check it against, so nothing was installed.');
-  return expected;
+  return expectedFrom(release.zip.digest, fromFile);
 }
 
 async function prepare(release, install) {

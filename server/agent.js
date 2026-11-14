@@ -12,7 +12,44 @@ const BASE = `http://127.0.0.1:${GAME_PORT}/qb-control`;
 let hostedBase = null;
 export const setAgentBase = (fn) => { hostedBase = fn; };
 
+// ---- console commands the helper must never run ----
+// A resource that stops or restarts itself from its own code crashes the whole server, and console
+// commands typed in CityHQ run inside the helper. These start, stop or restart a resource; exec
+// runs a .cfg file, and server.cfg (like most) starts the helper again.
+const HELPER = 'qb-control';
+const HELPER_FOLDERS = ['[local]'];
+const RESTART_WORDS = ['restart', 'stop', 'ensure', 'start'];
+const NAME_CHAR = /[\w.-]/;
+
+/** True when word appears in text on its own, not as part of a longer name. */
+function hasWord(text, word) {
+  for (let i = text.indexOf(word); i !== -1; i = text.indexOf(word, i + 1)) {
+    if (!NAME_CHAR.test(text[i - 1] || '') && !NAME_CHAR.test(text[i + word.length] || '')) return true;
+  }
+  return false;
+}
+
+/**
+ * Why a console command can't be run through the helper: 'exec' (a .cfg file can start the helper
+ * again), 'restart' (it stops, starts or restarts the helper, or the folder it's in), or null.
+ */
+export function helperRestartReason(command) {
+  const text = String(command ?? '').toLowerCase();
+  if (hasWord(text, 'exec')) return 'exec';
+  if (!RESTART_WORDS.some((w) => hasWord(text, w))) return null;
+  return [HELPER, ...HELPER_FOLDERS].some((n) => hasWord(text, n)) ? 'restart' : null;
+}
+
+export const HELPER_RESTART_MESSAGES = {
+  exec: 'exec can\'t run from CityHQ: the .cfg file would start CityHQ\'s helper again from inside the helper itself, which crashes the whole server. To load changes to server.cfg, restart the server.',
+  restart: 'That would make CityHQ\'s helper (qb-control) stop or restart itself, which crashes the whole server. Restart the whole server from Home instead.',
+};
+
 export async function agentRequest(route, { method = 'GET', body, timeoutMs = 4000 } = {}) {
+  if (route === '/command') {
+    const reason = helperRestartReason(body?.command);
+    if (reason) throw new HttpError(400, HELPER_RESTART_MESSAGES[reason]);
+  }
   const base = hostedBase ? `${await hostedBase()}/qb-control` : BASE;
   // Over the internet things take longer than on this PC.
   if (hostedBase) timeoutMs = Math.max(timeoutMs, 10000);

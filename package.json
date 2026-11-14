@@ -13,7 +13,7 @@
     "build": "npm run typecheck && vite build",
     "serve": "node server/standalone.js",
     "desktop": "electron .",
-    "test": "node --test server/fields.test.js server/browser.test.js server/automation.test.js server/remote.test.js web/commands.test.ts",
+    "test": "node --test server/fields.test.js server/browser.test.js server/automation.test.js server/remote.test.js server/safety.test.js server/auth.test.js web/commands.test.ts",
     "package": "npm run build && node scripts/package.js",
     "icons": "electron scripts/make-icons.mjs"
   },

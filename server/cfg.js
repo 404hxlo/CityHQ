@@ -1,6 +1,8 @@
 // Reads and edits server.cfg: which resources start at boot, the app's own managed
 // block, and masking of secrets so they never reach the browser.
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { readFile } from 'node:fs/promises';
+import path from 'node:path';
 import { replaceFile } from './retry.js';
 
 export const BLOCK_START = '# >>> CityHQ (managed by the app, edits here may be replaced)';
@@ -23,9 +25,51 @@ const EOL = (text) => (text.includes('\r\n') ? '\r\n' : '\n');
 let hostedIo = null;
 export const setCfgIo = (io) => { hostedIo = io; };
 
+// ---- one change at a time ----
+const held = new AsyncLocalStorage();
+const queues = new Map();
+
+/**
+ * Runs fn with a file to itself: another change to the same file waits until this one is done, so
+ * two changes made at once (from the PC and a phone, say, or a fix during an install) never undo
+ * each other. Code that already holds the file (one change calling another) just carries on.
+ */
+export function withFileLock(key, fn) {
+  const mine = held.getStore();
+  if (mine?.has(key)) return fn();
+  const before = queues.get(key) || Promise.resolve();
+  const run = before.then(() => held.run(new Set([...(mine || []), key]), fn));
+  const done = run.then(() => {}, () => {});
+  queues.set(key, done);
+  done.then(() => { if (queues.get(key) === done) queues.delete(key); });
+  return run;
+}
+
+/** The lock for a file on this PC (Windows paths ignore case), or for one on a hosted server. */
+export const fileLock = (full) => path.resolve(full).toLowerCase();
+export const hostLock = (hostPath) => `host:${hostPath}`;
+const cfgLock = (cfgPath) => (hostedIo ? hostLock(cfgPath) : fileLock(cfgPath));
+
 export const readCfg = (cfgPath) => (hostedIo ? hostedIo.read(cfgPath) : readFile(cfgPath, 'utf8'));
 
-export const writeCfg = (cfgPath, text) => (hostedIo ? hostedIo.write(cfgPath, text) : replaceFile(cfgPath, text));
+export const writeCfg = (cfgPath, text) => withFileLock(cfgLock(cfgPath), () => (hostedIo ? hostedIo.write(cfgPath, text) : replaceFile(cfgPath, text)));
+
+/** Runs fn with server.cfg to itself, for a change that reads it, works something out and writes it. */
+export const withCfg = (cfgPath, fn) => withFileLock(cfgLock(cfgPath), fn);
+
+/**
+ * Reads server.cfg, changes it and saves it, with the file to itself throughout. mutate gets the
+ * text and returns the new text; the same text (or nothing) leaves the file alone.
+ */
+export function changeCfgFile(cfgPath, mutate) {
+  return withCfg(cfgPath, async () => {
+    const before = await readCfg(cfgPath);
+    const next = await mutate(before);
+    if (typeof next !== 'string' || next === before) return { before, after: before, changed: false };
+    await writeCfg(cfgPath, next);
+    return { before, after: next, changed: true };
+  });
+}
 
 /** A line's code and its comment (# or //), with quoted text kept whole. */
 export function splitComment(line) {

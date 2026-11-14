@@ -5,7 +5,9 @@ import { execFile } from 'node:child_process';
 import { mkdir, readdir, readFile, rm, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
-import { forgetBootLines, parseBoot, readCfg, writeCfg } from '../cfg.js';
+import {
+  addBootLine, changeCfgFile, forgetBootLines, parseBoot, readCfg, withCfg, writeCfg,
+} from '../cfg.js';
 import { recordChange } from '../history.js';
 import { findServerData, HttpError, TMP_DIR } from '../paths.js';
 import { agentRequest } from '../agent.js';
@@ -82,11 +84,13 @@ export async function removeFromHost(name, { record = true } = {}) {
   const spare = `${name}-${Date.now()}`;
   await conn.files.rename(resources, from, `${REMOVED}/${spare}`);
   const { cfgPath } = findServerData();
-  const cfg = await readCfg(cfgPath);
-  const boot = parseBoot(cfg);
-  const startedAtBoot = boot.names.has(name) || resource.categories.some((c) => boot.categories.has(c));
-  const next = forgetBootLines(cfg, name);
-  if (next !== cfg) await writeCfg(cfgPath, next);
+  const startedAtBoot = await withCfg(cfgPath, async () => {
+    const cfg = await readCfg(cfgPath);
+    const boot = parseBoot(cfg);
+    const next = forgetBootLines(cfg, name);
+    if (next !== cfg) await writeCfg(cfgPath, next);
+    return boot.names.has(name) || resource.categories.some((c) => boot.categories.has(c));
+  });
   forgetResourceMeta();
   await agentRequest('/refresh', { method: 'POST', timeoutMs: 15000 }).catch(() => null);
   if (record) {
@@ -107,11 +111,7 @@ export async function restoreOnHost({ name, from, spare, boot }) {
   await conn.files.rename(resources, `${REMOVED}/${spare}`, from);
   if (boot) {
     const { cfgPath } = findServerData();
-    const cfg = await readCfg(cfgPath);
-    if (!parseBoot(cfg).names.has(name)) {
-      const { addBootLine } = await import('../cfg.js');
-      await writeCfg(cfgPath, addBootLine(cfg, name));
-    }
+    await changeCfgFile(cfgPath, (cfg) => (parseBoot(cfg).names.has(name) ? cfg : addBootLine(cfg, name)));
   }
   forgetResourceMeta();
   await agentRequest('/refresh', { method: 'POST', timeoutMs: 15000 }).catch(() => null);

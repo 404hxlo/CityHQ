@@ -3,7 +3,9 @@
 // whether it starts with the server work; installing and removing come in a later version.
 import path from 'node:path';
 import { agentRequest } from '../agent.js';
-import { addBootLine, parseBoot, readCfg, removeBootLine, writeCfg } from '../cfg.js';
+import {
+  addBootLine, parseBoot, readCfg, removeBootLine, withCfg, writeCfg,
+} from '../cfg.js';
 import { serverFramework } from '../framework.js';
 import { findServerData, HttpError } from '../paths.js';
 import { recordChange } from '../history.js';
@@ -141,22 +143,25 @@ export async function setHostedBoot(name, enabled, { record = true } = {}) {
   if (!isValidName(name)) throw new HttpError(400, 'Invalid resource name');
   if (NEVER_STOP.has(name)) throw new HttpError(400, `${name} must always start with the server`);
   const { cfgPath, dataPath } = server();
-  const cfg = await readCfg(cfgPath);
-  const boot = parseBoot(cfg);
-  let next = cfg;
-  if (enabled) {
-    if (!boot.names.has(name)) next = addBootLine(cfg, name);
-  } else {
-    next = removeBootLine(cfg, name);
-    const live = await agentRequest('/resources', { timeoutMs: 15000 }).catch(() => []);
-    const entry = live.find((r) => r.name === name);
-    const where = categoriesOf(entry?.path, dataPath);
-    const covering = where.categories.find((c) => parseBoot(next).categories.has(c));
-    if (covering) {
-      throw new HttpError(409, `${name} starts because server.cfg starts its whole ${covering} folder. To leave it out, move its folder out of ${covering} with your host's file manager.`);
+  // Where it is on the host, asked before server.cfg is held, since the helper can be slow to answer.
+  const live = enabled ? [] : await agentRequest('/resources', { timeoutMs: 15000 }).catch(() => []);
+  await withCfg(cfgPath, async () => {
+    const cfg = await readCfg(cfgPath);
+    const boot = parseBoot(cfg);
+    let next = cfg;
+    if (enabled) {
+      if (!boot.names.has(name)) next = addBootLine(cfg, name);
+    } else {
+      next = removeBootLine(cfg, name);
+      const entry = live.find((r) => r.name === name);
+      const where = categoriesOf(entry?.path, dataPath);
+      const covering = where.categories.find((c) => parseBoot(next).categories.has(c));
+      if (covering) {
+        throw new HttpError(409, `${name} starts because server.cfg starts its whole ${covering} folder. To leave it out, move its folder out of ${covering} with your host's file manager.`);
+      }
     }
-  }
-  if (next !== cfg) await writeCfg(cfgPath, next);
+    if (next !== cfg) await writeCfg(cfgPath, next);
+  });
   if (record) {
     recordChange({
       kind: 'boot',

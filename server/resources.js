@@ -12,8 +12,8 @@ import { agentRequest } from './agent.js';
 import { createBackup } from './backups.js';
 import { findInstallSource } from './catalog.js';
 import {
-  addBootLine, connectionStringOf, convarOn, ensureManagedBlock, forgetBootLines, parseBoot, parseConnection, readCfg,
-  readConvar, removeBootLine, setConvar, writeCfg,
+  addBootLine, changeCfgFile, connectionStringOf, convarOn, ensureManagedBlock, forgetBootLines, parseBoot, parseConnection, readCfg,
+  readConvar, removeBootLine, setConvar, withCfg, writeCfg,
 } from './cfg.js';
 import { clientArgs, clientEnv, dbClient } from './dbtools.js';
 import { serverFramework } from './framework.js';
@@ -367,6 +367,12 @@ export async function setBoot(name, enabled, { record = true } = {}) {
 async function switchBoot(name, enabled) {
   if (!isValidName(name)) throw new HttpError(400, 'Invalid resource name');
   if (NEVER_STOP.has(name)) throw new HttpError(400, `${name} must always start with the server`);
+  const { cfgPath } = serverData();
+  // server.cfg is read, decided on and saved as one change, so one made meanwhile isn't lost.
+  return withCfg(cfgPath, () => switchBootNow(name, enabled));
+}
+
+async function switchBootNow(name, enabled) {
   const { cfgPath, dataPath } = serverData();
   let cfg = await readCfg(cfgPath);
   const resource = await findResourceDir(name);
@@ -613,7 +619,7 @@ export async function installFromUpload(stream, filename, declaredSize) {
 export async function activateInstalled(name, { boot, start }) {
   if (!isValidName(name)) throw new HttpError(400, 'Invalid resource name');
   const { cfgPath } = serverData();
-  if (boot) await writeCfg(cfgPath, addBootLine(await readCfg(cfgPath), name));
+  if (boot) await changeCfgFile(cfgPath, (cfg) => addBootLine(cfg, name));
   if (start) {
     await refreshResources();
     return resourceAction(name, 'ensure');
@@ -662,11 +668,14 @@ export async function removeResource(name) {
   const dest = path.join(TRASH_DIR, id);
   await mkdir(TRASH_DIR, { recursive: true });
   const rel = path.relative(path.join(dataPath, 'resources'), resource.dir);
-  const boot = parseBoot(await readCfg(cfgPath));
-  const startedAtBoot = boot.names.has(name) || resource.categories.some((c) => boot.categories.has(c));
-  await moveFolderSafely(resource.dir, dest, name);
-  await writeFile(`${dest}.json`, JSON.stringify({ name, origin: rel, removedAt: Date.now() }));
-  await writeCfg(cfgPath, forgetBootLines(await readCfg(cfgPath), name));
+  const startedAtBoot = await withCfg(cfgPath, async () => {
+    const boot = parseBoot(await readCfg(cfgPath));
+    const wasAtBoot = boot.names.has(name) || resource.categories.some((c) => boot.categories.has(c));
+    await moveFolderSafely(resource.dir, dest, name);
+    await writeFile(`${dest}.json`, JSON.stringify({ name, origin: rel, removedAt: Date.now() }));
+    await writeCfg(cfgPath, forgetBootLines(await readCfg(cfgPath), name));
+    return wasAtBoot;
+  });
 
   const disabled = await readDisabled();
   if (disabled[name]) { delete disabled[name]; await writeDisabled(disabled); }
@@ -716,9 +725,5 @@ export async function restoreFromTrash(id) {
 export async function ensureCfgBlock() {
   const server = findServerData();
   if (!server) return false;
-  const before = await readCfg(server.cfgPath);
-  const after = ensureManagedBlock(before);
-  if (after === before) return false;
-  await writeCfg(server.cfgPath, after);
-  return true;
+  return (await changeCfgFile(server.cfgPath, (before) => ensureManagedBlock(before))).changed;
 }

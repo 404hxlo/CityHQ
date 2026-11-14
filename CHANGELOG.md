@@ -2,6 +2,17 @@
 
 Each version's section is shown in the app before it updates, and on its GitHub release page.
 
+## Unreleased
+
+- **Crash alerts keep working during backups.** The nightly backup now runs alongside everything else. Before, while it ran (up to an hour on a big server), CityHQ didn't notice crashes, warn players or make scheduled restarts.
+- **Restarts the PC slept through are skipped.** If the PC was asleep when a planned restart was due, CityHQ no longer restarts the moment it wakes, hours late and without warning players. It notes the skipped restart, and the next scheduled one happens at its usual time.
+- **The console can't crash the server through CityHQ's helper.** Commands that would make the helper (qb-control) stop or restart itself are refused with a plain explanation, including `exec server.cfg` and `ensure [local]`, which got through before. A resource restarting itself crashes the whole server. CityHQ's helper updates to 1.7.1 at the next server restart.
+- **Changes to server.cfg can't undo each other.** Two changes at the same moment (from the PC and a phone, say, or a fix during an install) now take turns, so neither is lost and server.cfg can't be left cut short. The same goes for saving a file in the editor.
+- **Safer saving.** Every file CityHQ saves is written all the way to the disk before it replaces the old one, so a power cut can't leave an empty file behind.
+- **Damaged settings are recovered.** If CityHQ's own settings file is damaged, CityHQ uses the copy it keeps from its last start, keeps the damaged file aside and tells you, instead of quietly starting over with a new passcode.
+- **Phone access follows the network.** When the PC joins Wi-Fi after CityHQ opened (at sign-in, say) or gets a new address, phone access starts on it within a minute. Before, it stayed off until CityHQ was restarted.
+- **Move to a host:** finishing only copies your database once the server on this PC has really stopped. If it couldn't be stopped, or CityHQ couldn't check whether anyone was playing, nothing is copied and it says what to do.
+
 ## 1.9.1
 
 - **txAdmin for hosted servers.** Settings has a txAdmin card with an **Open txAdmin** button. CityHQ reads txAdmin's port from your host's settings for the server, and checks that the port is open and the page answers.

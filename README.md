@@ -60,7 +60,8 @@ connection drops.
   rain", "add a script") or click a suggestion; everything you do shows up as a block, next to the live
   log and a panel with players, load and anything to fix. Ctrl K brings the same box up on any page.
 - **Simple and Pro:** Simple (the default) uses forms, plain words and starting points. Pro shows command
-  syntax, the raw log and the console, and runs anything else you type as a server command.
+  syntax, the raw log and the console, and runs anything else you type as a server command (except
+  ones that would restart CityHQ's own helper, which would crash the server).
 - **Stats:** players, CPU and memory over time, and a calendar of backups and restarts.
 - **Health:** checks for common setup problems (sleep, missing tables, start-order traps), explains
   every restart, and helps friends outside your home join.
@@ -75,7 +76,8 @@ connection drops.
 - **Safety net:** if the server crashes, on your PC or at a host, CityHQ tells you why: a Windows
   notification, a message in your Discord channel if you like, and the cause with its fix (a button
   when switching something off fixes it) in Things to fix. It restarts the server if it stays down.
-  Scheduled restarts warn players first, and the PC is kept awake while the server runs.
+  Scheduled restarts warn players first (one the PC slept through is skipped, not run late), and the
+  PC is kept awake while the server runs.
 
 ## Moving a server to another PC
 
