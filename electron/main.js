@@ -10,6 +10,7 @@ import { COOKIE, createSession } from '../server/auth.js';
 import { isSecondary, setDesktopHooks } from '../server/desktop.js';
 import { onEvent } from '../server/events.js';
 import { APP_PORT, LOG_DIR } from '../server/paths.js';
+import { describeOwner, portOwner } from '../server/processes.js';
 import { markStarted } from '../server/updates.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -154,6 +155,21 @@ function setKeepAwake(mode) {
   awakeKind = mode;
 }
 
+/** Why CityHQ couldn't start listening, in words someone can act on. */
+async function startupMessage(err) {
+  if (err.code === 'EACCES') {
+    return `Windows is keeping port ${APP_PORT}, which CityHQ uses, for another feature (Hyper-V, WSL and Docker reserve blocks of ports). Restarting the PC usually frees it.`;
+  }
+  if (err.code === 'EADDRINUSE') {
+    const owner = await portOwner(APP_PORT);
+    if (owner && /cityhq|electron/i.test(owner.name || '')) {
+      return `Another copy of CityHQ is already running${owner.path ? ` (from ${path.dirname(owner.path)})` : ''}. Quit it from its tray icon, then open this one again.`;
+    }
+    return `Port ${APP_PORT}, which CityHQ uses, is taken by ${describeOwner(owner)}. Close that program, then open CityHQ again.`;
+  }
+  return String(err.message || err);
+}
+
 /** Closes CityHQ for good, and with restart, opens it again. */
 function leave(restart) {
   quitting = true;
@@ -178,6 +194,8 @@ function installDesktopHooks() {
       app.setLoginItemSettings({ ...loginOptions, openAtLogin: enabled });
     },
     openFolder: (folder) => shell.openPath(folder),
+    // Windows' own network settings, where a network can be set to Private.
+    openNetworkSettings: (page) => shell.openExternal(page === 'wifi' ? 'ms-settings:network-wifi' : page === 'ethernet' ? 'ms-settings:network-ethernet' : 'ms-settings:network-status'),
     // A hosted server's panel key or SFTP password, locked with Windows' own protection for this
     // Windows account, so the file on disk is useless anywhere else.
     canProtect: () => safeStorage.isEncryptionAvailable(),
@@ -226,12 +244,7 @@ if (!app.requestSingleInstanceLock()) {
       ({ url: baseUrl } = await startApp());
     } catch (err) {
       logError('startup', err.stack || err);
-      dialog.showErrorBox(
-        'CityHQ could not start',
-        err.code === 'EADDRINUSE'
-          ? `Port ${APP_PORT} is already in use. Close any other copy of CityHQ and try again.`
-          : String(err.message || err),
-      );
+      dialog.showErrorBox('CityHQ could not start', await startupMessage(err));
       quitting = true;
       app.quit();
       return;

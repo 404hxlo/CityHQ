@@ -1,0 +1,16 @@
+name: An idea
+description: Something CityHQ could do, or do better.
+labels: [idea]
+body:
+  - type: textarea
+    id: idea
+    attributes:
+      label: What you'd like
+      description: What you want to do with your server, and what gets in the way today.
+    validations:
+      required: true
+  - type: textarea
+    id: who
+    attributes:
+      label: Who it helps
+      description: For example someone running their first server, a big city with many scripts, or a hosted server.

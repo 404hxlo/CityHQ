@@ -15,27 +15,51 @@ const exec = promisify(execFile);
 const HISTORY_LENGTH = 150;
 const SAMPLE_SECONDS = 2;
 
+// Each sample also says which TCP ports each of those programs listens on, so this server's txAdmin
+// can be told apart from another server's started from the same FiveM folder.
 const PROBE = `
 $ErrorActionPreference = 'SilentlyContinue'
 while ($true) {
   $p = @(Get-CimInstance Win32_Process -Filter "Name='FXServer.exe' OR Name='mariadbd.exe'" |
     Select-Object ProcessId, ParentProcessId, Name, ExecutablePath, CommandLine, UserModeTime, KernelModeTime, WorkingSetSize)
-  ConvertTo-Json -Compress -Depth 2 -InputObject $p
+  if ($p.Count) {
+    $listen = @(Get-NetTCPConnection -State Listen -OwningProcess @($p.ProcessId))
+    foreach ($row in $p) { $row | Add-Member -NotePropertyName Ports -NotePropertyValue @($listen | Where-Object { $_.OwningProcess -eq $row.ProcessId } | ForEach-Object { [int]$_.LocalPort } | Sort-Object -Unique) }
+  }
+  ConvertTo-Json -Compress -Depth 3 -InputObject $p
   Start-Sleep -Seconds ${SAMPLE_SECONDS}
 }`;
 
 /** True when a program runs from inside folder (FiveM's server folder, or CityHQ's own database). */
 export const runsFrom = (exe, folder) => Boolean(exe) && exe.toLowerCase().startsWith(`${path.resolve(folder).toLowerCase()}\\`);
 
+/** The TCP ports a process listens on, from the probe; null when the probe couldn't tell. */
+const portsOf = (row) => (row.Ports === undefined || row.Ports === null ? null : [row.Ports].flat().map(Number));
+
+/**
+ * txAdmin for this server among those started from its FiveM folder. Usually there's one. Two
+ * servers can share one FiveM folder (each with its own txData), and then this server's txAdmin is
+ * the one listening on this server's txAdmin port; with none on it, this server is off.
+ */
+export function pickMonitor(monitors, txAdminPort) {
+  if (monitors.length <= 1) return monitors[0] || null;
+  const known = monitors.filter((r) => portsOf(r) !== null);
+  // Without port details nothing tells them apart, so keep to the first, as before.
+  if (!known.length) return monitors[0];
+  return known.find((r) => portsOf(r).includes(Number(txAdminPort))) || null;
+}
+
 /**
  * Picks this server's processes out of every FXServer and database on the PC: FXServer only from
  * this server's FiveM folder, and a database only when CityHQ runs it. Other servers are ignored.
  */
-export function ownProcesses(rows, { fxserverDir = FXSERVER_DIR, dbHome = DB_HOME, managedDb = MANAGED_DB } = {}) {
+export function ownProcesses(rows, {
+  fxserverDir = FXSERVER_DIR, dbHome = DB_HOME, managedDb = MANAGED_DB, txAdminPort = TXADMIN_PORT,
+} = {}) {
   const fx = rows.filter((r) => r.Name === 'FXServer.exe' && runsFrom(r.ExecutablePath, fxserverDir));
   const fxPids = new Set(fx.map((r) => r.ProcessId));
   const roles = fx.filter((r) => !/-dumpserver/i.test(r.CommandLine || ''));
-  const monitor = roles.find((r) => !fxPids.has(r.ParentProcessId)) || null;
+  const monitor = pickMonitor(roles.filter((r) => !fxPids.has(r.ParentProcessId)), txAdminPort);
   const game = monitor ? roles.find((r) => r.ParentProcessId === monitor.ProcessId) || null : null;
   const db = managedDb ? rows.find((r) => r.Name === 'mariadbd.exe' && runsFrom(r.ExecutablePath, dbHome)) || null : null;
   return { monitor, game, db };
@@ -146,6 +170,35 @@ export function stopProbe() {
 export const getProcessState = () => state;
 export const getHistory = () => history;
 
+/** Who is listening on a TCP port on this PC: { pid, name, path }, or null (nobody, or it can't be told). */
+export async function portOwner(port) {
+  const script = `$c = Get-NetTCPConnection -State Listen -LocalPort ${Number(port)} -ErrorAction SilentlyContinue | Select-Object -First 1; `
+    + 'if ($c) { $p = Get-CimInstance Win32_Process -Filter "ProcessId=$($c.OwningProcess)"; '
+    + 'ConvertTo-Json -Compress -InputObject @{ pid = [int]$c.OwningProcess; name = [string]$p.Name; path = [string]$p.ExecutablePath } }';
+  try {
+    const { stdout } = await exec('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], { windowsHide: true, timeout: 15000 });
+    const owner = JSON.parse(stdout.trim() || 'null');
+    return owner?.pid ? owner : null;
+  } catch { return null; }
+}
+
+/** A program on a port, in words: "FXServer.exe (D:\Other-Server\server)", or Windows itself. */
+export function describeOwner(owner) {
+  if (!owner) return 'another program';
+  if (!owner.path) return owner.pid === 4 ? 'Windows itself' : owner.name || `the program with id ${owner.pid}`;
+  return `${owner.name || path.win32.basename(owner.path)} (${path.win32.dirname(owner.path)})`;
+}
+
+/**
+ * Throws a plain explanation when a port this server needs is taken by a program that isn't the
+ * one expected (folder: where the expected program runs from). Ports CityHQ can't check pass.
+ */
+export async function assertPortIsOurs(port, folder, what) {
+  const owner = await portOwner(port);
+  if (!owner || (owner.path && runsFrom(owner.path, folder))) return;
+  throw new HttpError(409, `Port ${port}, which ${what} uses, is taken by ${describeOwner(owner)}. Close that program (or stop that server), then try again.`);
+}
+
 export function isPortOpen(port, host = '127.0.0.1', timeoutMs = 700) {
   return new Promise((resolve) => {
     const socket = net.connect({ port, host });
@@ -178,7 +231,12 @@ export async function ensureDatabase() {
     if (!conn || await isPortOpen(Number(conn.port), conn.host)) return false;
     throw new HttpError(503, `Your database at ${conn.host}:${conn.port} (from server.cfg) isn't answering. Start it first, for example MySQL in XAMPP's control panel, then try again.`);
   }
-  if (await isPortOpen(DB_PORT)) return false;
+  if (await isPortOpen(DB_PORT)) {
+    // Something answers on the database's port: CityHQ's own database, or another one in the way
+    // (which the server would then try to use).
+    await assertPortIsOurs(DB_PORT, DB_HOME, 'CityHQ\'s database for this server');
+    return false;
+  }
   spawnDetached(DB_EXE, [`--defaults-file=${DB_INI}`], path.dirname(DB_INI), 'mariadb-console');
   for (let i = 0; i < 30; i++) {
     if (await isPortOpen(DB_PORT)) return true;
@@ -233,7 +291,12 @@ async function startWithHiddenConsole(exe, cwd, logName, env) {
 
 export async function startTxAdmin() {
   await ensureDatabase();
-  if (await isPortOpen(TXADMIN_PORT)) return false;
+  if (await isPortOpen(TXADMIN_PORT)) {
+    // Something answers on txAdmin's port: this server's txAdmin, already running, or another
+    // program in the way, which used to look like "already running" and then a stuck start.
+    await assertPortIsOurs(TXADMIN_PORT, FXSERVER_DIR, 'this server\'s txAdmin');
+    return false;
+  }
   // Drop anything inherited that would make txAdmin bind to the wrong interface.
   const env = { ...TX_ENV, TXHOST_INTERFACE: undefined };
   await startWithHiddenConsole(FXSERVER_EXE, FXSERVER_DIR, 'txadmin-console', env);

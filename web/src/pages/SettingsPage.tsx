@@ -3,7 +3,7 @@ import {
 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import {
-  api, SERVER_SCOPE, type Automation as AutomationData, type Settings,
+  api, SERVER_SCOPE, type Automation as AutomationData, type NetworkInfo, type Settings,
 } from '../api';
 import { AdminsCard } from '../Admins';
 import { ProfileCard } from '../Profile';
@@ -13,8 +13,91 @@ import { SettingsEditor } from '../SettingsEditor';
 import { ReportButton } from '../Report';
 import { UpdatesCard } from '../Updates';
 import {
-  Button, Notice, Spinner, Toggle, useAction, useConfirm, usePoll,
+  Button, Notice, Spinner, timeAgo, Toggle, useAction, useConfirm, usePoll,
 } from '../ui';
+
+/** What the network phone access listens on means for it: a warning on one Windows calls Public. */
+function NetworkNote({ network, desktop }: { network: NetworkInfo | null | undefined; desktop: boolean }) {
+  const { busy, run } = useAction();
+  if (network?.category === 'Public') {
+    return (
+      <Notice kind="warn">
+        <strong>Windows calls this network Public</strong>, as it does café and hotel Wi-Fi. Phone access isn&apos;t
+        encrypted, so anyone on a shared network could see what your phone sends. If this is your home Wi-Fi, set it to
+        Private in Windows: open the network&apos;s properties and choose Private under Network profile type.
+        {desktop && (
+          <div className="notice-actions">
+            <Button icon={<ExternalLink size={15} />} busy={busy === 'net'} onClick={() => run('net', () => api.openNetworkSettings(network.page))}>
+              Open network settings
+            </Button>
+          </div>
+        )}
+      </Notice>
+    );
+  }
+  return (
+    <Notice kind="info">
+      If Windows asks about CityHQ, allow it on <strong>Private networks</strong> only. The connection on your Wi-Fi
+      isn&apos;t encrypted, so keep phone access to your home network.
+    </Notice>
+  );
+}
+
+/** Phones signed in over the home network, each with a way to sign it out. */
+function SignedInPhones() {
+  const { busy, run } = useAction();
+  const confirm = useConfirm();
+  const { data, refresh } = usePoll(api.phones, 20000);
+  const phones = data?.phones || [];
+  const older = data?.older || 0;
+
+  const signOut = async (id: string) => {
+    await run(`out-${id}`, () => api.signOutPhone(id), 'Signed out');
+    refresh();
+  };
+  const signOutAll = async () => {
+    const ok = await confirm({
+      title: 'Sign out all phones?',
+      body: <p>Each phone has to scan a new QR code, or type the passcode, to sign in again. This PC stays signed in.</p>,
+      confirm: 'Sign out all phones',
+      danger: true,
+    });
+    if (!ok) return;
+    await run('out-all', () => api.signOutPhones(), (r) => (r.signedOut === 1 ? '1 phone signed out' : `${r.signedOut} phones signed out`));
+    refresh();
+  };
+
+  return (
+    <div className="phone-list">
+      <div className="card-row">
+        <h4>Signed-in phones</h4>
+        {(phones.length > 0 || older > 0) && (
+          <Button variant="ghost" icon={<LogOut size={15} />} busy={busy === 'out-all'} onClick={signOutAll}>Sign out all phones</Button>
+        )}
+      </div>
+      {data && !phones.length && <p className="muted-note">No phones are signed in right now.</p>}
+      {phones.map((p) => (
+        <div className="phone-row" key={p.id}>
+          <span>
+            {p.device}
+            <span className="when">
+              signed in {timeAgo(p.createdAt)}
+              {p.lastUsed && p.createdAt && p.lastUsed - p.createdAt > 60000 ? `, used ${timeAgo(p.lastUsed)}` : ''}
+            </span>
+          </span>
+          <Button variant="ghost" busy={busy === `out-${p.id}`} onClick={() => signOut(p.id)}>Sign out</Button>
+        </div>
+      ))}
+      {older > 0 && (
+        <p className="muted-note">
+          Also {older} sign-in{older === 1 ? '' : 's'} from before CityHQ noted which device it was (this PC&apos;s own
+          window can be one). They end within 30 days, or Sign out all phones ends them now.
+        </p>
+      )}
+      <p className="muted-note">Phones stay signed in for 7 days.</p>
+    </div>
+  );
+}
 
 function PhoneAccess({ settings, reload }: { settings: Settings; reload: () => void }) {
   const { busy, run } = useAction();
@@ -65,10 +148,16 @@ function PhoneAccess({ settings, reload }: { settings: Settings; reload: () => v
 
       {settings.lanEnabled && (
         <>
-          <Notice kind="info">
-            If Windows asks about CityHQ, allow it on <strong>Private networks</strong> only. The connection on your Wi-Fi is not encrypted, so use this at home rather than on shared networks.
-          </Notice>
-          {!settings.lanListening && <Notice kind="error">No home network was found on this PC. Connect to Wi-Fi or Ethernet, then turn this off and on.</Notice>}
+          {settings.lanListening && (
+            <div className="phone-status">
+              <span><span className="status-dot" aria-hidden="true" />Phones can connect at <code>{url.replace(/^http:\/\//, '')}</code></span>
+              {settings.network && (
+                <span className={`net-chip ${settings.network.category === 'Public' ? 'warn' : ''}`}>This network: {settings.network.category}</span>
+              )}
+            </div>
+          )}
+          <NetworkNote network={settings.network} desktop={settings.desktop} />
+          {!settings.lanListening && <Notice kind="error">No home network was found on this PC yet. Connect to Wi-Fi or Ethernet: phone access starts on it within a minute.</Notice>}
           {settings.lanListening && (
             <div className="pair-grid">
               <div className="qr-box" aria-label="QR code to sign in on your phone" role="img">
@@ -95,6 +184,7 @@ function PhoneAccess({ settings, reload }: { settings: Settings; reload: () => v
               </div>
             </div>
           )}
+          <SignedInPhones />
         </>
       )}
     </section>

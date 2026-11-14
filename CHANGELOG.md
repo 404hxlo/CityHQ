@@ -2,6 +2,26 @@
 
 Each version's section is shown in the app before it updates, and on its GitHub release page.
 
+## Unreleased
+
+- **Right answers on PCs in other languages and regions.** These now work whatever language Windows is in, and however the PC writes dates:
+  - the restart explanations, which read the date txAdmin writes in the PC's own format (11/14/2026 in the US, 14.11.2026 in Germany, 2026/11/14 in Japan, and others)
+  - Health's sleep check, which on Windows in another language said "The PC never sleeps on its own"
+  - the firewall check in "Let friends join"
+  - spotting Smart App Control blocking the server when it starts
+- **A port taken by another program is named.** When something else uses the port of the server's txAdmin or CityHQ's own database, Start says which program it is, instead of waiting five minutes and calling it a stuck start. If CityHQ itself can't start because its port is taken, it says by what (or that Windows is keeping it, which a restart usually fixes).
+- **Two servers started from the same FiveM folder** are told apart by their txAdmin's port, so Stop and Restart only ever reach this one.
+- **Phone access:**
+  - **Signed-in phones:** Settings lists the phones signed in, with the device and when each was last used. You can sign out one phone, or all of them, while this PC stays signed in.
+  - **7-day sign-ins:** phones now sign in for 7 days instead of 30.
+  - **Public networks:** when Windows calls the network Public, as it does café and hotel Wi-Fi (and often home Wi-Fi it hasn't been told about), CityHQ warns you, since phone access isn't encrypted. A button opens the Windows settings where you can set your home Wi-Fi to Private.
+- **New documents.** These are on GitHub and in the source download:
+  - PRIVACY.md: everything CityHQ keeps, everything it sends and where, and how to remove it all
+  - SECURITY.md: how to report a security problem privately
+  - CONTRIBUTING.md: how to work on CityHQ
+
+  The app now includes the licences of the software its screens are built with.
+
 ## 1.9.2
 
 - **Crash alerts keep working during backups.** The nightly backup now runs alongside everything else. Before, while it ran (up to an hour on a big server), CityHQ didn't notice crashes, warn players or make scheduled restarts.

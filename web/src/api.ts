@@ -310,7 +310,14 @@ export interface Ban { id: number; name: string; reason: string; expire: number;
 export interface ConsoleLine { text: string; level: 'info' | 'warn' | 'error' }
 export interface ConsoleChunk { offset: number; lines: ConsoleLine[]; reset: boolean }
 
+/** The network phone access listens on, as Windows sees it, and the part of Windows' settings that changes it. */
+export interface NetworkInfo { category: 'Public' | 'Private' | 'Work'; name: string | null; page: 'wifi' | 'ethernet' }
+
+/** A phone signed in over the home network. */
+export interface PhoneSession { id: string; device: string; createdAt: number | null; lastUsed: number | null; expires: number }
+
 export interface Settings {
+  network?: NetworkInfo | null;
   local: boolean; lanEnabled: boolean; lanListening: boolean; appPort: number; gamePort: number; txAdminPort: number;
   paths: { root: string; fxserver: string; serverData: string | null } | null;
   urls: string[]; passcode: string | null; desktop: boolean;
@@ -523,6 +530,10 @@ export const api = {
   setLan: (enabled: boolean) => request<{ lanEnabled: boolean; lanListening: boolean; errors: string[] }>('POST', '/api/settings/lan', { enabled }),
   newPasscode: () => request<{ passcode: string }>('POST', '/api/settings/passcode'),
   pairing: (url?: string) => request<{ url: string; svg: string }>('POST', '/api/settings/pairing', { url }),
+  phones: () => request<{ phones: PhoneSession[]; older: number }>('GET', '/api/settings/phones'),
+  signOutPhone: (id: string) => request<{ signedOut: number }>('POST', `/api/settings/phones/${q(id)}/sign-out`),
+  signOutPhones: () => request<{ signedOut: number }>('POST', '/api/settings/phones/sign-out-all'),
+  openNetworkSettings: (page?: NetworkInfo['page']) => request<{ opened: boolean }>('POST', '/api/settings/network/open', { page }),
 
   report: (what: string, doing: string, includeDetails: boolean) => request<{ title: string; body: string; url: string; complete: boolean }>('POST', '/api/report', { what, doing, includeDetails }),
 

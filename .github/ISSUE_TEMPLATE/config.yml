@@ -1,0 +1,9 @@
+# Blank issues stay on: CityHQ's own "Report a problem" opens one already filled in.
+blank_issues_enabled: true
+contact_links:
+  - name: A security problem
+    url: https://github.com/404hxlo/CityHQ/security/advisories/new
+    about: Report it privately, not as a public issue.
+  - name: How CityHQ works
+    url: https://404hxlo.github.io/CityHQ/
+    about: The website, with what CityHQ does and how to get it.

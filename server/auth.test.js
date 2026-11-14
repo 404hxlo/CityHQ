@@ -155,3 +155,90 @@ test('a new passcode signs every device out', () => {
   assert.equal(auth.isValidSession(token), false);
   assert.throws(() => auth.loginWithPasscode('10.0.0.70', before), (err) => err.status === 401);
 });
+
+// ---------------------------------------------------------------- phones and this PC
+const recordOf = (token) => getSettings().sessions[hashOf(token)];
+const ANDROID = 'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0 Mobile Safari/537.36';
+const IPHONE = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.1 Mobile/15E148 Safari/604.1';
+
+test('a phone signs in for 7 days, CityHQ\'s window and browsers on this PC for 30', () => {
+  const day = 24 * 3600 * 1000;
+  const phone = auth.createSession({ kind: 'phone', device: 'Android phone · Chrome' });
+  const desk = auth.createSession();
+  assert.ok(Math.abs(recordOf(phone).expires - (Date.now() + 7 * day)) < 5000);
+  assert.ok(Math.abs(recordOf(desk).expires - (Date.now() + 30 * day)) < 5000);
+  assert.equal(recordOf(desk).kind, 'desktop');
+  assert.equal(auth.sessionLifetime(false), 7 * day);
+  assert.equal(auth.sessionLifetime(true), 30 * day);
+});
+
+test('signing in from the home network notes the device; from this PC, a browser', () => {
+  const fromPhone = auth.loginWithPasscode('192.168.1.40', getSettings().passcode, { local: false, userAgent: ANDROID });
+  assert.equal(recordOf(fromPhone).kind, 'phone');
+  assert.equal(recordOf(fromPhone).device, 'Android phone · Chrome');
+  const fromPc = auth.loginWithPasscode('127.0.0.1', getSettings().passcode, { local: true, userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/131.0 Safari/537.36' });
+  assert.equal(recordOf(fromPc).kind, 'browser');
+  const paired = auth.loginWithPairing('192.168.1.41', auth.createPairingToken(), { local: false, userAgent: IPHONE });
+  assert.equal(recordOf(paired).device, 'iPhone · Safari');
+  assert.equal(JSON.stringify(getSettings().sessions).includes('Pixel 8'), false, 'only the short name is kept, never the whole description');
+});
+
+test('devices are named in plain words', () => {
+  assert.equal(auth.deviceLabel(ANDROID), 'Android phone · Chrome');
+  assert.equal(auth.deviceLabel(IPHONE), 'iPhone · Safari');
+  assert.equal(auth.deviceLabel('Mozilla/5.0 (Linux; Android 14; SM-X710) AppleWebKit/537.36 (KHTML, like Gecko) SamsungBrowser/26.0 Chrome/121.0 Safari/537.36'), 'Android tablet · Samsung Internet');
+  assert.equal(auth.deviceLabel('Mozilla/5.0 (iPhone; CPU iPhone OS 18_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/131.0 Mobile/15E148 Safari/604.1'), 'iPhone · Chrome');
+  assert.equal(auth.deviceLabel(''), 'A device');
+});
+
+test('the phone list shows phones only, newest use first, and counts older sign-ins apart', () => {
+  regeneratePasscode();
+  const desk = auth.createSession();
+  const older = auth.createSession({ kind: 'phone' });
+  getSettings().sessions[hashOf(older)] = Date.now() + 3600000;
+  const a = auth.createSession({ kind: 'phone', device: 'Android phone · Chrome' });
+  const b = auth.createSession({ kind: 'phone', device: 'iPhone · Safari' });
+  recordOf(a).lastUsed = Date.now() - 60000;
+  recordOf(b).lastUsed = Date.now();
+  const { phones, older: olderCount } = auth.listPhones(desk);
+  assert.deepEqual(phones.map((p) => p.device), ['iPhone · Safari', 'Android phone · Chrome']);
+  assert.equal(olderCount, 1);
+  assert.match(phones[0].id, /^[a-f0-9]{16}$/);
+  assert.equal(JSON.stringify(phones).includes(b), false, 'the list never holds a sign-in token');
+  assert.equal(auth.listPhones(b).phones.length, 1, 'the phone asking is not listed');
+});
+
+test('one phone, or every phone, can be signed out; this PC stays signed in', () => {
+  regeneratePasscode();
+  const desk = auth.createSession();
+  const browser = auth.createSession({ kind: 'browser' });
+  const a = auth.createSession({ kind: 'phone', device: 'A' });
+  const b = auth.createSession({ kind: 'phone', device: 'B' });
+  const oldOne = auth.createSession({ kind: 'phone' });
+  getSettings().sessions[hashOf(oldOne)] = Date.now() + 3600000;
+  const [first] = auth.listPhones(desk).phones.filter((p) => p.device === 'A');
+  assert.deepEqual(auth.signOutPhone(first.id), { signedOut: 1 });
+  assert.equal(auth.isValidSession(a), false);
+  assert.equal(auth.isValidSession(b), true);
+  assert.throws(() => auth.signOutPhone(first.id), (err) => err.status === 404);
+  assert.throws(() => auth.signOutPhone(hashOf(desk).slice(0, 16)), (err) => err.status === 404, 'only phones can be signed out this way');
+  assert.deepEqual(auth.signOutPhones(desk), { signedOut: 2 }, 'the other phone and the older sign-in');
+  assert.equal(auth.isValidSession(b), false);
+  assert.equal(auth.isValidSession(oldOne), false);
+  assert.equal(auth.isValidSession(desk), true);
+  assert.equal(auth.isValidSession(browser), true);
+});
+
+test('using a sign-in notes when, saved at most once a minute', () => {
+  const token = auth.createSession({ kind: 'phone', device: 'A' });
+  const start = Date.now() + 120000;
+  auth.touchSession(token, start);
+  assert.equal(recordOf(token).lastUsed, start);
+  const saved = () => JSON.parse(readFileSync(path.join(STATE, 'settings.json'), 'utf8')).sessions[hashOf(token)].lastUsed;
+  assert.equal(saved(), start);
+  auth.touchSession(token, start + 5000);
+  assert.equal(recordOf(token).lastUsed, start + 5000, 'kept in memory straight away');
+  assert.equal(saved(), start, 'not written to disk again within a minute');
+  auth.touchSession(token, start + 61000);
+  assert.equal(saved(), start + 61000);
+});

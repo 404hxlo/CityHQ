@@ -24,6 +24,11 @@ const { finishBlocker } = await import('./move/job.js');
 const {
   checksumIn, expectedFrom, helperCommandLine, isNewer, parseRelease, unsafeForCmd, whatsNew,
 } = await import('./updates.js');
+const { bootSegments, dateShapeOf, parseBannerStamp } = await import('./doctor.js');
+const { powercfgSeconds } = await import('./health.js');
+const { firewallCovers, pickNetwork, rulesFromObjects } = await import('./reach.js');
+const { blockedFromEventData } = await import('./startup.js');
+const { describeOwner, ownProcesses, pickMonitor } = await import('./processes.js');
 
 const folder = (name) => {
   const dir = path.join(SCRATCH, name);
@@ -262,4 +267,136 @@ test('updates: the updater is started with every path quoted, and odd folders ar
   assert.equal(unsafeForCmd('D:\\100% Games\\CityHQ'), true);
   assert.equal(unsafeForCmd('D:\\"quoted"\\CityHQ'), true);
   assert.equal(unsafeForCmd('D:\\Games & Tools\\CityHQ'), false);
+});
+
+// ---------------------------------------------------------------- PCs not set to US English
+// txAdmin writes its start time with toLocaleString(), in the PC's own format.
+const LOCALES = [
+  'en-US', 'en-GB', 'de-DE', 'fr-FR', 'es-ES', 'es-MX', 'nl-NL', 'pl-PL', 'ru-RU', 'tr-TR', 'it-IT', 'pt-BR',
+  'sv-SE', 'ja-JP', 'zh-CN', 'ko-KR', 'ar-EG', 'en-IN', 'th-TH',
+];
+
+test('txAdmin\'s start time is read in every common date format, digits and AM/PM words included', () => {
+  const moments = [new Date(2026, 10, 14, 1, 5, 9), new Date(2026, 10, 14, 13, 5, 9), new Date(2026, 2, 3, 0, 30, 0), new Date(2026, 11, 31, 12, 0, 59)];
+  for (const locale of LOCALES) {
+    const shape = dateShapeOf(locale);
+    for (const when of moments) {
+      const written = when.toLocaleString(locale);
+      const read = parseBannerStamp(written, shape);
+      assert.equal(read?.getTime(), when.getTime(), `${locale}: "${written}"`);
+    }
+  }
+});
+
+test('a calendar with other months (Persian) is left unread rather than read wrongly', () => {
+  const shape = dateShapeOf('fa-IR');
+  assert.equal(parseBannerStamp(new Date(2026, 10, 14, 13, 5, 9).toLocaleString('fa-IR'), shape), null);
+});
+
+test('server starts are found in a German log', () => {
+  const de = dateShapeOf('de-DE');
+  const lines = [
+    `[TXADMIN] ======== [1] FXServer Starting - ${new Date(2026, 10, 3, 17, 23, 36).toLocaleString('de-DE')}`,
+    '[c-scripting-core] Creating script environments for slow_script',
+    `[TXADMIN] ======== [2] FXServer Starting - ${new Date(2026, 10, 14, 9, 0, 0).toLocaleString('de-DE')}       `,
+  ];
+  const segments = bootSegments(lines, de);
+  assert.equal(segments.length, 2);
+  assert.equal(segments[0].start.getTime(), new Date(2026, 10, 3, 17, 23, 36).getTime(), '3 November, not 11 March');
+  assert.deepEqual(segments[0].lines, ['[c-scripting-core] Creating script environments for slow_script']);
+});
+
+test('the PC\'s sleep timers are read when Windows is in another language', () => {
+  const german = [
+    'Energieschema-GUID: 381b4222-f694-41f0-9685-ff5bb260df2e  (Ausbalanciert)',
+    '  GUID des Untergebiets: 238c9fa8-0aad-41ed-83f4-97be242c8f20  (Energie sparen nach)',
+    '    GUID der Energieeinstellung: 29f6c1db-86da-48c5-9fdb-f2b67b1f44da  (Standbymodus nach)',
+    '      Minimaler möglicher Wert: 0x00000000',
+    '      Maximaler möglicher Wert: 0xffffffff',
+    '      Mögliche Einstellungen - Inkrement: 0x00000001',
+    '      Mögliche Einstellungen - Einheiten: Sekunden',
+    '    Aktueller Wechselstrom-Einstellungsindex: 0x00000708',
+    '    Aktueller Gleichstrom-Einstellungsindex: 0x00000384',
+  ].join('\r\n');
+  assert.equal(powercfgSeconds(german, 'AC'), 1800);
+  assert.equal(powercfgSeconds(german, 'DC'), 900);
+  assert.equal(powercfgSeconds('Zugriff verweigert.', 'AC'), null, 'an error is not a timer');
+  assert.equal(powercfgSeconds('    Current AC Power Setting Index: 0x0000012c\r\n    Current DC Power Setting Index: 0x000000b4', 'DC'), 180);
+});
+
+test('firewall rules read from PowerShell\'s objects count the same as before', () => {
+  const rules = rulesFromObjects([
+    { name: 'FiveM server (CityHQ) TCP', profile: 0, program: 'D:\\Server\\server\\FXServer.exe', protocol: 'TCP', localPort: 'Any' },
+    { name: 'FiveM server (CityHQ) UDP', profile: 0, program: 'D:\\Server\\server\\FXServer.exe', protocol: 'UDP', localPort: 'Any' },
+    { name: 'Game port, home only', profile: 2, program: '', protocol: 'TCP', localPort: '30120,30200-30300' },
+  ]);
+  assert.equal(rules[0].profiles, 'Any');
+  assert.equal(rules[2].profiles, 'Private');
+  assert.equal(rulesFromObjects({ name: 'one', profile: 6 })[0].profiles, 'Private,Public', 'a single rule comes as an object');
+  assert.deepEqual(firewallCovers(rules, { program: 'd:\\server\\server\\fxserver.exe', port: 30120, profile: 'Public' }), { tcp: true, udp: true });
+  assert.deepEqual(firewallCovers(rules.slice(2), { program: 'x', port: 30250, profile: 'Private' }), { tcp: true, udp: false });
+  assert.deepEqual(firewallCovers(rules.slice(2), { program: 'x', port: 30250, profile: 'Public' }), { tcp: false, udp: false });
+  // A work network is "DomainAuthenticated" to Windows, and its rules say "Domain".
+  assert.deepEqual(firewallCovers(rulesFromObjects([{ profile: 1, program: 'x', protocol: 'Any' }]), { program: 'x', port: 1, profile: 'DomainAuthenticated' }), { tcp: true, udp: true });
+});
+
+test('Smart App Control\'s blocks are read from the event\'s data, whatever language its text is in', () => {
+  const tail = '\\qbcore-server\\server\\fxserver.exe';
+  const events = [
+    { text: 'Codeintegrität hat festgestellt, dass ein Prozess ...', data: ['67', '\\Device\\HarddiskVolume3\\QBCore-Server\\server\\libnode22.dll', '61', '\\Device\\HarddiskVolume3\\QBCore-Server\\server\\FXServer.exe', '4', '1', '-1073740760'] },
+    { text: 'another program', data: ['\\Device\\HarddiskVolume3\\Games\\other.dll', '\\Device\\HarddiskVolume3\\Games\\other.exe'] },
+  ];
+  assert.deepEqual(blockedFromEventData(events, tail), ['libnode22.dll']);
+  assert.deepEqual(blockedFromEventData({ data: '\\Device\\x\\FXServer.exe' }, tail), [], 'no file named, nothing invented');
+});
+
+// ---------------------------------------------------------------- ports and shared FiveM folders
+const row = (pid, parent, ports, extra = {}) => ({
+  ProcessId: pid, ParentProcessId: parent, Name: 'FXServer.exe', ExecutablePath: 'D:\\FiveM\\server\\FXServer.exe', CommandLine: 'FXServer.exe', ...(ports === undefined ? {} : { Ports: ports }), ...extra,
+});
+
+test('two servers started from one FiveM folder: this one is the txAdmin on its own port', () => {
+  const rows = [
+    row(10, 1, [40120]), row(11, 10, [30120]),
+    row(20, 1, [40121]), row(21, 20, [30121]),
+  ];
+  const mine = ownProcesses(rows, { fxserverDir: 'D:\\FiveM\\server', dbHome: 'D:\\none', managedDb: false, txAdminPort: 40121 });
+  assert.equal(mine.monitor.ProcessId, 20);
+  assert.equal(mine.game.ProcessId, 21);
+  const theirs = ownProcesses(rows, { fxserverDir: 'D:\\FiveM\\server', dbHome: 'D:\\none', managedDb: false, txAdminPort: 40120 });
+  assert.equal(theirs.monitor.ProcessId, 10);
+  // Only the other server runs: this one is off, and Stop can never reach the other one.
+  const onlyOther = ownProcesses(rows.slice(0, 2).concat(row(30, 1, [40122])), { fxserverDir: 'D:\\FiveM\\server', dbHome: 'D:\\none', managedDb: false, txAdminPort: 40121 });
+  assert.equal(onlyOther.monitor, null);
+  assert.equal(onlyOther.game, null);
+});
+
+test('one server, or no port details: the same choice as before', () => {
+  assert.equal(pickMonitor([row(10, 1, [40120])], 40999).ProcessId, 10, 'a single txAdmin is this server\'s, whatever its port');
+  assert.equal(pickMonitor([row(10, 1), row(20, 1)], 40121).ProcessId, 10, 'without port details, the first, as before');
+  assert.equal(pickMonitor([row(10, 1, 40121), row(20, 1, [])], 40121).ProcessId, 10, 'one port can come as a plain number');
+  assert.equal(pickMonitor([], 40120), null);
+});
+
+test('a program holding a port is named in plain words', () => {
+  assert.equal(describeOwner({ pid: 812, name: 'FXServer.exe', path: 'D:\\Other-Server\\server\\FXServer.exe' }), 'FXServer.exe (D:\\Other-Server\\server)');
+  assert.equal(describeOwner({ pid: 4, name: 'System', path: '' }), 'Windows itself');
+  assert.equal(describeOwner({ pid: 9000, name: 'svchost.exe', path: '' }), 'svchost.exe');
+  assert.equal(describeOwner(null), 'another program');
+});
+// ---------------------------------------------------------------- the network phone access is on
+test('phone access knows when Windows calls its network Public', () => {
+  const adapters = {
+    'Wi-Fi': [{ family: 'IPv4', internal: false, address: '192.168.1.20' }],
+    'vEthernet (WSL)': [{ family: 'IPv4', internal: false, address: '172.29.0.1' }],
+    Loopback: [{ family: 'IPv4', internal: true, address: '127.0.0.1' }],
+  };
+  assert.deepEqual(pickNetwork({ alias: 'Wi-Fi', name: 'Home', category: 'Public' }, adapters), { category: 'Public', name: 'Home', page: 'wifi' });
+  assert.deepEqual(pickNetwork([{ alias: 'Ethernet', name: 'Office', category: 'DomainAuthenticated' }], { Ethernet: [{ family: 'IPv4', address: '10.0.0.5' }] }), { category: 'Work', name: 'Office', page: 'ethernet' });
+  // Several networks: phone access listens on all of them, so the least private one counts.
+  const both = { ...adapters, Ethernet: [{ family: 'IPv4', internal: false, address: '10.1.1.2' }] };
+  assert.equal(pickNetwork([{ alias: 'Ethernet', category: 'Private' }, { alias: 'Wi-Fi', category: 'Public' }], both).category, 'Public');
+  // A network without a home address on this PC (a VPN, say) doesn't count when one with one exists.
+  assert.equal(pickNetwork([{ alias: 'Wi-Fi', category: 'Private' }, { alias: 'Corp VPN', category: 'Public' }], adapters).category, 'Private');
+  assert.equal(pickNetwork([], adapters), null);
 });

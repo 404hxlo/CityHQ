@@ -4,7 +4,8 @@
 
 CityHQ is a Windows app for running a QBCore or Qbox FiveM server without touching config files or
 the command line. It works with the server you already have, or builds you a new one. It sits on top
-of txAdmin and works from the desktop, or from a phone on the same Wi-Fi.
+of txAdmin and works from the desktop, or from a phone on the same Wi-Fi (Settings lists the phones
+signed in, so you can sign them out).
 
 Website: <https://404hxlo.github.io/CityHQ/>
 
@@ -111,7 +112,9 @@ npm run package
 ```
 
 `npm run package` builds the app into `release\`. Pushing a tag such as `v1.1.0` (matching
-`package.json`'s version) makes GitHub build the zip and publish it on the Releases page.
+`package.json`'s version) makes GitHub build the zip and publish it on the Releases page. Every push
+and pull request runs the type check, tests and build first. [CONTRIBUTING.md](CONTRIBUTING.md) has the
+rules for changes and how to try one in a test copy that leaves your own server alone.
 
 CityHQ finds its server folder in this order: the `QBC_ROOT` environment variable, a server folder
 it is installed inside (one holding `qbcontrol.json` or `server\FXServer.exe`), then the one chosen
@@ -127,12 +130,19 @@ where its parts are in its `qbcontrol.json` (`fxserverDir`, `txDataDir`, `profil
 | `setup\` | The setup script and the guide it copies into each server folder |
 | `site\` | The website, published to GitHub Pages by `.github/workflows/pages.yml` |
 
+## Privacy and security
+
+CityHQ has no accounts, analytics or tracking. [PRIVACY.md](PRIVACY.md) lists everything it keeps
+on your PC, everything it sends and where, and how to remove it all. To report a security problem
+privately, see [SECURITY.md](SECURITY.md).
+
 ## License
 
 CityHQ is free to use, including on servers that take donations, under the
 [PolyForm Shield License 1.0.0](LICENSE.md). You may read, change and share the code, but not use
 it to make a product that competes with CityHQ. It is source-available rather than "open source"
-in the formal sense.
+in the formal sense. The software CityHQ's screens include, and its licences, are listed in
+`resources\app\dist\THIRD-PARTY-NOTICES.txt` inside the app folder.
 
 ## Not affiliated
 

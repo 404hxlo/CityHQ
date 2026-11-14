@@ -1,7 +1,8 @@
 // Alerts in a Discord channel, so they reach the owner's phone. The owner pastes the channel's
 // webhook link once in Settings; it's locked with Windows' own protection, like a host's key, and
-// never shown again or put in a problem report. Only CityHQ's own summary is ever sent: no log
-// lines, player names or anything from server.cfg.
+// never shown again or put in a problem report. Only CityHQ's own summary is ever sent (it can quote
+// FiveM's own words, such as why it refused the license key): never the log, player names or
+// anything from server.cfg.
 import { HttpError, STATE_DIR } from './paths.js';
 import {
   canKeepSecrets, forgetSecret, loadSecret, saveSecret,

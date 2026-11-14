@@ -27,10 +27,18 @@ export const otherFrameworkSql = (file, framework) => (framework === 'qbox' ? NO
 
 const finding = (id, status, title, detail, extra = {}) => ({ id, status, title, detail, steps: [], ...extra });
 
-/** Seconds from a powercfg line such as "Current AC Power Setting Index: 0x0000012c". */
+/**
+ * Seconds from powercfg's "Current AC Power Setting Index: 0x0000012c" (and DC). Windows translates
+ * those words, but every language lists the plugged-in (AC) value and then the battery (DC) value
+ * last, so on a PC in another language they're taken from the end.
+ */
 export function powercfgSeconds(text, kind) {
-  const m = text.match(new RegExp(`Current ${kind} Power Setting Index:\\s*0x([0-9a-f]+)`, 'i'));
-  return m ? parseInt(m[1], 16) : null;
+  const m = String(text).match(new RegExp(`Current ${kind} Power Setting Index:\\s*0x([0-9a-f]+)`, 'i'));
+  if (m) return parseInt(m[1], 16);
+  const values = [...String(text).matchAll(/:\s*0x([0-9a-f]+)\s*$/gim)].map((v) => parseInt(v[1], 16));
+  // The setting's own range (minimum, maximum, step) comes first, so a real answer has five values.
+  if (values.length < 5) return null;
+  return kind === 'AC' ? values.at(-2) : values.at(-1);
 }
 
 const minutes = (s) => (s % 60 === 0 ? `${s / 60} minute${s === 60 ? '' : 's'}` : `${s} seconds`);

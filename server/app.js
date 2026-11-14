@@ -8,8 +8,8 @@ import path from 'node:path';
 import QRCode from 'qrcode';
 import { agentRequest, installAgent } from './agent.js';
 import {
-  clearSessionCookie, createPairingToken, createSession, destroySession, isLocalRequest, isValidSession, lanAddresses,
-  loginWithPairing, loginWithPasscode, readCookie, requestGuard, requireSession, setSessionCookie,
+  clearSessionCookie, createPairingToken, createSession, destroySession, isLocalRequest, isValidSession, lanAddresses, listPhones,
+  loginWithPairing, loginWithPasscode, readCookie, requestGuard, requireSession, sessionLifetime, setSessionCookie, signOutPhone, signOutPhones,
 } from './auth.js';
 import {
   BACKUP_DIR_ROOT, backupStatus, createBackup, deleteBackup, isValidBackupId, listBackups, VALID_PARTS,
@@ -44,7 +44,9 @@ import {
 import { healthChecks } from './health.js';
 import { inspectResource } from './inspect.js';
 import { readProfile, setMaxClients } from './profile.js';
-import { askFirewallRules, firewallCommand, reachReport } from './reach.js';
+import {
+  askFirewallRules, firewallCommand, networkInfo, reachReport,
+} from './reach.js';
 import {
   listChanges, recordChange, registerFixLog, registerUndo, undoChange,
 } from './history.js';
@@ -137,12 +139,14 @@ function buildApp() {
   api.get('/session', (req, res) => {
     res.json({ authed: isValidSession(readCookie(req)), local: isLocalRequest(req) });
   });
+  // A phone on the home network signs in for 7 days, a browser on this PC for 30.
+  const signInFrom = (req) => ({ local: isLocalRequest(req), userAgent: req.headers['user-agent'] });
   api.post('/login', json, handler((req, res) => {
-    setSessionCookie(res, loginWithPasscode(ip(req), req.body?.passcode));
+    setSessionCookie(res, loginWithPasscode(ip(req), req.body?.passcode, signInFrom(req)), sessionLifetime(isLocalRequest(req)));
     return { ok: true };
   }));
   api.post('/pair', json, handler((req, res) => {
-    setSessionCookie(res, loginWithPairing(ip(req), req.body?.token));
+    setSessionCookie(res, loginWithPairing(ip(req), req.body?.token, signInFrom(req)), sessionLifetime(isLocalRequest(req)));
     return { ok: true };
   }));
   api.post('/logout', handler((req, res) => {
@@ -653,10 +657,12 @@ function buildApp() {
   api.put('/updates/auto', localOnly, json, handler((req) => setAutoUpdateCheck(Boolean(req.body?.enabled))));
 
   // Settings
-  api.get('/settings', handler((req) => {
+  api.get('/settings', handler(async (req) => {
     const local = isLocalRequest(req);
     const server = findServerData();
     return {
+      // The kind of network phone access listens on, as Windows sees it (Public, Private or Work).
+      network: local && getSettings().lanEnabled ? await networkInfo().catch(() => null) : null,
       local,
       lanEnabled: getSettings().lanEnabled,
       lanListening: lanServers.length > 0,
@@ -685,6 +691,16 @@ function buildApp() {
     const passcode = regeneratePasscode();
     setSessionCookie(res, createSession());
     return { passcode };
+  }));
+  // Phones signed in over the home network, and signing them out (on the PC only).
+  api.get('/settings/phones', localOnly, handler((req) => listPhones(readCookie(req))));
+  api.post('/settings/phones/sign-out-all', localOnly, handler((req) => signOutPhones(readCookie(req))));
+  api.post('/settings/phones/:id/sign-out', localOnly, handler((req) => signOutPhone(req.params.id)));
+  // Windows' own settings for the network, where it can be set to Private.
+  api.post('/settings/network/open', localOnly, json, handler(async (req) => {
+    if (!desktop()?.openNetworkSettings) throw new HttpError(409, 'This only works in the desktop app.');
+    await desktop().openNetworkSettings(req.body?.page === 'wifi' ? 'wifi' : req.body?.page === 'ethernet' ? 'ethernet' : null);
+    return { opened: true };
   }));
   api.post('/settings/pairing', localOnly, json, handler(async (req) => {
     const urls = lanAddresses().map((a) => `http://${a}:${APP_PORT}`);

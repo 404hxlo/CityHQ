@@ -24,7 +24,7 @@ import {
 } from './health.js';
 import { frameworkOf, qbxBridgeOff } from './framework.js';
 import {
-  adminRestarts, bootSegments, explainRestart, lastActivity, wholePause,
+  adminRestarts, bootSegments, dateShapeOf, explainRestart, lastActivity, wholePause,
 } from './doctor.js';
 import { stripSqlComments } from './fixes.js';
 import { frameworkFit } from './inspect.js';
@@ -1400,18 +1400,20 @@ const SERVER = [
   '[TXADMIN] ======== [222] FXServer Starting - 11/10/2026, 6:32:30 PM',
   '[script:qb-control] [qb-control] ready',
 ];
+// These logs were written on a PC set to US English (txAdmin uses the PC's date format).
+const US = dateShapeOf('en-US');
 
 test('doctor: txAdmin restarts and server starts are read with their times', () => {
-  const restarts = adminRestarts(ADMIN);
+  const restarts = adminRestarts(ADMIN, null, US);
   assert.equal(restarts.length, 3);
   assert.equal(restarts[0].at.getHours(), 18);
   assert.equal(restarts[0].at.getMinutes(), 0);
-  assert.equal(bootSegments(SERVER).length, 3);
+  assert.equal(bootSegments(SERVER, US).length, 3);
 });
 
 test('your real restart: txAdmin blamed the casino, but the whole server was paused by sleep', () => {
-  const [first] = adminRestarts(ADMIN);
-  const [segment] = bootSegments(SERVER);
+  const [first] = adminRestarts(ADMIN, null, US);
+  const [segment] = bootSegments(SERVER, US);
   assert.equal(wholePause(segment.lines), 1810391);
   const incident = explainRestart(first, segment, [{ from: first.at.getTime() - 1810000, to: first.at.getTime() - 3000 }]);
   assert.equal(incident.kind, 'paused');
@@ -1420,8 +1422,8 @@ test('your real restart: txAdmin blamed the casino, but the whole server was pau
 });
 
 test('doctor: a hang while awake points at the script that was loading, with a turn-off fix', () => {
-  const [, second] = adminRestarts(ADMIN);
-  const segment = bootSegments(SERVER)[1];
+  const [, second] = adminRestarts(ADMIN, null, US);
+  const segment = bootSegments(SERVER, US)[1];
   assert.deepEqual(lastActivity(segment.lines), { kind: 'resource', name: 'slow_script' });
   const incident = explainRestart(second, segment, []);
   assert.equal(incident.kind, 'hang');
@@ -1429,8 +1431,8 @@ test('doctor: a hang while awake points at the script that was loading, with a t
 });
 
 test('doctor: a restart CityHQ made itself is planned, not a crash', () => {
-  const third = adminRestarts(ADMIN)[2];
-  const segment = bootSegments(SERVER)[2];
+  const third = adminRestarts(ADMIN, null, US)[2];
+  const segment = bootSegments(SERVER, US)[2];
   assert.equal(explainRestart(third, segment, [], [{ state: 'restarting', at: third.at.getTime() - 60000 }]).kind, 'planned');
   const crash = explainRestart(third, segment, [], []);
   assert.equal(crash.kind, 'crash');
@@ -1501,10 +1503,10 @@ test('friends: what FiveM\'s server list said, read with the time since the serv
   const fail = '[citizen-server-impl] Server list query returned an error: Cfx failed to reach the server at 203.0.113.7:30121 - check if the sv_listingIpOverride';
   const ready = '[script:qb-control] [qb-control] ready';
   const at = (h, m) => new Date(2026, 10, 10, h, m).getTime();
-  assert.deepEqual(listingStatus([start('8:00:00 PM'), ready, fail], at(20, 30)), { status: 'blocked', publicIp: '203.0.113.7' });
-  assert.equal(listingStatus([start('7:00:00 PM'), fail, start('8:00:00 PM'), ready], at(20, 2)).status, 'pending', 'too soon after a start to know');
-  assert.equal(listingStatus([start('7:00:00 PM'), fail, start('8:00:00 PM'), ready], at(20, 2)).lastFailed, true);
-  assert.equal(listingStatus([start('7:00:00 PM'), fail, start('8:00:00 PM'), ready], at(20, 10)).status, 'ok', 'no complaint for a while after starting means it worked');
+  assert.deepEqual(listingStatus([start('8:00:00 PM'), ready, fail], at(20, 30), US), { status: 'blocked', publicIp: '203.0.113.7' });
+  assert.equal(listingStatus([start('7:00:00 PM'), fail, start('8:00:00 PM'), ready], at(20, 2), US).status, 'pending', 'too soon after a start to know');
+  assert.equal(listingStatus([start('7:00:00 PM'), fail, start('8:00:00 PM'), ready], at(20, 2), US).lastFailed, true);
+  assert.equal(listingStatus([start('7:00:00 PM'), fail, start('8:00:00 PM'), ready], at(20, 10), US).status, 'ok', 'no complaint for a while after starting means it worked');
 });
 
 // ---- Server profile ----

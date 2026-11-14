@@ -37,18 +37,72 @@ async function tail(file, bytes = TAIL_BYTES) {
   }
 }
 
-/** "11/10/2026, 5:23:22 PM" as a date. */
-const parseStamp = (text) => {
-  const d = new Date(text.replace(',', ''));
-  return Number.isNaN(d.getTime()) ? null : d;
-};
+// ---- the date in txAdmin's start banner ----
+// txAdmin writes "FXServer Starting - <date>" with toLocaleString(), so the date comes in this PC's
+// own format: 11/10/2026, 5:23:22 PM in the US, 10.11.2026, 17:23:22 in Germany, 2026/11/10 17:23:22
+// in Japan, and with Arabic or other digits in some languages.
+const OTHER_DIGITS = [0x660, 0x6f0, 0x966, 0x9e6, 0xe50, 0xff10];
+const plainDigits = (text) => text.replace(/[٠-٩۰-۹०-९০-৯๐-๙０-９]/g, (d) => {
+  const code = d.charCodeAt(0);
+  return String(code - OTHER_DIGITS.find((base) => code >= base && code <= base + 9));
+});
 
-/** Each server start in the server log, with its lines. */
-export function bootSegments(lines) {
+/** How a locale writes a date and time: the order of day, month and year, and its words for AM and PM. */
+export function dateShapeOf(locale) {
+  const format = new Intl.DateTimeFormat(locale, { year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: 'numeric', second: 'numeric' });
+  const partsAt = (hour) => format.formatToParts(new Date(2026, 10, 14, hour, 5, 9));
+  const period = (hour) => partsAt(hour).find((p) => p.type === 'dayPeriod')?.value?.trim().toLowerCase() || null;
+  return {
+    order: partsAt(13).map((p) => p.type).filter((t) => t === 'year' || t === 'month' || t === 'day'),
+    am: period(1),
+    pm: period(13),
+    // Thailand counts years from 543 BC; calendars with other months (Persian, say) aren't read.
+    calendar: format.resolvedOptions().calendar,
+  };
+}
+
+const PC_DATE_SHAPE = dateShapeOf();
+
+/** The date in a txAdmin start banner, written in this PC's format (or the shape given), or null. */
+export function parseBannerStamp(text, shape = PC_DATE_SHAPE) {
+  const calendar = shape.calendar || 'gregory';
+  if (!['gregory', 'iso8601', 'buddhist'].includes(calendar)) return null;
+  const raw = plainDigits(String(text ?? '')).toLowerCase();
+  const numbers = (raw.match(/\d+/g) || []).map(Number);
+  if (numbers.length < 5) return null;
+  const [n1, n2, n3, hourRaw, minute, second = 0] = numbers;
+  let year;
+  let first;
+  let second2;
+  if (n1 >= 1000) [year, first, second2] = [n1, n2, n3];
+  else if (n3 >= 1000) [first, second2, year] = [n1, n2, n3];
+  else return null;
+  // Which of the other two is the month: the PC's own order, unless the numbers say otherwise.
+  const dateOrder = shape.order.filter((t) => t !== 'year');
+  let monthFirst = dateOrder[0] === 'month';
+  if (first > 12 && second2 <= 12) monthFirst = false;
+  else if (second2 > 12 && first <= 12) monthFirst = true;
+  const [month, day] = monthFirst ? [first, second2] : [second2, first];
+  let hour = hourRaw;
+  const says = (word) => Boolean(word) && raw.includes(word);
+  if (says(shape.pm) || /(^|[^a-z])p\.?\s?m\.?($|[^a-z])/.test(raw)) hour = (hour % 12) + 12;
+  else if (says(shape.am) || /(^|[^a-z])a\.?\s?m\.?($|[^a-z])/.test(raw)) hour %= 12;
+  if (month < 1 || month > 12 || day < 1 || day > 31 || hour > 23 || minute > 59 || second > 59) return null;
+  if (calendar === 'buddhist') year -= 543;
+  const date = new Date(year, month - 1, day, hour, minute, second);
+  return date.getDate() === day ? date : null;
+}
+
+const STARTING = /Starting - (.+)$/;
+
+/** The date of a "... Starting - <date>" line, or null when the line isn't one. */
+export const startedAt = (line, shape = PC_DATE_SHAPE) => parseBannerStamp(String(line ?? '').match(STARTING)?.[1], shape);
+
+/** Each server start in the server log, with its lines. shape: how dates are written (this PC's way). */
+export function bootSegments(lines, shape = PC_DATE_SHAPE) {
   const out = [];
   for (const line of lines) {
-    const m = line.match(/FXServer Starting - (\d+\/\d+\/\d+, [\d:]+ [AP]M)/);
-    if (m) { out.push({ start: parseStamp(m[1]), lines: [] }); continue; }
+    if (/FXServer Starting - /.test(line)) { out.push({ start: startedAt(line, shape), lines: [] }); continue; }
     if (out.length) out.at(-1).lines.push(line);
   }
   return out.filter((s) => s.start);
@@ -60,11 +114,11 @@ export function bootSegments(lines) {
  * when the log was last written (`end`): every timestamped line gets the latest date at or before
  * the line after it. Without an upper bound, lines are dated forwards from their banner.
  */
-export function adminRestarts(lines, end = null) {
+export function adminRestarts(lines, end = null, shape = PC_DATE_SHAPE) {
   const runs = [{ base: null, items: [] }];
   for (const line of lines) {
-    const banner = line.match(/Starting - (\d+\/\d+\/\d+, [\d:]+ [AP]M)/);
-    if (banner) { runs.push({ base: parseStamp(banner[1]), items: [] }); continue; }
+    const stamp = startedAt(line, shape);
+    if (stamp) { runs.push({ base: stamp, items: [] }); continue; }
     const t = line.match(/^\[(\d\d):(\d\d):(\d\d)\]/);
     if (!t) continue;
     const restart = line.match(/\[MONITOR\] Restarting server: (.+)$/);

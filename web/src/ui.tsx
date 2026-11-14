@@ -313,3 +313,15 @@ export function formatWhen(ms: number): string {
 }
 
 export const formatMoney = (n: number | undefined) => (n === undefined ? '-' : `$${Math.round(n).toLocaleString()}`);
+
+/** How long ago something was: "just now", "5 min ago", "3 h ago", "2 days ago". */
+export function timeAgo(ms: number | null | undefined, now = Date.now()): string {
+  if (!ms) return '';
+  const minutes = Math.floor(Math.max(0, now - ms) / 60000);
+  if (minutes < 1) return 'just now';
+  if (minutes < 60) return `${minutes} min ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours} h ago`;
+  const days = Math.floor(hours / 24);
+  return `${days} day${days === 1 ? '' : 's'} ago`;
+}

@@ -20,6 +20,22 @@ export function parseBlockedFiles(lines, exeTail = EXE_TAIL) {
   return [...files];
 }
 
+/**
+ * The same from the events' own data, which reads the same in every Windows language (the event's
+ * text is translated): each event lists the program (this server's FXServer.exe) and the file it
+ * wasn't allowed to load.
+ */
+export function blockedFromEventData(events, exeTail = EXE_TAIL) {
+  const files = new Set();
+  for (const event of (Array.isArray(events) ? events : [events]).filter(Boolean)) {
+    const values = (Array.isArray(event.data) ? event.data : [event.data]).map((v) => String(v ?? ''));
+    const paths = values.filter((v) => v.includes('\\') && /\.\w{2,4}$/.test(v));
+    if (!paths.some((v) => v.toLowerCase().endsWith(exeTail))) continue;
+    for (const p of paths) if (!p.toLowerCase().endsWith(exeTail)) files.add(path.win32.basename(p));
+  }
+  return [...files];
+}
+
 export function blockMessage({ files, smartAppControl }) {
   const which = files.length ? `it won't let ${files.join(' and ')} load` : 'it stops one of the server\'s files from loading';
   if (smartAppControl) {
@@ -37,13 +53,18 @@ export async function windowsBlock(sinceMs) {
   const script = String.raw`
 $ErrorActionPreference = 'SilentlyContinue'
 $since = [DateTimeOffset]::FromUnixTimeMilliseconds(${Math.floor(sinceMs - 5000)}).LocalDateTime
-$lines = @(Get-WinEvent -FilterHashtable @{ LogName='Microsoft-Windows-CodeIntegrity/Operational'; Id=3033,3077; StartTime=$since } | ForEach-Object { ($_.Message -split '\r?\n')[0] })
+$events = @(Get-WinEvent -FilterHashtable @{ LogName='Microsoft-Windows-CodeIntegrity/Operational'; Id=3033,3077; StartTime=$since } | ForEach-Object {
+  $data = @(([xml]$_.ToXml()).Event.EventData.Data | ForEach-Object { [string]$_.'#text' })
+  [pscustomobject]@{ text = ($_.Message -split '\r?\n')[0]; data = $data }
+})
 $sac = (Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\CI\Policy').VerifiedAndReputablePolicyState
-ConvertTo-Json -Compress -InputObject @{ lines = $lines; sac = $sac }`;
+ConvertTo-Json -Compress -Depth 4 -InputObject @{ events = $events; sac = $sac }`;
   try {
     const { stdout } = await exec('powershell.exe', ['-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64')], { windowsHide: true, timeout: 20000 });
-    const { lines, sac } = JSON.parse(stdout.trim() || '{}');
-    const files = parseBlockedFiles(Array.isArray(lines) ? lines : [lines].filter(Boolean));
+    const { events, sac } = JSON.parse(stdout.trim() || '{}');
+    const list = (Array.isArray(events) ? events : [events]).filter(Boolean);
+    const files = blockedFromEventData(list);
+    if (!files.length) files.push(...parseBlockedFiles(list.map((e) => e.text).filter(Boolean)));
     return files.length ? { files, smartAppControl: sac === 1 } : null;
   } catch {
     return null;
