@@ -2,7 +2,7 @@
 
 Each version's section is shown in the app before it updates, and on its GitHub release page.
 
-## Unreleased
+## 1.9.2
 
 - **Crash alerts keep working during backups.** The nightly backup now runs alongside everything else. Before, while it ran (up to an hour on a big server), CityHQ didn't notice crashes, warn players or make scheduled restarts.
 - **Restarts the PC slept through are skipped.** If the PC was asleep when a planned restart was due, CityHQ no longer restarts the moment it wakes, hours late and without warning players. It notes the skipped restart, and the next scheduled one happens at its usual time.
