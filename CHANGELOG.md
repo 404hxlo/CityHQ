@@ -2,7 +2,7 @@
 
 Each version's section is shown in the app before it updates, and on its GitHub release page.
 
-## Unreleased
+## 1.9.3
 
 - **Right answers on PCs in other languages and regions.** These now work whatever language Windows is in, and however the PC writes dates:
   - the restart explanations, which read the date txAdmin writes in the PC's own format (11/14/2026 in the US, 14.11.2026 in Germany, 2026/11/14 in Japan, and others)
