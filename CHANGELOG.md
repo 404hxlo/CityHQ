@@ -2,6 +2,19 @@
 
 Each version's section is shown in the app before it updates, and on its GitHub release page.
 
+## Unreleased
+
+- **Change any file on the Files page, not just text.** This works on every file and folder in the server folder: pictures, sounds, videos, fonts, game files and scripts.
+  - **Replace…** on an open file puts a new one in its place under the same name, so whatever uses that name picks it up: a loading screen's background or music, a car's textures, a script's images. If the new file is a different kind, CityHQ asks first.
+  - **Add files** and **New folder** sit on every folder, and you can drag files from File Explorer onto the list. If a file with that name is already there, CityHQ asks before replacing it.
+  - **Rename** and **Delete** are under the ⋯ button, on files and on the open folder. Deleting a script's own folder removes the script the same way the Resources page does.
+  - **Undo:** whatever is replaced or deleted is kept for 30 days. Undo it right away from the bar that appears, or later from What changed on the Backups page.
+  - **Restart:** when the change is to a running script, the same bar offers to restart it so players get the new file. It also says when that applies: a loading screen at players' next join, and streamed game files after players reconnect.
+  - **Protected:** files ending in .cfg can still be changed in the editor, where their passwords and keys stay hidden, but they can't be replaced, renamed or deleted. CityHQ's own helper can't be changed at all. Folders with running scripts in them can't be renamed or deleted until those scripts are stopped.
+  - **Hosted servers:** for now, add and replace files with your host's file manager.
+- **Sounds and videos play on the Files page,** and you can skip to any point in them.
+- **Undo for hosted servers' files.** Undo in What changed now works for a file saved on a hosted server. Before, it said the file no longer existed.
+
 ## 1.9.3
 
 - **Right answers on PCs in other languages and regions.** These now work whatever language Windows is in, and however the PC writes dates:

@@ -680,13 +680,14 @@ export async function removeResource(name) {
   const disabled = await readDisabled();
   if (disabled[name]) { delete disabled[name]; await writeDisabled(disabled); }
   await refreshResources();
-  recordChange({
+  const title = `Removed ${name}`;
+  const changeId = await recordChange({
     kind: 'remove',
-    title: `Removed ${name}`,
+    title,
     undo: { type: 'restore-trash', id, name, boot: startedAtBoot },
     undoHint: `${name} comes back from Recently removed${startedAtBoot ? ' and starts with the server again' : ''}.`,
   });
-  return { removed: name, id };
+  return { removed: name, id, change: changeId ? { id: changeId, title } : null };
 }
 
 export async function listTrash() {

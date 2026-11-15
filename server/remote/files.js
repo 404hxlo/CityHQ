@@ -207,7 +207,10 @@ export async function browseFolder(rel = '') {
       ...(e.dir ? { items: null } : { kind: kindByName(e.name) }),
     }));
   entries.sort((a, b) => (a.type === b.type ? a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }) : a.type === 'dir' ? -1 : 1));
-  return { path: relOf(full), entries: entries.slice(0, 3000), truncated: entries.length > 3000 };
+  // Files are added and changed on the host's own file manager for now.
+  return {
+    path: relOf(full), entries: entries.slice(0, 3000), truncated: entries.length > 3000, canChange: false, lock: null,
+  };
 }
 
 export async function fileDetails(rel) {
@@ -231,6 +234,8 @@ export async function fileDetails(rel) {
     resourceRunning: false,
     // Text is downloaded only when it holds no key or password; other files only when small.
     canDownload: !isCfgLike(entry.name) && (kind === 'image' || kind === 'text') && entry.size <= MAX_EDIT_BYTES,
+    canChange: false,
+    lock: null,
   };
 }
 

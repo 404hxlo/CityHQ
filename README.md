@@ -70,7 +70,7 @@ connection drops.
   script's own documentation, and a one-click fix when one is safe.
 - **Resources:** start, stop, add (from a file, a folder or GitHub, including files over 1 GB) and
   remove resources, each with an install check of what it needs.
-- **Files:** browse and edit any server file. Lua is checked before saving, and every save can be undone.
+- **Files:** browse and edit any server file. Lua is checked before saving, and every save can be undone. Replace, add, rename or delete any file (pictures, sounds, game files), and drag files in from File Explorer. What's replaced or deleted is kept for 30 days, and a running script can be restarted right there so players get the change. Sounds and videos play there too.
 - **City and Players:** weather, announcements, the whitelist, money, jobs, items, revive, kick and ban.
 - **Backups:** one-click backup and restore of players, settings and scripts, plus a nightly backup,
   and a list of every change made through CityHQ with Undo.

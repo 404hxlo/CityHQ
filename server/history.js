@@ -30,7 +30,10 @@ function queue(task) {
   return run;
 }
 
-/** Remembers a change. Never throws: history must not break the change itself. */
+/**
+ * Remembers a change, and resolves to its id (for an Undo button right where it was made), or
+ * null if it couldn't be written. Never throws: history must not break the change itself.
+ */
 export function recordChange({ kind, title, detail = '', undo = null, undoHint = '' }) {
   return queue(async () => {
     try {
@@ -39,7 +42,8 @@ export function recordChange({ kind, title, detail = '', undo = null, undoHint =
       list.unshift({ id, at: Date.now(), kind, title, detail, undo, undoHint, undone: false });
       await mkdir(STATE_DIR, { recursive: true });
       await writeFile(FILE, JSON.stringify(list.slice(0, KEEP), null, 1));
-    } catch { /* only a record */ }
+      return id;
+    } catch { return null; /* only a record */ }
   });
 }
 

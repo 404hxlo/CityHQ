@@ -5,6 +5,7 @@ import { open, readdir, readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import { agentRequest } from './agent.js';
+import { lockFor, placeOf, realKey } from './filechanges.js';
 import {
   assertSafeRel, DATA_SCOPE, EDITABLE, isSecretFile, looksLikeText, MAX_EDIT_BYTES, safeToDownload, safeView, SERVER_SCOPE, tokenPath,
 } from './files.js';
@@ -20,6 +21,23 @@ const IMAGE_TYPES = {
   '.bmp': 'image/bmp',
   '.ico': 'image/x-icon',
 };
+// Sounds and videos play in the viewer (loading screens and phones use these).
+const MEDIA_TYPES = {
+  '.mp3': 'audio/mpeg',
+  '.ogg': 'audio/ogg',
+  '.oga': 'audio/ogg',
+  '.opus': 'audio/ogg',
+  '.wav': 'audio/wav',
+  '.m4a': 'audio/mp4',
+  '.aac': 'audio/aac',
+  '.flac': 'audio/flac',
+  '.mp4': 'video/mp4',
+  '.m4v': 'video/mp4',
+  '.webm': 'video/webm',
+  '.ogv': 'video/ogg',
+  '.mov': 'video/quicktime',
+};
+const IS_RESOURCE = /^(fxmanifest|__resource)\.lua$/i;
 const MAX_FOLDER_ENTRIES = 3000;
 const MAX_RESULTS = 200;
 const MAX_HITS_PER_FILE = 8;
@@ -34,6 +52,7 @@ const relFrom = (root, full) => toPosix(path.relative(root, full));
 function kindByName(name) {
   const ext = path.extname(name).toLowerCase();
   if (IMAGE_TYPES[ext]) return 'image';
+  if (MEDIA_TYPES[ext]) return MEDIA_TYPES[ext].startsWith('audio/') ? 'audio' : 'video';
   return EDITABLE.has(ext) ? 'text' : 'other';
 }
 
@@ -43,6 +62,11 @@ function locate(rel) {
   return { dataPath, full: resolveInside(dataPath, rel) };
 }
 
+const placeHere = () => {
+  const { dataPath, cfgPath } = serverData();
+  return placeOf(dataPath, cfgPath);
+};
+
 export async function browseFolder(rel = '') {
   const { dataPath, full } = locate(rel);
   const info = await stat(full).catch(() => null);
@@ -51,8 +75,12 @@ export async function browseFolder(rel = '') {
 
   const token = tokenPath()?.toLowerCase();
   const all = await readdir(full, { withFileTypes: true });
-  const visible = all.filter((e) => (e.isDirectory() || e.isFile()) && path.join(full, e.name).toLowerCase() !== token);
+  // A .qbctmp file is one CityHQ is still saving or receiving; it isn't part of the server.
+  const visible = all.filter((e) => (e.isDirectory() || e.isFile()) && path.join(full, e.name).toLowerCase() !== token && !/\.qbctmp$/i.test(e.name));
   const truncated = visible.length > MAX_FOLDER_ENTRIES;
+  // What may be changed is decided again when something is changed; this only hides buttons.
+  const place = placeHere();
+  const real = realKey(full);
 
   const entries = await Promise.all(visible.slice(0, MAX_FOLDER_ENTRIES).map(async (e) => {
     const child = path.join(full, e.name);
@@ -63,13 +91,26 @@ export async function browseFolder(rel = '') {
       type: e.isDirectory() ? 'dir' : 'file',
       size: childInfo?.size ?? 0,
       modified: childInfo?.mtimeMs ?? 0,
+      lock: lockFor(path.join(real, e.name.toLowerCase()), e.isDirectory(), place),
     };
-    if (e.isDirectory()) entry.items = (await readdir(child).catch(() => [])).length;
-    else entry.kind = kindByName(e.name);
+    if (e.isDirectory()) {
+      const names = await readdir(child).catch(() => []);
+      entry.items = names.length;
+      if (names.some((n) => IS_RESOURCE.test(n))) entry.resource = true;
+    } else {
+      entry.kind = kindByName(e.name);
+    }
     return entry;
   }));
   entries.sort((a, b) => (a.type === b.type ? a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }) : a.type === 'dir' ? -1 : 1));
-  return { path: toPosix(path.relative(dataPath, full)), entries, truncated };
+  return {
+    path: toPosix(path.relative(dataPath, full)),
+    entries,
+    truncated,
+    canChange: true,
+    lock: lockFor(real, true, place),
+    resource: all.some((e) => e.isFile() && IS_RESOURCE.test(e.name)),
+  };
 }
 
 /** Finds the editor scope for a file, so backups stay with the file however it was opened. */
@@ -135,10 +176,30 @@ export async function fileDetails(rel) {
     editor,
     resourceRunning,
     canDownload: await safeToDownload(full, info.size),
+    canChange: true,
+    lock: lockFor(realKey(full), false, placeHere()),
   };
 }
 
-/** Sends a file's bytes: images shown inline, everything else as a download. */
+/** Sends a sound or video so the player can start anywhere in it (it asks for parts of the file). */
+function sendMedia(res, full, type) {
+  return new Promise((resolve, reject) => {
+    res.sendFile(full, {
+      headers: { 'Content-Type': type, 'Cache-Control': 'no-store' },
+      acceptRanges: true,
+      cacheControl: false,
+      etag: false,
+      lastModified: false,
+      dotfiles: 'allow',
+    }, (err) => {
+      // Skipping ahead cancels the part being sent; nothing is wrong with the file.
+      if (!err || res.headersSent || ['ECONNABORTED', 'ECONNRESET', 'ERR_STREAM_PREMATURE_CLOSE'].includes(err.code)) resolve();
+      else reject(err);
+    });
+  });
+}
+
+/** Sends a file's bytes: pictures, sounds and videos shown inline, everything else as a download. */
 export async function sendRaw(res, rel, wantDownload) {
   const { full } = locate(rel);
   const info = await stat(full).catch(() => null);
@@ -148,6 +209,8 @@ export async function sendRaw(res, rel, wantDownload) {
     throw new HttpError(403, 'This file can hold passwords or keys, so it can only be viewed here.');
   }
 
+  const mediaType = MEDIA_TYPES[path.extname(full).toLowerCase()];
+  if (mediaType && !wantDownload) return sendMedia(res, full, mediaType);
   const imageType = IMAGE_TYPES[path.extname(full).toLowerCase()];
   res.setHeader('Content-Length', info.size);
   res.setHeader('Cache-Control', 'no-store');

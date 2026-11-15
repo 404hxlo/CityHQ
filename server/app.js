@@ -17,6 +17,9 @@ import {
 import {
   browseFolder, fileDetails, searchFiles, sendRaw,
 } from './browser.js';
+import {
+  addFromUpload, checkUploads, contentLength, deleteItem, FILE_PAGE_UNDO, makeFolder, renameItem, replaceFromUpload,
+} from './filechanges.js';
 import { readConsole } from './console.js';
 import {
   getOverview, restartServer, restoreServer, startServer, startStatusPolling, stopServer, stopStatusPolling,
@@ -64,6 +67,7 @@ import {
   APP_DIR, APP_PORT, FXSERVER_DIR, GAME_PORT, findServerData, HttpError, LOG_DIR, MANAGED_DB, REMOTE, ROOT, ROOT_FOUND, ROOT_SOURCE, TXADMIN_PORT,
 } from './paths.js';
 import { setHostedBoot } from './remote/resources.js';
+import { restoreVersion as restoreHostedVersion } from './remote/files.js';
 import { restoreOnHost } from './remote/install.js';
 import { registerHostedRoutes } from './remote/routes.js';
 import { startRemote, stopRemote } from './remote/runtime.js';
@@ -449,6 +453,13 @@ function buildApp() {
   api.get('/browse/info', handler((req) => fileDetails(req.query.path)));
   api.get('/browse/search', handler((req) => searchFiles(req.query.q, req.query.mode, req.query.path ?? '')));
   api.get('/browse/raw', handler((req, res) => sendRaw(res, req.query.path, req.query.download === '1')));
+  // Changing files there. Uploads arrive as the file's own bytes; everything replaced or deleted is kept.
+  api.post('/browse/upload-check', json, handler((req) => checkUploads(req.body?.folder ?? '', req.body?.files)));
+  api.post('/browse/upload', handler((req) => addFromUpload(req, req.query.folder ?? '', req.query.name, contentLength(req))));
+  api.put('/browse/file', handler((req) => replaceFromUpload(req, req.query.path, contentLength(req))));
+  api.post('/browse/folder', json, handler((req) => makeFolder(req.body?.path ?? '', req.body?.name)));
+  api.post('/browse/rename', json, handler((req) => renameItem(req.body?.path, req.body?.name)));
+  api.post('/browse/delete', json, handler((req) => deleteItem(req.body?.path)));
 
   // Players
   api.get('/players', handler(() => agentRequest('/players')));
@@ -639,6 +650,7 @@ function buildApp() {
     await changeAdmin(identifier, role, name);
     return role ? `${name} is ${rolesFor(serverFramework().framework)[role]?.label || role} again.` : `${name} is no longer an admin.`;
   });
+  for (const [type, undo] of Object.entries(FILE_PAGE_UNDO)) registerUndo(type, undo);
   api.get('/history', handler(() => listChanges()));
   api.post('/history/:id/undo', handler((req) => undoChange(req.params.id)));
 
@@ -817,6 +829,11 @@ export async function startApp() {
       return enabled ? `${name} starts with the server again.` : `${name} no longer starts with the server.`;
     });
     registerUndo('hosted-restore', (undo) => restoreOnHost(undo));
+    // A file saved on the host is put back on the host, from the copy kept on this PC.
+    registerUndo('file-version', async ({ scope, rel, versionId }) => {
+      await restoreHostedVersion(scope, rel, versionId);
+      return `${rel} is back to how it was before that change.`;
+    });
     startStatusPolling();
     mainServer = await listen(appInstance, '127.0.0.1');
     await applyLanSetting();

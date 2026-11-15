@@ -242,17 +242,41 @@ export interface EditableFile {
   readOnly: boolean; readOnlyReason: string | null;
   backupId?: string | null; syntaxChecked?: boolean;
 }
+/**
+ * Why something can't be changed on the Files page: the server folder itself ('root'), CityHQ's
+ * helper ('helper'), a folder holding the helper or server.cfg, or a .cfg file (editor only).
+ */
+export type FileLock = 'root' | 'helper' | 'holds-helper' | 'holds-cfg' | 'cfg' | null;
 export interface BrowseEntry {
   name: string; path: string; type: 'dir' | 'file'; size: number; modified: number;
-  items?: number; kind?: 'text' | 'image' | 'other';
+  items?: number | null; kind?: 'text' | 'image' | 'audio' | 'video' | 'other';
+  /** A folder that is a script (it has an fxmanifest.lua). */
+  resource?: boolean;
+  lock?: FileLock;
 }
-export interface BrowseFolder { path: string; entries: BrowseEntry[]; truncated: boolean }
+export interface BrowseFolder {
+  path: string; entries: BrowseEntry[]; truncated: boolean;
+  canChange?: boolean; lock?: FileLock;
+  /** The folder is a script's own folder. */
+  resource?: boolean;
+}
 export interface FileDetails {
   path: string; name: string; size: number; modified: number;
-  kind: 'text' | 'image' | 'binary' | 'large';
+  kind: 'text' | 'image' | 'audio' | 'video' | 'binary' | 'large';
   editor: { scope: string; path: string };
   resourceRunning: boolean; canDownload: boolean;
+  canChange?: boolean; lock?: FileLock;
 }
+/** The script a Files page change touched, so the page can offer to restart it. */
+export interface ChangedScript { name: string; state: string; loadscreen: boolean; stream: boolean; canRestart: boolean }
+export interface FileChangeResult {
+  path: string;
+  change: { id: string; title: string } | null;
+  script: ChangedScript | null;
+  note?: string | null;
+  removedScript?: string;
+}
+export interface UploadCheck { files: { name: string; existing: string | null; problem: string | null }[]; problem: string | null }
 export interface SearchHit { path: string; name: string; type: 'dir' | 'file'; line?: number; text?: string }
 export interface SearchResponse { results: SearchHit[]; truncated: boolean; timedOut: boolean }
 export interface FileVersion { id: string; savedAt: number; size: number }
@@ -346,7 +370,7 @@ export interface WelcomeProgress { tools: DbToolsState; newServer: NewServerJob 
 /** An error from the app that may carry details, like where a mistake in a file is. */
 export class ApiError extends Error {
   status: number;
-  data: { syntax?: { line?: number; message?: string; plain: string } } | null;
+  data: { syntax?: { line?: number; message?: string; plain: string }; exists?: boolean } | null;
   constructor(message: string, status: number, data: ApiError['data']) {
     super(message);
     this.status = status;
@@ -374,22 +398,29 @@ async function request<T>(method: string, url: string, body?: unknown): Promise<
 }
 
 /** Uploads with progress, which fetch can't report and a big file really needs. */
-function uploadWithProgress(url: string, file: File, onProgress: (fraction: number) => void) {
-  return new Promise<{ installed: InstalledResource[] }>((resolve, reject) => {
+function sendWithProgress<T>(method: string, url: string, file: File, onProgress: (fraction: number) => void) {
+  return new Promise<T>((resolve, reject) => {
     const xhr = new XMLHttpRequest();
-    xhr.open('POST', url);
+    xhr.open(method, url);
     xhr.setRequestHeader('x-qbc-client', '1');
     xhr.setRequestHeader('Content-Type', 'application/octet-stream');
     xhr.upload.onprogress = (e) => { if (e.lengthComputable) onProgress(e.loaded / e.total); };
     xhr.onerror = () => reject(new Error('The upload could not finish. Check your connection and try again.'));
     xhr.onload = () => {
-      let data: { error?: string; installed?: InstalledResource[] } | null = null;
+      let data: ({ error?: string } & ApiError['data']) | null = null;
       try { data = JSON.parse(xhr.responseText); } catch { /* handled below */ }
-      if (xhr.status >= 200 && xhr.status < 300 && data?.installed) resolve({ installed: data.installed });
-      else reject(new Error(data?.error || `Upload failed (${xhr.status})`));
+      if (xhr.status === 401) listeners.forEach((fn) => fn());
+      if (xhr.status >= 200 && xhr.status < 300 && data) resolve(data as T);
+      else reject(new ApiError(data?.error || `Upload failed (${xhr.status})`, xhr.status, data));
     };
     xhr.send(file);
   });
+}
+
+async function uploadWithProgress(url: string, file: File, onProgress: (fraction: number) => void) {
+  const data = await sendWithProgress<{ installed?: InstalledResource[] }>('POST', url, file, onProgress);
+  if (!data.installed) throw new Error('The upload could not finish. Try again.');
+  return { installed: data.installed };
 }
 
 const q = encodeURIComponent;
@@ -504,6 +535,12 @@ export const api = {
   fileDetails: (path: string) => request<FileDetails>('GET', `/api/browse/info?path=${q(path)}`),
   searchFiles: (query: string, mode: 'names' | 'text', path: string) => request<SearchResponse>('GET', `/api/browse/search?q=${q(query)}&mode=${mode}&path=${q(path)}`),
   rawUrl: (path: string, download = false) => `/api/browse/raw?path=${q(path)}${download ? '&download=1' : ''}`,
+  uploadCheck: (folder: string, files: { name: string; size: number }[]) => request<UploadCheck>('POST', '/api/browse/upload-check', { folder, files }),
+  addFile: (folder: string, file: File, onProgress: (fraction: number) => void) => sendWithProgress<FileChangeResult>('POST', `/api/browse/upload?folder=${q(folder)}&name=${q(file.name)}`, file, onProgress),
+  replaceFile: (path: string, file: File, onProgress: (fraction: number) => void) => sendWithProgress<FileChangeResult>('PUT', `/api/browse/file?path=${q(path)}`, file, onProgress),
+  makeFolder: (path: string, name: string) => request<FileChangeResult>('POST', '/api/browse/folder', { path, name }),
+  renameItem: (path: string, name: string) => request<FileChangeResult>('POST', '/api/browse/rename', { path, name }),
+  deleteItem: (path: string) => request<FileChangeResult>('POST', '/api/browse/delete', { path }),
 
   players: () => request<Player[]>('GET', '/api/players'),
   shared: () => request<Shared>('GET', '/api/shared'),

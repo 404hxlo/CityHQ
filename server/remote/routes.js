@@ -22,6 +22,8 @@ const NOT_YET = [
   /^\/health\/doctor/, /^\/reach/, /^\/profile/, /^\/trash/, /^\/backups/,
   /^\/resources\/[^/]+\/(check|restart-checked|sql-files|sql)/,
   /^\/server\/(start-panel|pin)/, /^\/browse\/search/,
+  // Adding, replacing, renaming and deleting on the Files page work on this PC's disk.
+  /^\/browse\/(upload|upload-check|file|folder|rename|delete)$/,
 ];
 
 export function registerHostedRoutes(api, { json, handler, localOnly, relaunchSoon }) {

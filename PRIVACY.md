@@ -26,6 +26,8 @@ server), and only contacts the services below. This page lists both.
 - `crashes.json`: the last 30 crashes, each with a few lines of the server log from just before it.
 - `events.json`, `history.json`, `fixes.json`: what CityHQ did and what changed, so it can be undone.
 - `trash`: scripts you removed, until you delete them.
+- `kept-files`: files and folders you replaced or deleted on the Files page, kept for 30 days so the
+  change can be undone. After that, CityHQ removes them itself.
 - `discord-webhook.bin`: the Discord link for crash alerts, if you set one, locked with Windows' own
   protection.
 

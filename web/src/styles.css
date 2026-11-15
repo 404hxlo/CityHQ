@@ -442,6 +442,36 @@ body:has(.is-fullscreen) { overflow: hidden; }
 .viewer-title h2 { font-size: 18px; font-family: var(--mono); font-weight: 600; font-stretch: 100%; }
 .image-preview { display: grid; place-items: center; flex: 1; min-height: 240px; padding: 16px; border-radius: var(--radius-sm); background: repeating-conic-gradient(#20242a 0 25%, #171a1d 0 50%) 0 0 / 20px 20px; }
 .image-preview img { display: block; max-width: 100%; max-height: 62vh; height: auto; }
+.media-preview { display: flex; flex-direction: column; gap: 8px; }
+.media-preview audio { width: 100%; }
+.media-preview video { display: block; width: 100%; max-height: 62vh; border-radius: var(--radius-sm); background: #000; }
+/* Changing files: buttons on the folder and the open file, a ⋯ menu for the rest. */
+.breadcrumb:has(+ .folder-actions) { border-bottom: 0; margin-bottom: 0; padding-bottom: 4px; }
+.folder-actions { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; padding: 2px 6px 8px; border-bottom: 1px solid var(--line); margin-bottom: 4px; }
+.folder-actions .btn { min-height: 28px; padding: 0 10px; font-size: 12.5px; }
+.folder-actions .more-menu { margin-left: auto; }
+.viewer-actions { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.more-menu { position: relative; display: inline-flex; }
+.more-btn { width: 32px; padding: 0; }
+.folder-actions .more-btn { width: 28px; padding: 0; }
+.menu { position: absolute; top: calc(100% + 4px); right: 0; z-index: 30; display: flex; flex-direction: column; min-width: 180px; padding: 4px; background: var(--raised); border: 1px solid var(--line-strong); border-radius: var(--radius-sm); box-shadow: 0 14px 34px rgba(0, 0, 0, 0.45); }
+.menu-item { display: flex; align-items: center; gap: 9px; width: 100%; padding: 7px 10px; border: 0; border-radius: 5px; background: none; color: var(--ink); font-size: 13px; text-align: left; cursor: pointer; }
+.menu-item svg { flex: none; color: var(--ink-soft); }
+.menu-item:hover, .menu-item:focus-visible { background: var(--raised-2); outline: none; }
+.menu-item.is-danger, .menu-item.is-danger svg { color: var(--bad); }
+.change-bar { display: flex; align-items: flex-start; gap: 10px; padding: 10px 8px 10px 14px; border-radius: var(--radius); background: var(--accent-soft); border: 1px solid rgba(164, 139, 255, 0.35); }
+.change-bar-body { display: flex; flex-direction: column; gap: 3px; flex: 1; min-width: 0; font-size: 13.5px; color: var(--ink-soft); overflow-wrap: anywhere; }
+.change-bar-title { color: var(--ink); font-weight: 600; }
+.change-bar-actions { margin-top: 6px; }
+.change-bar-actions:empty { display: none; }
+.change-bar-problem { display: flex; flex-direction: column; gap: 8px; margin-top: 4px; }
+.change-bar .upload-progress { margin-top: 4px; }
+.name-form { display: flex; flex-direction: column; gap: 6px; }
+.name-form .input-label { margin-top: 0; }
+.files-list.is-dropping { outline: 2px dashed var(--accent); outline-offset: -3px; }
+.drop-cover { position: sticky; bottom: 6px; display: flex; align-items: center; justify-content: center; gap: 8px; margin: auto 6px 6px; padding: 12px; border-radius: var(--radius-sm); background: var(--accent); color: var(--accent-ink); font-weight: 600; pointer-events: none; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4); }
+/* Phones and tablets can't drag files in; Add files works there. */
+@media (hover: none) { .drop-hint { display: none; } }
 
 /* ---------- problems ---------- */
 .problem-list-cards { display: flex; flex-direction: column; gap: 10px; }
@@ -1119,7 +1149,9 @@ a.side-row:hover { background: var(--panel); }
   .files-back { display: inline-flex; align-self: flex-start; margin-left: -14px; }
   .viewer-head { flex-direction: column; align-items: stretch; flex-wrap: nowrap; }
   .viewer-title { flex: none; }
-  .viewer-head .btn-ghost:not(.files-back) { align-self: flex-start; margin-left: -14px; }
+  .viewer-head > .btn-ghost:not(.files-back) { align-self: flex-start; margin-left: -14px; }
+  .folder-actions .btn { min-height: 34px; }
+  .folder-actions .more-btn { width: 34px; }
   .file-viewer .code-frame { flex: none; height: 62dvh; }
   .entry-row { padding: 11px 8px; }
   .page-stack { gap: 14px; }
