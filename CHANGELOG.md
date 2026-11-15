@@ -2,7 +2,7 @@
 
 Each version's section is shown in the app before it updates, and on its GitHub release page.
 
-## Unreleased
+## 1.9.4
 
 - **Change any file on the Files page, not just text.** This works on every file and folder in the server folder: pictures, sounds, videos, fonts, game files and scripts.
   - **Replace…** on an open file puts a new one in its place under the same name, so whatever uses that name picks it up: a loading screen's background or music, a car's textures, a script's images. If the new file is a different kind, CityHQ asks first.
