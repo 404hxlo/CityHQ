@@ -180,15 +180,10 @@ function Shell({ local, onSignOut }: { local: boolean; onSignOut: () => void }) 
 
   const goTo = useCallback((next: string) => { window.location.hash = next; }, []);
   const data = overview.data;
-  const state = data?.state;
-  const online = state === 'online';
-  const hosted = data?.hosted || null;
-  const nav = NAV.filter((n) => !n.pro || mode === 'pro' || page === n.id);
-  const problems = data?.problems.length || 0;
-  const alerts = data?.alerts.length || 0;
-  const restartAt = data?.schedule?.pendingRestart?.at || data?.schedule?.nextRestart || null;
 
-  // A downloaded copy that hasn't been connected to a server yet starts on the Welcome screen.
+  // A downloaded copy that hasn't been connected to a server yet (or one sent back with Change
+  // server) starts on the Welcome screen. Its answer has nothing about a server in it, so this
+  // comes before anything below reads one.
   if (data && data.folderFound === false) {
     return (
       <>
@@ -197,6 +192,14 @@ function Shell({ local, onSignOut }: { local: boolean; onSignOut: () => void }) 
       </>
     );
   }
+
+  const state = data?.state;
+  const online = state === 'online';
+  const hosted = data?.hosted || null;
+  const nav = NAV.filter((n) => !n.pro || mode === 'pro' || page === n.id);
+  const problems = data?.problems?.length || 0;
+  const alerts = data?.alerts?.length || 0;
+  const restartAt = data?.schedule?.pendingRestart?.at || data?.schedule?.nextRestart || null;
 
   return (
     <div className={`app mode-${mode}`}>

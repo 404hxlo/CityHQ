@@ -2,6 +2,10 @@
 
 Each version's section is shown in the app before it updates, and on its GitHub release page.
 
+## Unreleased
+
+- **The Welcome screen shows again.** Since 1.8.0, CityHQ's window stayed blank whenever no server was chosen: after **Change server** in Settings, and on the first start of a new download. The Welcome screen now opens, and picking a server from it brings CityHQ back on that server.
+
 ## 1.9.4
 
 - **Change any file on the Files page, not just text.** This works on every file and folder in the server folder: pictures, sounds, videos, fonts, game files and scripts.
