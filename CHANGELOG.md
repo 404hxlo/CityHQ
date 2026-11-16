@@ -2,7 +2,7 @@
 
 Each version's section is shown in the app before it updates, and on its GitHub release page.
 
-## Unreleased
+## 1.9.5
 
 - **The Welcome screen shows again.** Since 1.8.0, CityHQ's window stayed blank whenever no server was chosen: after **Change server** in Settings, and on the first start of a new download. The Welcome screen now opens, and picking a server from it brings CityHQ back on that server.
 
